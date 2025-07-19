@@ -60,7 +60,7 @@ cd path/to/your/backend
 conda create -n assistant python=3.11.13
 
 ## 3. 安装所有Python依赖库
-pip install -r requirements.txt
+pip install -r requirements.txt(可使用镜像源加速-i + 镜像地址)
 
 ## 4. 配置API密钥
 ##    - 将 .env.example 文件复制并重命名为 .env
