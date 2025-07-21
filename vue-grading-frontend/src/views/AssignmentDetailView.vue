@@ -83,6 +83,7 @@
               <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">学生ID</th>
               <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">分数</th>
               <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">查重报告</th>
+              <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">AIGC检测</th>
               <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">评语</th>
               <th class="px-6 py-3 text-xs font-medium text-right text-gray-500 uppercase">操作</th>
             </tr>
@@ -108,6 +109,10 @@
                 </button>
                 <span v-else class="text-gray-400">-</span>
               </td>
+              <!-- 新增AIGC检测结果列 -->
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold" :class="getAIGCColor(result.aigc_report)">
+                {{ formatAIGC(result.aigc_report) }}
+              </td>
               <td class="px-6 py-4 text-sm text-gray-500 whitespace-normal">{{ result.feedback }}</td>
               <td class="px-6 py-4 text-sm font-medium text-right whitespace-nowrap">
                 <button @click="deleteSingleResult(result.id, index)" title="删除此条记录" class="p-1 text-gray-400 rounded-full hover:text-red-600">
@@ -131,6 +136,13 @@ import gradingApi from '../services/gradingApi';
 import Loader from '../components/Loader.vue';
 import ReportModal from '../components/ReportModal.vue';
 
+// --- Interfaces ---
+interface AIGCReport {
+  predicted_label: string;
+  confidence: number;
+  ai_probability: number;
+}
+
 interface SimilarityMatch {
   score: number;
   similar_to: string;
@@ -153,6 +165,7 @@ interface SubmissionResult {
   score: number;
   feedback: string;
   plagiarism_report?: PlagiarismReport;
+  aigc_report?: AIGCReport; // 添加AIGC报告字段
 }
 
 interface Assignment {
@@ -166,16 +179,12 @@ const props = defineProps<{
   id: string;
 }>();
 
-// 数据描述
+// --- Component State ---
 const assignment = ref<Assignment | null>(null);
 const results = ref<SubmissionResult[]>([]);
 const selectedReport = ref<PlagiarismReport | null>(null);
-
-// 形式化
 const file = ref<File | null>(null);
 const fileName = ref('');
-
-// 前端
 const isLoadingAssignment = ref(true);
 const isLoadingResults = ref(false);
 const isSubmitting = ref(false);
@@ -260,7 +269,7 @@ const deleteAllResults = async () => {
   }
 };
 
-// 前端的处理逻辑
+// 
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const selectedFile = target.files?.[0];
@@ -285,6 +294,19 @@ const showReportDetail = (report: PlagiarismReport) => {
   isModalVisible.value = true;
 };
 
+// 新增aigc得分展示模块
+const formatAIGC = (report?: AIGCReport): string => {
+  if (!report) return '未检测';
+  const probability = (report.ai_probability * 100).toFixed(1);
+  return `${probability}% AI生成`;
+};
+
+const getAIGCColor = (report?: AIGCReport): string => {
+  if (!report) return 'text-gray-400';
+  if (report.ai_probability > 0.8) return 'text-red-600';
+  if (report.ai_probability > 0.5) return 'text-yellow-600';
+  return 'text-green-600';
+};
 
 onMounted(fetchAssignmentDetails);
 </script>

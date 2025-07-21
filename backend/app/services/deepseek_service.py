@@ -3,7 +3,7 @@ import json
 import requests
 from ..core.config import settings
 from typing import Optional
-from ..schemas.models import LLMAnalysis, PlagiarismReport
+from ..schemas.models import LLMAnalysis, PlagiarismReport, AIGCReport # 引入 AIGCReport
 
 class DeepSeekService:
     """封装所有与DeepSeek API的交互逻辑。"""
@@ -77,8 +77,8 @@ class DeepSeekService:
             print(f"LLM查重分析时出错: {e}")
         return None
 
-    def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_report: Optional[PlagiarismReport] = None) -> dict:
-        """调用DeepSeek API来批改作业，现在可以接收查重报告作为参考。"""
+    def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_report: Optional[PlagiarismReport] = None, aigc_report: Optional[AIGCReport] = None) -> dict:
+        """调用DeepSeek API来批改作业，现在可以接收查重报告和AIGC检测报告作为参考。"""
         MAX_CHARS = 40000 
         if len(student_answer) > MAX_CHARS:
             print(f"警告: 学生提交内容过长({len(student_answer)}字符)，将被截断为{MAX_CHARS}字符。")
@@ -100,41 +100,20 @@ class DeepSeekService:
         if plagiarism_report and plagiarism_report.llm_analysis and plagiarism_report.llm_analysis.is_plagiarized:
             plagiarism_context = f"""
             [学术诚信警报]:
-            我们的AI深度分析表明，本次提交存在高度抄袭的可能性。请在评分时仔细参考此报告。
+            AI深度分析表明，本次提交存在高度抄袭的可能性。请在评分时仔细参考此报告。
             分析理由: {plagiarism_report.llm_analysis.reasoning}
             ---
             """
         
-        # user_prompt = f"""
-        # 请使用“思维链”（Chain of Thought）方法来为学生的项目评分，然后以指定的JSON格式提供最终输出。
+        aigc_context = ""
+        if aigc_report and aigc_report.ai_probability > 0.8: # 如果AI生成概率很高
+            aigc_context = f"""
+            [AIGC内容警报]:
+            我们的检测模型发现，这份作业有 {aigc_report.ai_probability*100:.1f}% 的可能性是由AI生成的。
+            请在评估学生的原创性和真实理解程度时，将此信息作为重要参考。
+            ---
+            """
 
-        # **第一步：分析评分标准**
-        # 仔细阅读下面提供的评分标准中的每一条准则。
-
-        # **第二步：对照标准评估提交内容**
-        # 阅读学生提交的全部内容。对于评分标准中的每一条准则，给出一个分数，并为该分数撰写一个简短、具体的理由。
-
-        # **第三步：综合与终评**
-        # 通过将每个准则的得分相加来计算总分。撰写一份全面的综合反馈总结。
-
-        # **第四步：格式化输出**
-        # 构建一个包含最终结果的单一JSON对象。该JSON对象必须包含 "total_score"、"overall_feedback" 和 "score_details" 这几个键。"score_details" 必须是一个对象数组，每个对象包含 "criterion"、"score"、"max_score" 和 "feedback"。
-
-        # ---
-        # [任务信息]
-        # 题目: {question}
-        # 评分细则:
-        # {rubric_str}
-        # ---
-        # {plagiarism_context}
-        # [学生提交内容]
-        # {student_answer}
-        # ---
-
-        # 现在，请仅以所要求的JSON格式提供你的最终评估。
-        # """
-
-        # 先不使用思维链的方式
         user_prompt = f"""
         请为学生的项目按照以下评分细则评分，然后以指定的JSON格式提供最终输出。
 
@@ -147,6 +126,7 @@ class DeepSeekService:
         {rubric_str}
         ---
         {plagiarism_context}
+        {aigc_context}
         [学生提交内容]
         {student_answer}
         ---

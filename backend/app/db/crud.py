@@ -11,13 +11,6 @@ from . import models
 async def create_assignment(db: AsyncSession, assignment: schemas.AssignmentCreate) -> models.Assignment:
     """
     在数据库中创建一个新的作业任务。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        assignment (schemas.AssignmentCreate): 包含新作业信息的Pydantic模型。
-
-    Returns:
-        models.Assignment: 新创建的、包含数据库生成ID的作业对象。
     """
     db_assignment = models.Assignment(
         task_name=assignment.task_name,
@@ -33,13 +26,6 @@ async def create_assignment(db: AsyncSession, assignment: schemas.AssignmentCrea
 async def get_assignment(db: AsyncSession, assignment_id: int) -> Optional[models.Assignment]:
     """
     根据ID从数据库中获取单个作业任务及其所有提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        assignment_id (int): 作业任务的ID。
-
-    Returns:
-        Optional[models.Assignment]: 找到的作业对象，如果不存在则返回None。
     """
     result = await db.execute(
         select(models.Assignment)
@@ -52,14 +38,6 @@ async def get_assignment(db: AsyncSession, assignment_id: int) -> Optional[model
 async def get_assignments(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[models.Assignment]:
     """
     从数据库中获取作业任务列表（不包含提交记录）。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        skip (int): 跳过的记录数。
-        limit (int): 返回的最大记录数。
-
-    Returns:
-        List[models.Assignment]: 作业对象列表。
     """
     result = await db.execute(
         select(models.Assignment)
@@ -73,13 +51,6 @@ async def get_assignments(db: AsyncSession, skip: int = 0, limit: int = 100) -> 
 async def delete_assignment(db: AsyncSession, assignment_id: int) -> Optional[models.Assignment]:
     """
     根据ID从数据库中删除一个作业任务及其所有关联的提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        assignment_id (int): 要删除的作业任务的ID。
-
-    Returns:
-        Optional[models.Assignment]: 被删除的作业对象，如果未找到则返回None。
     """
     assignment = await get_assignment(db, assignment_id)
     if assignment:
@@ -92,21 +63,16 @@ async def delete_assignment(db: AsyncSession, assignment_id: int) -> Optional[mo
 async def create_submission(db: AsyncSession, submission: schemas.SubmissionCreate) -> models.Submission:
     """
     在数据库中为某个作业任务创建一个新的提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        submission (schemas.SubmissionCreate): 包含新提交记录信息的Pydantic模型。
-
-    Returns:
-        models.Submission: 新创建的提交记录对象。
     """
+    # 在创建数据库对象时，加入 aigc_report 字段
     db_submission = models.Submission(
         student_id=submission.student_id,
         score=submission.score,
         feedback=submission.feedback,
         merged_content=submission.merged_content,
         assignment_id=submission.assignment_id,
-        plagiarism_report=submission.plagiarism_report
+        plagiarism_report=submission.plagiarism_report,
+        aigc_report=submission.aigc_report  # 新增此行
     )
     db.add(db_submission)
     await db.commit()
@@ -117,13 +83,6 @@ async def create_submission(db: AsyncSession, submission: schemas.SubmissionCrea
 async def get_submissions_for_assignment(db: AsyncSession, assignment_id: int) -> List[models.Submission]:
     """
     获取指定作业任务下的所有提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        assignment_id (int): 作业任务的ID。
-
-    Returns:
-        List[models.Submission]: 该作业下的提交记录对象列表。
     """
     result = await db.execute(
         select(models.Submission)
@@ -136,13 +95,6 @@ async def get_submissions_for_assignment(db: AsyncSession, assignment_id: int) -
 async def delete_submission(db: AsyncSession, submission_id: int) -> Optional[models.Submission]:
     """
     根据ID从数据库中删除单个提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        submission_id (int): 要删除的提交记录的ID。
-
-    Returns:
-        Optional[models.Submission]: 被删除的提交记录对象，如果未找到则返回None。
     """
     result = await db.execute(select(models.Submission).filter(models.Submission.id == submission_id))
     submission = result.scalars().first()
@@ -156,13 +108,6 @@ async def delete_submission(db: AsyncSession, submission_id: int) -> Optional[mo
 async def delete_all_submissions_for_assignment(db: AsyncSession, assignment_id: int) -> int:
     """
     一键清空（删除）指定作业下的所有提交记录。
-
-    Args:
-        db (AsyncSession): 数据库会话对象。
-        assignment_id (int): 作业任务的ID。
-
-    Returns:
-        int: 被删除的记录数量。
     """
     stmt = delete(models.Submission).where(models.Submission.assignment_id == assignment_id)
     result = await db.execute(stmt)

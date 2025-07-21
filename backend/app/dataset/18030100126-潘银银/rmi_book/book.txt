@@ -1,4 +1,0 @@
-2 English
-3 dance
-5 java
-6 C_plus_plus

@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey
 from sqlalchemy.orm import relationship
 import json
 from .database import Base
-from ..schemas.models import PlagiarismReport
+from ..schemas.models import PlagiarismReport, AIGCReport # 引入aigc检测模型模块
 from typing import Optional
 
 # 数据库中主要有两个数据模型，一是任务/作业模型，二是提交记录模型
@@ -31,6 +31,7 @@ class Submission(Base):
     feedback = Column(Text)
     merged_content = Column(Text)
     _plagiarism_report_json = Column("plagiarism_report", Text, nullable=True)
+    _aigc_report_json = Column("aigc_report", Text, nullable=True) # 新增列
     assignment_id = Column(Integer, ForeignKey("assignments.id"))
     assignment = relationship("Assignment", back_populates="submissions")
 
@@ -46,3 +47,17 @@ class Submission(Base):
             self._plagiarism_report_json = None
         else:
             self._plagiarism_report_json = value.model_dump_json()
+
+    # 新增AIGC报告的getter和setter
+    @property
+    def aigc_report(self):
+        if self._aigc_report_json is None:
+            return None
+        return json.loads(self._aigc_report_json)
+
+    @aigc_report.setter
+    def aigc_report(self, value: Optional[AIGCReport]):
+        if value is None:
+            self._aigc_report_json = None
+        else:
+            self._aigc_report_json = value.model_dump_json()

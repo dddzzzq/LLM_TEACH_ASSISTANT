@@ -1,6 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
+# --- AIGC检测报告模型 ---
+class AIGCReport(BaseModel):
+    predicted_label: str = Field(description="预测标签，如 'AI生成' 或 '人类写作'")
+    confidence: float = Field(description="模型对预测标签的置信度")
+    ai_probability: float = Field(description="文本由AI生成的概率")
+
 # --- 查重报告模型 ---
 class SimilarityMatch(BaseModel):
     similar_to: str = Field(description="最高相似度对应的学生ID")
@@ -21,6 +27,7 @@ class SubmissionBase(BaseModel):
     score: float
     feedback: str
     plagiarism_report: Optional[PlagiarismReport] = None
+    aigc_report: Optional[AIGCReport] = None  # 新增aigc检测报告
 
 class SubmissionCreate(SubmissionBase):
     merged_content: str
