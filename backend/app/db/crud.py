@@ -61,18 +61,15 @@ async def delete_assignment(db: AsyncSession, assignment_id: int) -> Optional[mo
 
 
 async def create_submission(db: AsyncSession, submission: schemas.SubmissionCreate) -> models.Submission:
-    """
-    在数据库中为某个作业任务创建一个新的提交记录。
-    """
-    # 在创建数据库对象时，加入 aigc_report 字段
+    """在数据库中创建一个新的提交记录。"""
     db_submission = models.Submission(
         student_id=submission.student_id,
         score=submission.score,
         feedback=submission.feedback,
         merged_content=submission.merged_content,
         assignment_id=submission.assignment_id,
-        plagiarism_report=submission.plagiarism_report,
-        aigc_report=submission.aigc_report  # 新增此行
+        plagiarism_reports=submission.plagiarism_reports,  # 修改提交的参数，抄袭检测报告是一个list
+        aigc_report=submission.aigc_report
     )
     db.add(db_submission)
     await db.commit()

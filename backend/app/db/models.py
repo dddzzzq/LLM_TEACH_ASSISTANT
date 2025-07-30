@@ -3,7 +3,7 @@ from sqlalchemy.orm import relationship
 import json
 from .database import Base
 from ..schemas.models import PlagiarismReport, AIGCReport # 引入aigc检测模型模块
-from typing import Optional
+from typing import List, Optional, Dict
 
 # 数据库中主要有两个数据模型，一是任务/作业模型，二是提交记录模型
 
@@ -30,25 +30,25 @@ class Submission(Base):
     score = Column(Float)
     feedback = Column(Text)
     merged_content = Column(Text)
-    _plagiarism_report_json = Column("plagiarism_report", Text, nullable=True)
-    _aigc_report_json = Column("aigc_report", Text, nullable=True) # 新增列
+    _plagiarism_reports_json = Column("plagiarism_reports", Text, nullable=True)
+    _aigc_report_json = Column("aigc_report", Text, nullable=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"))
     assignment = relationship("Assignment", back_populates="submissions")
 
     @property
-    def plagiarism_report(self):
-        if self._plagiarism_report_json is None:
-            return None
-        return json.loads(self._plagiarism_report_json)
+    def plagiarism_reports(self):
+        if self._plagiarism_reports_json is None:
+            return []
+        return json.loads(self._plagiarism_reports_json)
 
-    @plagiarism_report.setter
-    def plagiarism_report(self, value: Optional[PlagiarismReport]):
+    @plagiarism_reports.setter
+    def plagiarism_reports(self, value: Optional[List[Dict]]):
         if value is None:
-            self._plagiarism_report_json = None
+            self._plagiarism_reports_json = None
         else:
-            self._plagiarism_report_json = value.model_dump_json()
+            reports_as_dicts = [report.model_dump(by_alias=True) for report in value]
+            self._plagiarism_reports_json = json.dumps(reports_as_dicts, ensure_ascii=False)
 
-    # 新增AIGC报告的getter和setter
     @property
     def aigc_report(self):
         if self._aigc_report_json is None:
