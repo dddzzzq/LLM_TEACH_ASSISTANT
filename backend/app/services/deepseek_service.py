@@ -225,7 +225,7 @@ class DeepSeekService:
                     highest_plagiarism_score = report.llm_analysis.similarity_score
                     worst_report = report
             
-            if highest_plagiarism_score > 70 and worst_report:
+            if highest_plagiarism_score > 90 and worst_report:
                  plagiarism_context = f"""
                 [学术诚信警报]:
                 AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
