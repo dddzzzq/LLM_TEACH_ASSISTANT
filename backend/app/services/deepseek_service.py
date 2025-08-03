@@ -72,7 +72,7 @@ class DeepSeekService:
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
         return f"""
         你是一位经验丰富的学术评审专家。请对比以下两份**实验报告**，扮演一个客观的第三方顾问角色。
-        你的任务是提供一份详细的辅助决策报告，包含：
+        你的任务是提供一份详细的辅助决策中文报告，包含：
         1.  一个0到100的**语义相似度分数**。
         2.  详细的**分析理由**，关注论点、结构和措辞。
         3.  列出1-3个最能支撑你结论的**核心文本片段**作为证据。
@@ -98,7 +98,7 @@ class DeepSeekService:
     def _get_code_plagiarism_prompt(self, code1: str, code2: str) -> str:
         return f"""
         你是一位资深的软件工程技术主管。请对比以下两份**源代码**，扮演一个客观的第三方代码审查顾问角色。
-        你的任务是提供一份详细的辅助决策报告，包含：
+        你的任务是提供一份详细的辅助决策中文报告，包含：
         1.  一个0到100的**逻辑与结构相似度分数**。
         2.  详细的**分析理由**，关注算法、结构、命名和注释。
         3.  列出1-3个最能支撑你结论的**核心代码片段**作为证据。
@@ -225,7 +225,7 @@ class DeepSeekService:
                     highest_plagiarism_score = report.llm_analysis.similarity_score
                     worst_report = report
             
-            if highest_plagiarism_score > 90 and worst_report:
+            if highest_plagiarism_score > 80 and worst_report:
                  plagiarism_context = f"""
                 [学术诚信警报]:
                 AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。

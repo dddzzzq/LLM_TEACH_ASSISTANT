@@ -21,7 +21,7 @@ class PlagiarismService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         self.text_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\bert-base-chinese"
-        self.code_model_name = "microsoft/unixcoder-base"
+        self.code_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\unixcoder-base"
         
         cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
         os.makedirs(cache_dir, exist_ok=True)

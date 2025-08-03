@@ -69,13 +69,29 @@ async def create_submission(db: AsyncSession, submission: schemas.SubmissionCrea
         merged_content=submission.merged_content,
         assignment_id=submission.assignment_id,
         plagiarism_reports=submission.plagiarism_reports,  # 修改提交的参数，抄袭检测报告是一个list
-        aigc_report=submission.aigc_report
+        aigc_report=submission.aigc_report,
+        is_human_reviewed=False # 新建时默认为未复查
     )
     db.add(db_submission)
     await db.commit()
     await db.refresh(db_submission)
     return db_submission
 
+# --- 更新教师复查提交记录的函数 ---
+async def update_submission(db: AsyncSession, submission_id: int, submission_update: schemas.SubmissionUpdate) -> Optional[models.Submission]:
+    """根据教师的复查结果更新一条提交记录。"""
+    result = await db.execute(select(models.Submission).filter(models.Submission.id == submission_id))
+    db_submission = result.scalars().first()
+    
+    if db_submission:
+        db_submission.score = submission_update.score
+        db_submission.human_feedback = submission_update.human_feedback
+        db_submission.is_human_reviewed = True # 标记为已复查
+        
+        await db.commit()
+        await db.refresh(db_submission)
+        return db_submission
+    return None
 
 async def get_submissions_for_assignment(db: AsyncSession, assignment_id: int) -> List[models.Submission]:
     """

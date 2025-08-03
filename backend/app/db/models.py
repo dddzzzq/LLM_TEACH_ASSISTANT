@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 import json
 from .database import Base
@@ -34,6 +34,9 @@ class Submission(Base):
     _aigc_report_json = Column("aigc_report", Text, nullable=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"))
     assignment = relationship("Assignment", back_populates="submissions")
+    # 新增教师复查功能
+    is_human_reviewed = Column(Boolean, default=False, nullable=False)
+    human_feedback = Column(Text, nullable=True) # 存储教师的最终评语
 
     @property
     def plagiarism_reports(self):
@@ -42,7 +45,7 @@ class Submission(Base):
         return json.loads(self._plagiarism_reports_json)
 
     @plagiarism_reports.setter
-    def plagiarism_reports(self, value: Optional[List[Dict]]):
+    def plagiarism_reports(self, value: Optional[List[Dict]]):   # 修改为报告列表
         if value is None:
             self._plagiarism_reports_json = None
         else:

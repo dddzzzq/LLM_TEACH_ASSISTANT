@@ -5,7 +5,7 @@ const apiClient = axios.create({
 });
 
 export default {
-  // Assignment endpoints
+  // 任务端点
   createAssignment(data) {
     return apiClient.post('/assignments/', data, { headers: { 'Content-Type': 'application/json' } });
   },
@@ -19,17 +19,23 @@ export default {
     return apiClient.delete(`/assignments/${id}`);
   },
 
-  // Submission endpoints
+  // 提交端点
   getResultsForAssignment(id) {
     return apiClient.get(`/assignments/${id}/results`);
   },
   submitBatch(assignmentId, formData) {
     return apiClient.post(`/assignments/${assignmentId}/submit`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
   },
-  deleteSubmission(submissionId) {
-    return apiClient.delete(`/submissions/${submissionId}`);
-  },
   deleteAllSubmissions(assignmentId) {
     return apiClient.delete(`/assignments/${assignmentId}/results`);
+  },
+  // Submission endpoints (核心修改点)
+  deleteSubmission(submissionId) {
+    // 路径从 /assignments/submissions/... 简化为 /submissions/...
+    return apiClient.delete(`/submissions/${submissionId}`);
+  },
+  updateSubmission(submissionId, data) {
+    // 路径从 /assignments/submissions/... 简化为 /submissions/...
+    return apiClient.put(`/submissions/${submissionId}`, data, { headers: { 'Content-Type': 'application/json' } });
   }
 }

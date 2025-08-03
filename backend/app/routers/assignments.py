@@ -21,7 +21,11 @@ from ..services.deepseek_service import deepseek_service
 from ..services.plagiarism_service import plagiarism_service
 from ..services.aigc_service import aigc_detector_service
 
+# 用于处理 /assignments/* 的路由
 router = APIRouter(prefix="/assignments", tags=["作业与评分"])
+# 用于处理 /submissions/* 的路由
+submission_router = APIRouter(prefix="/submissions", tags=["学生提交"])
+
 
 async def process_batch_file(assignment_id: int, batch_bytes: bytes):
     """处理上交的batch压缩文件"""
@@ -116,7 +120,9 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                     feedback=ai_result.get("overall_feedback", "评分失败"), merged_content=merged_content,
                     assignment_id=assignment_id, 
                     plagiarism_reports=student_reports["plagiarism_reports"],
-                    aigc_report=student_reports["aigc_report"]
+                    aigc_report=student_reports["aigc_report"],
+                    is_human_reviewed=False, # 明确设置初始值为 False
+                    human_feedback=None      # 明确设置初始值为 None
                 )
                 await crud.create_submission(db=db_session, submission=submission_data)
                 print(f"已完成对 {student_id} 的处理并存入数据库。")
@@ -197,12 +203,26 @@ async def delete_all_submissions(
     deleted_count = await crud.delete_all_submissions_for_assignment(db=db_session, assignment_id=assignment_id)
     return {"message": f"成功删除 {deleted_count} 条评分记录。"}
 
-# 删除单个作业某一提交路由
-@router.delete("/submissions/{submission_id}", status_code=status.HTTP_204_NO_CONTENT)
+# 使用和提交有关的路由删除和更新单条记录
+@submission_router.put("/{submission_id}", response_model=schemas.SubmissionInDB)
+async def review_and_update_submission(
+    submission_id: int,
+    submission_update: schemas.SubmissionUpdate,
+    db_session: AsyncSession = Depends(database.get_db),
+):
+    updated_submission = await crud.update_submission(
+        db=db_session, 
+        submission_id=submission_id, 
+        submission_update=submission_update
+    )
+    if not updated_submission:
+        raise HTTPException(status_code=404, detail="未找到该提交记录")
+    return updated_submission
+
+@submission_router.delete("/{submission_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_single_submission(
     submission_id: int, db_session: AsyncSession = Depends(database.get_db)
 ):
     deleted_submission = await crud.delete_submission(db=db_session, submission_id=submission_id)
     if not deleted_submission:
         raise HTTPException(status_code=404, detail="未找到该提交记录")
-    return

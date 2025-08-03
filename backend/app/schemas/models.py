@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
+# --- 新增教师人工审查更新模型 ---
+class SubmissionUpdate(BaseModel):
+    score: float    # 得分
+    human_feedback: str     # 评语
+
 # --- AIGC检测报告模型 ---
 class AIGCReport(BaseModel):
     predicted_label: str = Field(description="预测标签，如 'AI生成' 或 '人类写作'")
@@ -45,6 +50,9 @@ class SubmissionBase(BaseModel):
     feedback: str
     plagiarism_reports: List[PlagiarismReport] = []
     aigc_report: Optional[AIGCReport] = None  # 新增aigc检测报告
+    is_human_reviewed: bool     # 新增字段：是否人工复查
+    human_feedback: Optional[str] = None    # 新增字段：教师评语
+
 
 class SubmissionCreate(SubmissionBase):
     merged_content: str

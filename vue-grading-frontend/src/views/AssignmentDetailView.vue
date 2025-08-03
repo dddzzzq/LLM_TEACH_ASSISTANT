@@ -121,7 +121,23 @@
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-for="(result, index) in results" :key="result.id">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
-                  {{ result.student_id }}
+                  <div class="flex items-center">
+                    <span>{{ result.student_id }}</span>
+                    <svg
+                      v-if="result.is_human_reviewed"
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5 ml-2 text-green-500"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      title="已由教师复查"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </div>
                 </td>
                 <td
                   class="px-6 py-4 text-sm font-bold whitespace-nowrap"
@@ -147,11 +163,32 @@
                 </td>
                 <td
                   class="px-6 py-4 text-sm text-gray-500 whitespace-normal truncate max-w-xs"
-                  :title="result.feedback"
+                  :title="result.human_feedback || result.feedback"
                 >
-                  {{ result.feedback }}
+                  {{ result.human_feedback || result.feedback }}
                 </td>
                 <td class="px-6 py-4 text-sm font-medium text-right whitespace-nowrap">
+                  <button
+                    @click="openReviewModal(result)"
+                    title="教师复查"
+                    class="p-1 text-gray-400 rounded-full hover:text-indigo-600"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"
+                      />
+                      <path
+                        fill-rule="evenodd"
+                        d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
                   <button
                     @click="showReport(result, 'feedback')"
                     title="查看完整评语"
@@ -197,14 +234,20 @@
         <div v-else class="py-5 text-center text-gray-500">暂无提交结果。</div>
       </div>
     </div>
-
-    <ReportModal
-      v-if="isModalVisible"
-      :submission="selectedSubmission"
-      :reportType="reportType"
-      @close="isModalVisible = false"
-    />
   </div>
+
+  <ReportModal
+    v-if="isModalVisible"
+    :submission="selectedSubmission"
+    :reportType="reportType"
+    @close="isModalVisible = false"
+  />
+  <ReviewModal
+    v-if="isReviewModalVisible"
+    :submission="submissionToReview"
+    @close="isReviewModalVisible = false"
+    @save="handleSaveReview"
+  />
 </template>
 
 <script setup lang="ts">
@@ -213,6 +256,7 @@ import { useRoute } from "vue-router";
 import gradingApi from "../services/gradingApi";
 import Loader from "../components/Loader.vue";
 import ReportModal from "../components/ReportModal.vue";
+import ReviewModal from "../components/ReviewModal.vue";
 
 // --- Interfaces ---
 interface AIGCReport {
@@ -221,20 +265,17 @@ interface AIGCReport {
   ai_probability: number;
   detection_source?: string;
 }
-
 interface LLMPlagiarismAnalysis {
   similarity_score: number;
   reasoning: string;
   suspicious_parts: any[];
 }
-
 interface PlagiarismReport {
   similar_to: string;
   initial_score: number;
   content_type: string;
   llm_analysis?: LLMPlagiarismAnalysis;
 }
-
 interface SubmissionResult {
   id: number;
   student_id: string;
@@ -242,8 +283,9 @@ interface SubmissionResult {
   feedback: string;
   plagiarism_reports: PlagiarismReport[];
   aigc_report?: AIGCReport;
+  is_human_reviewed: boolean;
+  human_feedback?: string;
 }
-
 interface Assignment {
   task_name: string;
   question: string;
@@ -267,8 +309,10 @@ const error = ref<string | null>(null);
 const submissionMessage = ref("");
 const submissionError = ref(false);
 const reportType = ref("feedback");
+const isReviewModalVisible = ref(false);
+const submissionToReview = ref<SubmissionResult | null>(null);
 
-// --- API 方法 ---
+// --- API Methods ---
 const fetchAssignmentDetails = async () => {
   isLoadingAssignment.value = true;
   try {
@@ -282,7 +326,6 @@ const fetchAssignmentDetails = async () => {
     isLoadingAssignment.value = false;
   }
 };
-
 const fetchResults = async () => {
   isLoadingResults.value = true;
   try {
@@ -294,7 +337,6 @@ const fetchResults = async () => {
     isLoadingResults.value = false;
   }
 };
-
 const submitBatchFile = async () => {
   if (!file.value) return;
   isSubmitting.value = true;
@@ -315,7 +357,6 @@ const submitBatchFile = async () => {
     isSubmitting.value = false;
   }
 };
-
 const deleteSingleResult = async (submissionId: number, index: number) => {
   if (confirm(`确定要删除学生 ${results.value[index].student_id} 的评分记录吗？`)) {
     try {
@@ -326,7 +367,6 @@ const deleteSingleResult = async (submissionId: number, index: number) => {
     }
   }
 };
-
 const deleteAllResults = async () => {
   if (results.value.length === 0) return;
   if (confirm(`确定要清空此作业下的所有 ${results.value.length} 条评分记录吗？`)) {
@@ -339,6 +379,7 @@ const deleteAllResults = async () => {
   }
 };
 
+// --- UI Logic ---
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const selectedFile = target.files?.[0];
@@ -350,19 +391,42 @@ const handleFileChange = (event: Event) => {
 
 const showReport = (submission: SubmissionResult, type: string) => {
   if (type === "plagiarism") {
-    // 创建一个深拷贝以避免修改原始数据
     const submissionCopy = JSON.parse(JSON.stringify(submission));
-    // 过滤出分数大于等于90的报告
     submissionCopy.plagiarism_reports = submissionCopy.plagiarism_reports.filter(
-      (report: PlagiarismReport) => (report.llm_analysis?.similarity_score || 0) >= 90
+      (report: PlagiarismReport) => (report.llm_analysis?.similarity_score || 0) >= 80
     );
     selectedSubmission.value = submissionCopy;
   } else {
     selectedSubmission.value = submission;
   }
-
   reportType.value = type;
   isModalVisible.value = true;
+};
+
+const openReviewModal = (submission: SubmissionResult) => {
+  submissionToReview.value = submission;
+  isReviewModalVisible.value = true;
+};
+
+const handleSaveReview = async (updatedData: {
+  id: number;
+  score: number;
+  human_feedback: string;
+}) => {
+  try {
+    const response = await gradingApi.updateSubmission(updatedData.id, {
+      score: updatedData.score,
+      human_feedback: updatedData.human_feedback,
+    });
+    const index = results.value.findIndex((r) => r.id === updatedData.id);
+    if (index !== -1) {
+      results.value[index] = response.data;
+    }
+    isReviewModalVisible.value = false;
+  } catch (e) {
+    alert("保存失败，请重试。");
+    console.error(e);
+  }
 };
 
 const getScoreColor = (score: number) => {
@@ -371,7 +435,7 @@ const getScoreColor = (score: number) => {
   return "text-red-600";
 };
 
-// --- 针对抄袭报告检测的一些辅助方法 ---
+// --- Helper Functions ---
 const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
   if (!reports || reports.length === 0) return 0;
   return Math.max(0, ...reports.map((r) => r.llm_analysis?.similarity_score || 0));
@@ -397,7 +461,6 @@ const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
   return "text-green-600";
 };
 
-// ---针对aigc检测的一些辅助方法 ---
 const formatAIGC = (report?: AIGCReport): string => {
   if (!report) return "未检测";
   const probability = (report.ai_probability * 100).toFixed(1);

@@ -17,8 +17,8 @@ class AIGCDetectorService:
         self.device = 0 if torch.cuda.is_available() else -1
         
         # --- 定义两个模型 ---
-        self.prose_model_name = "Hello-SimpleAI/chatgpt-detector-roberta-chinese" # 用于文字报告
-        self.code_model_name = "Hello-SimpleAI/chatgpt-detector-roberta"       # 用于源代码
+        self.prose_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\chatgpt-detector-roberta-chinese" # 用于文字报告
+        self.code_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\chatgpt-detector-roberta"       # 用于源代码
         
         cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
         os.makedirs(cache_dir, exist_ok=True)

@@ -24,6 +24,7 @@ app.add_middleware(
 )
 
 app.include_router(assignments.router)
+app.include_router(assignments.submission_router) # 新增此行
 
 @app.get("/", tags=["Root"])
 async def read_root():
