@@ -258,7 +258,7 @@ import Loader from "../components/Loader.vue";
 import ReportModal from "../components/ReportModal.vue";
 import ReviewModal from "../components/ReviewModal.vue";
 
-// --- Interfaces ---
+// --- 接口 ---
 interface AIGCReport {
   predicted_label: string;
   confidence: number;
@@ -379,7 +379,7 @@ const deleteAllResults = async () => {
   }
 };
 
-// --- UI Logic ---
+// --- 界面逻辑 ---
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const selectedFile = target.files?.[0];
@@ -435,7 +435,7 @@ const getScoreColor = (score: number) => {
   return "text-red-600";
 };
 
-// --- Helper Functions ---
+// --- 辅助函数 ---
 const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
   if (!reports || reports.length === 0) return 0;
   return Math.max(0, ...reports.map((r) => r.llm_analysis?.similarity_score || 0));
