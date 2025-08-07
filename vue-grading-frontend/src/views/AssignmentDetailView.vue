@@ -141,9 +141,9 @@
                 </td>
                 <td
                   class="px-6 py-4 text-sm font-bold whitespace-nowrap"
-                  :class="getScoreColor(result.score)"
+                  :class="getScoreColor(result.is_human_reviewed && typeof result.human_score === 'number' ? result.human_score : result.score)"
                 >
-                  {{ result.score.toFixed(1) }}
+                  {{ (result.is_human_reviewed && typeof result.human_score === 'number' ? result.human_score : result.score).toFixed(1) }}
                 </td>
                 <td class="px-6 py-4 text-sm whitespace-nowrap">
                   <button
@@ -285,6 +285,7 @@ interface SubmissionResult {
   aigc_report?: AIGCReport;
   is_human_reviewed: boolean;
   human_feedback?: string;
+  human_score?: number;
 }
 interface Assignment {
   task_name: string;
@@ -410,12 +411,12 @@ const openReviewModal = (submission: SubmissionResult) => {
 
 const handleSaveReview = async (updatedData: {
   id: number;
-  score: number;
+  human_score: number;
   human_feedback: string;
 }) => {
   try {
     const response = await gradingApi.updateSubmission(updatedData.id, {
-      score: updatedData.score,
+      human_score: updatedData.score,
       human_feedback: updatedData.human_feedback,
     });
     const index = results.value.findIndex((r) => r.id === updatedData.id);

@@ -37,6 +37,7 @@ class Submission(Base):
     # 新增教师复查功能
     is_human_reviewed = Column(Boolean, default=False, nullable=False)
     human_feedback = Column(Text, nullable=True) # 存储教师的最终评语
+    human_score = Column(Float)     # 存储教师评分
 
     @property
     def plagiarism_reports(self):

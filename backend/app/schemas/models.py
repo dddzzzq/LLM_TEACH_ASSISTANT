@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 
 # --- 新增教师人工审查更新模型 ---
 class SubmissionUpdate(BaseModel):
-    score: float    # 得分
+    human_score: float    # 得分
     human_feedback: str     # 评语
 
 # --- AIGC检测报告模型 ---
@@ -52,6 +52,7 @@ class SubmissionBase(BaseModel):
     aigc_report: Optional[AIGCReport] = None  # 新增aigc检测报告
     is_human_reviewed: bool     # 新增字段：是否人工复查
     human_feedback: Optional[str] = None    # 新增字段：教师评语
+    human_score: Optional[float] = None # <-- 修改这里，允许为None      # 新增字段：教师评分
 
 
 class SubmissionCreate(SubmissionBase):

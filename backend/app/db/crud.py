@@ -84,7 +84,7 @@ async def update_submission(db: AsyncSession, submission_id: int, submission_upd
     db_submission = result.scalars().first()
     
     if db_submission:
-        db_submission.score = submission_update.score
+        db_submission.human_score = submission_update.human_score
         db_submission.human_feedback = submission_update.human_feedback
         db_submission.is_human_reviewed = True # 标记为已复查
         

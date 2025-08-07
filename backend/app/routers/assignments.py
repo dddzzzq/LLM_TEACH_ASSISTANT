@@ -122,7 +122,8 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                     plagiarism_reports=student_reports["plagiarism_reports"],
                     aigc_report=student_reports["aigc_report"],
                     is_human_reviewed=False, # 明确设置初始值为 False
-                    human_feedback=None      # 明确设置初始值为 None
+                    human_feedback=None,      # 明确设置初始值为 None
+                    human_score=0           # 明确设置初始值为0
                 )
                 await crud.create_submission(db=db_session, submission=submission_data)
                 print(f"已完成对 {student_id} 的处理并存入数据库。")
@@ -142,7 +143,7 @@ async def create_new_assignment(
 # 读取全部任务路由，用于显示作业列表
 @router.get("/", response_model=List[schemas.AssignmentInDB])
 async def read_all_assignments(
-    skip: int = 0, limit: int = 100, db_session: AsyncSession = Depends(database.get_db)
+    skip: int = 0, limit: int = 200, db_session: AsyncSession = Depends(database.get_db)
 ):
     return await crud.get_assignments(db=db_session, skip=skip, limit=limit)
 

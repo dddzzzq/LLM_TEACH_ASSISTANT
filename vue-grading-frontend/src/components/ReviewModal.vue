@@ -18,9 +18,9 @@
             >
             <input
               type="number"
-              id="score"
+              id="human_score"
               v-model.number="editableScore"
-              step="0.1"
+              step="1"
               min="0"
               max="100"
               required
@@ -78,7 +78,7 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "save"]);
 
-const editableScore = ref(props.submission.score);
+const editableScore = ref(props.submission.human_score || props.submission.sc);
 const editableFeedback = ref(
   props.submission.human_feedback || props.submission.feedback
 );
