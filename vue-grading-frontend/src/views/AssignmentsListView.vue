@@ -28,7 +28,7 @@
           <router-link :to="`/assignments/${assignment.id}`" class="flex-grow">
             <p class="text-lg font-semibold text-indigo-700">{{ assignment.task_name }}</p>
             <p class="mt-1 text-sm text-gray-600 truncate">
-              {{ assignment.question.slice(0, 110) + '...' }}
+              {{ assignment.question.slice(0, 100) + '...' }}
             </p>
           </router-link>
 

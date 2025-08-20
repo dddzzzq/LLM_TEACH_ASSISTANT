@@ -1,5 +1,6 @@
 import re
 import json
+import time
 import requests
 from ..core.config import settings
 from typing import List, Optional, Dict
@@ -15,15 +16,59 @@ class DeepSeekService:
         }
 
     def _call_api(self, user_prompt: str, system_prompt: str) -> str:
-        """一个通用的、私有的API调用方法。"""
-        payload = {"model": "deepseek-chat", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]}
-        try:
-            response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
-            response.raise_for_status()
-            return response.json()['choices'][0]['message']['content']
-        except Exception as e:
-            print(f"调用DeepSeek API时出错: {e}")
-            raise
+        """一个通用的、私有的API调用方法，在实际应用中因为出现调用api500错误，所以增加自动重试和对不完整JSON响应的安全处理。"""
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        }
+        
+        max_retries = 3
+        backoff_factor = 2
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
+                response.raise_for_status() 
+                
+                data = response.json()
+                
+                # 检查数据格式
+                choices = data.get('choices')
+                if choices and isinstance(choices, list) and len(choices) > 0:
+                    message = choices[0].get('message')
+                    if message and isinstance(message, dict):
+                        content = message.get('content')
+                        if content and isinstance(content, str):
+                            return content # 只有在所有检查都通过时才返回内容
+
+                # 如果结构不完整或内容为空，打印警告并触发重试
+                print(f"警告: LLM API返回了不完整的JSON数据: {data}")
+                raise ValueError("Incomplete JSON data from API")
+
+            except (requests.exceptions.RequestException, ValueError) as e:
+                print(f"调用DeepSeek API时出错: {e}")
+                
+                # 如果还有重试机会，则等待后重试
+                if attempt < max_retries - 1:
+                    wait_time = backoff_factor ** attempt
+                    print(f"将在 {wait_time} 秒后进行第 {attempt + 2} 次尝试...")
+                    time.sleep(wait_time)
+                else:
+                    # 如果重试次数用尽，则向上层抛出异常
+                    raise Exception(f"调用DeepSeek API失败，已达到最大重试次数: {e}")
+    # def _call_api(self, user_prompt: str, system_prompt: str) -> str:
+    #     """一个通用的、私有的API调用方法。"""
+    #     payload = {"model": "deepseek-chat", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]}
+    #     try:
+    #         response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
+    #         response.raise_for_status()
+    #         return response.json()['choices'][0]['message']['content']
+    #     except Exception as e:
+    #         print(f"调用DeepSeek API时出错: {e}")
+    #         raise
 
 #     def analyze_plagiarism(self, text1: str, student1_id: str, text2: str, student2_id: str) -> Optional[LLMAnalysis]:
 #         """调用LLM来深度分析两个文本的相似性，即查重检测"""
@@ -70,6 +115,8 @@ class DeepSeekService:
 #         return None
 
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
+        escaped_text1 = json.dumps(text1[:20000], ensure_ascii=False)
+        escaped_text2 = json.dumps(text2[:20000], ensure_ascii=False)
         return f"""
         你是一位经验丰富的学术评审专家。请对比以下两份**实验报告**，扮演一个客观的第三方顾问角色。
         你的任务是提供一份详细的辅助决策中文报告，包含：
@@ -79,11 +126,11 @@ class DeepSeekService:
 
         [报告 A]:
         ---
-        {text1[:20000]}
+        {escaped_text1[:20000]}
         ---
         [报告 B]:
         ---
-        {text2[:20000]}
+        {escaped_text2[:20000]}
         ---
         请严格按照以下JSON格式返回你的分析报告:
         {{
@@ -96,20 +143,46 @@ class DeepSeekService:
         """
 
     def _get_code_plagiarism_prompt(self, code1: str, code2: str) -> str:
+        escaped_code1 = json.dumps(code1[:20000], ensure_ascii=False)
+        escaped_code2 = json.dumps(code2[:20000], ensure_ascii=False)
+        # return f"""
+        # 你是一位资深的软件工程技术主管。请对比以下两份**源代码**，扮演一个客观的第三方代码审查顾问角色。
+        # 你的任务是提供一份详细的辅助决策中文报告，包含：
+        # 1.  一个0到100的**逻辑与结构相似度分数**。
+        # 2.  详细的**分析理由**，关注算法、结构、命名和注释。
+        # 3.  列出1-3个最能支撑你结论的**核心代码片段**作为证据。
+
+        # [代码 A]:
+        # ---
+        # {escaped_code1[:20000]}
+        # ---
+        # [代码 B]:
+        # ---
+        # {escaped_code2[:20000]}
+        # ---
+        # 请严格按照以下JSON格式返回你的分析报告:
+        # {{
+        #   "similarity_score": <number>,
+        #   "reasoning": "<string>",
+        #   "suspicious_parts": [
+        #     {{ "student_A_content": "<string>", "student_B_content": "<string>" }}
+        #   ]
+        # }}
+        # """
         return f"""
         你是一位资深的软件工程技术主管。请对比以下两份**源代码**，扮演一个客观的第三方代码审查顾问角色。
         你的任务是提供一份详细的辅助决策中文报告，包含：
         1.  一个0到100的**逻辑与结构相似度分数**。
-        2.  详细的**分析理由**，关注算法、结构、命名和注释。
+        2.  详细的**分析理由**，关注算法逻辑以及实现思想。
         3.  列出1-3个最能支撑你结论的**核心代码片段**作为证据。
 
         [代码 A]:
         ---
-        {code1[:20000]}
+        {escaped_code1[:20000]}
         ---
         [代码 B]:
         ---
-        {code2[:20000]}
+        {escaped_code2[:20000]}
         ---
         请严格按照以下JSON格式返回你的分析报告:
         {{

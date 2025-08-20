@@ -16,12 +16,16 @@ class PlagiarismService:
     修改后的抄袭检测服务，采用双模型策略。
     在每个学生提交的内容中分离文本和代码，并进行同类内容的交叉对比。
     """
-    def __init__(self):
-        # 加载对应的模型
+    def __init__(self, text_model_name: str = None, code_model_name: str = None):
+        """
+        初始化服务。
+        可以从外部传入模型路径，如果未提供，则使用默认路径。
+        """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        self.text_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\bert-base-chinese"
-        self.code_model_name = r"D:\DZQ\项目\教改项目-批改Agent\models\unixcoder-base"
+        # 如果外部没有指定路径，就使用默认的硬编码路径
+        self.text_model_name = text_model_name or r"D:\DZQ\项目\教改项目-批改Agent\models\bert-base-chinese"
+        self.code_model_name = code_model_name or r"D:\DZQ\项目\教改项目-批改Agent\models\unixcoder-base"
         
         cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
         os.makedirs(cache_dir, exist_ok=True)
