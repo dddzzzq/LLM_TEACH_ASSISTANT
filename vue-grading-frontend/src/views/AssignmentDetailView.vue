@@ -141,9 +141,20 @@
                 </td>
                 <td
                   class="px-6 py-4 text-sm font-bold whitespace-nowrap"
-                  :class="getScoreColor(result.is_human_reviewed && typeof result.human_score === 'number' ? result.human_score : result.score)"
+                  :class="
+                    getScoreColor(
+                      result.is_human_reviewed && typeof result.human_score === 'number'
+                        ? result.human_score
+                        : result.score
+                    )
+                  "
                 >
-                  {{ (result.is_human_reviewed && typeof result.human_score === 'number' ? result.human_score : result.score).toFixed(1) }}
+                  {{
+                    (result.is_human_reviewed && typeof result.human_score === "number"
+                      ? result.human_score
+                      : result.score
+                    ).toFixed(1)
+                  }}
                 </td>
                 <td class="px-6 py-4 text-sm whitespace-nowrap">
                   <button
@@ -394,7 +405,7 @@ const showReport = (submission: SubmissionResult, type: string) => {
   if (type === "plagiarism") {
     const submissionCopy = JSON.parse(JSON.stringify(submission));
     submissionCopy.plagiarism_reports = submissionCopy.plagiarism_reports.filter(
-      (report: PlagiarismReport) => (report.llm_analysis?.similarity_score || 0) >= 80
+      (report: PlagiarismReport) => (report.llm_analysis?.similarity_score || 0) >= 90
     );
     selectedSubmission.value = submissionCopy;
   } else {
@@ -431,7 +442,7 @@ const handleSaveReview = async (updatedData: {
 };
 
 const getScoreColor = (score: number) => {
-  if (score >= 90) return "text-green-600";
+  if (score >= 85) return "text-green-600";
   if (score >= 60) return "text-yellow-600";
   return "text-red-600";
 };
