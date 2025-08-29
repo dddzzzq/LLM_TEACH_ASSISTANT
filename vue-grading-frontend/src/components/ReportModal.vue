@@ -46,7 +46,7 @@
         </div>
         <div v-else class="space-y-6">
           <div
-            v-for="(report, index) in submission.plagiarism_reports"
+            v-for="(report, index) in sortedPlagiarismReports"
             :key="index"
             class="p-4 border rounded-lg"
           >
@@ -113,8 +113,22 @@
 </template>
 
 <script setup>
+import { computed }from 'vue';
+
 const props = defineProps({ submission: Object, reportType: String });
 const emit = defineEmits(["close"]);
+
+const sortedPlagiarismReports = computed(() => {
+  if (!props.submission || !props.submission.plagiarism_reports) {
+    return []
+  }
+  return [...props.submission.plagiarism_reports].sort((a, b) => {
+    const scoreA = a.llm_analysis?.similarity_score || 0;
+    const scoreB = b.llm_analysis?.similarity_score || 0;
+    return scoreB - scoreA;
+  });
+});
+
 const close = () => emit("close");
 const getReportHeaderClass = (report) => {
   if (report.llm_analysis && report.llm_analysis.similarity_score > 85)

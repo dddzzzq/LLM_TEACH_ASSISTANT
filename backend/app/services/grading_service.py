@@ -2,6 +2,7 @@ import zipfile
 import rarfile
 import io
 import os
+import docx
 
 from .file_processor import read_text_from_docx, read_text_from_pdf
 
@@ -88,6 +89,9 @@ class GradingService:
             elif file_type == ".rar":
                 with rarfile.RarFile(archive_buffer, "r") as archive_ref:
                     return self._process_archive_items(archive_ref, archive_ref.infolist())
+                
+            elif file_type == '.doc' or file_type == '.docx':
+                return read_text_from_docx(file_bytes)
             
             else:
                 return self._get_content_from_file(original_filename, file_bytes)

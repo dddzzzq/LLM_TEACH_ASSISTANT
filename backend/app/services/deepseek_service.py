@@ -298,7 +298,7 @@ class DeepSeekService:
                     highest_plagiarism_score = report.llm_analysis.similarity_score
                     worst_report = report
             
-            if highest_plagiarism_score > 80 and worst_report:
+            if highest_plagiarism_score > 95 and worst_report:
                  plagiarism_context = f"""
                 [学术诚信警报]:
                 AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
@@ -310,7 +310,7 @@ class DeepSeekService:
         if aigc_report and aigc_report.ai_probability > 0.8:
             aigc_context = f"""
             [AIGC内容警报]:
-            检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability*100:.1f}% 的可能性由AI生成。
+            检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability:.1f}% 的可能性由AI生成。
             ---
             """
         

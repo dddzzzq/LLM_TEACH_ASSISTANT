@@ -63,6 +63,14 @@
           <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
           <div class="flex items-center gap-4">
             <button
+                @click="exportResults"
+                :disabled="isExporting || results.length === 0"
+                class="text-sm font-semibold text-green-600 hover:text-green-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+            >
+                <span v-if="!isExporting">导出为Excel</span>
+                <span v-else>正在导出...</span>
+            </button>
+            <button
               @click="deleteAllResults"
               :disabled="isLoadingResults || results.length === 0"
               class="text-sm font-semibold text-red-600 hover:text-red-800 disabled:text-gray-400 disabled:cursor-not-allowed"
@@ -78,6 +86,7 @@
             </button>
           </div>
         </div>
+        
 
         <div v-if="isLoadingResults" class="py-5 text-center">
           <Loader />
@@ -119,7 +128,7 @@
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-              <tr v-for="(result, index) in results" :key="result.id">
+              <tr v-for="(result, index) in sortedResults" :key="result.id">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                   <div class="flex items-center">
                     <span>{{ result.student_id }}</span>
@@ -220,7 +229,7 @@
                     </svg>
                   </button>
                   <button
-                    @click="deleteSingleResult(result.id, index)"
+                    @click="deleteSingleResult(result.id)"
                     title="删除此条记录"
                     class="p-1 text-gray-400 rounded-full hover:text-red-600"
                   >
@@ -262,7 +271,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useRoute } from "vue-router";
 import gradingApi from "../services/gradingApi";
 import Loader from "../components/Loader.vue";
@@ -323,6 +332,58 @@ const submissionError = ref(false);
 const reportType = ref("feedback");
 const isReviewModalVisible = ref(false);
 const submissionToReview = ref<SubmissionResult | null>(null);
+const isExporting = ref(false);  // 导出按钮
+
+// 将结果导出excel
+const exportResults = async () => {
+  if (results.value.length === 0) {
+    alert("没有可导出的评分结果");
+    return;
+  }
+  isExporting.value = true;
+  try {
+    const response = await gradingApi.exportAssignment(props.id);
+    const blob = new Blob([response.data], { type: response.headers['content-type'] });
+
+            // 从 Content-Disposition 头中提取文件名
+        const contentDisposition = response.headers['content-disposition'];
+        let filename = `${assignment.value?.task_name || 'assignment'}_results.xlsx`; // 默认文件名
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+            if (filenameMatch && filenameMatch.length > 1) {
+                filename = decodeURIComponent(filenameMatch[1]);
+            }
+        }
+
+        // 创建一个隐藏的a标签来触发下载
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(link.href);
+
+    } catch (e: any) {
+        if (e.response && e.response.status === 404) {
+             alert("导出失败: 该作业没有任何评分结果。");
+        } else {
+             alert("导出失败，请检查网络或联系管理员。");
+        }
+        console.error("导出时发生错误:", e);
+    } finally {
+        isExporting.value = false;
+    }
+};
+
+// sort the details
+const sortedResults = computed(() => {
+  return [...results.value].sort((a, b) => {
+    const scoreA = typeof a.human_score === 'number' ? a.human_score : a.score;
+    const scoreB = typeof b.human_score === 'number' ? b.human_score : b.score;
+    return scoreB - scoreA;
+  });
+});
 
 // --- API Methods ---
 const fetchAssignmentDetails = async () => {
@@ -369,16 +430,27 @@ const submitBatchFile = async () => {
     isSubmitting.value = false;
   }
 };
-const deleteSingleResult = async (submissionId: number, index: number) => {
-  if (confirm(`确定要删除学生 ${results.value[index].student_id} 的评分记录吗？`)) {
+
+const deleteSingleResult = async (submissionId: number) => {
+  // 1. 使用 submissionId 从原始数组中查找要删除的对象
+  const resultToDelete = results.value.find(r => r.id === submissionId);
+  if (!resultToDelete) return; // 如果没找到，则不执行任何操作
+
+  // 2. 在确认对话框中显示正确的学生ID
+  if (confirm(`确定要删除学生 ${resultToDelete.student_id} 的评分记录吗？`)) {
     try {
+      // 3. API调用仍然使用 submissionId，这是正确的
       await gradingApi.deleteSubmission(submissionId);
-      results.value.splice(index, 1);
+      
+      results.value = results.value.filter(r => r.id !== submissionId);
+
     } catch (e) {
       alert("删除失败，请重试。");
+      console.error(e);
     }
   }
 };
+
 const deleteAllResults = async () => {
   if (results.value.length === 0) return;
   if (confirm(`确定要清空此作业下的所有 ${results.value.length} 条评分记录吗？`)) {
@@ -475,7 +547,7 @@ const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
 
 const formatAIGC = (report?: AIGCReport): string => {
   if (!report) return "未检测";
-  const probability = (report.ai_probability * 100).toFixed(1);
+  const probability = (report.ai_probability).toFixed(1);
   const source = report.detection_source ? ` (${report.detection_source})` : "";
   return `${probability}% AI生成${source}`;
 };

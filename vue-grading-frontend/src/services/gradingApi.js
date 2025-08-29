@@ -37,5 +37,11 @@ export default {
   updateSubmission(submissionId, data) {
     // 路径从 /assignments/submissions/... 简化为 /submissions/...
     return apiClient.put(`/submissions/${submissionId}`, data, { headers: { 'Content-Type': 'application/json' } });
+  },
+  exportAssignment(assignmentId) {
+        // 新增导出excel端点
+    return apiClient.get(`/assignments/${assignmentId}/export`, {
+      responseType: 'blob', // 关键：告诉axios期望接收一个二进制文件
+    });
   }
 }

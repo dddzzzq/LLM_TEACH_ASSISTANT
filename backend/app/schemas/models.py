@@ -11,6 +11,7 @@ class AIGCReport(BaseModel):
     predicted_label: str = Field(description="预测标签，如 'AI生成' 或 '人类写作'")
     confidence: float = Field(description="模型对预测标签的置信度")
     ai_probability: float = Field(description="文本由AI生成的概率")
+    detection_source: Optional[str] = Field(None, description="风险最高的文本来源，如 '文字报告' 或 '源代码'")
 
 # --- 查重报告模型 ---
 # class SimilarityMatch(BaseModel):
