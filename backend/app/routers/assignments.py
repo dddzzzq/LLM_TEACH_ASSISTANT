@@ -164,59 +164,95 @@ async def read_single_assignment(
 async def export_assignment_results(
     assignment_id: int, db_session: AsyncSession = Depends(database.get_db)
 ):
+    """
+    将指定作业的所有评分结果及详细抄袭报告导出为Excel文件。
+    """
     assignment = await crud.get_assignment(db=db_session, assignment_id=assignment_id)
     if not assignment:
-        raise HTTPException(status_code=404, detail="作业未找到")
-    
+        raise HTTPException(status_code=404, detail="未找到该作业")
+
     results = await crud.get_submissions_for_assignment(
-        db = db_session, assignment_id=assignment_id
+        db=db_session, assignment_id=assignment_id
     )
 
     if not results:
         raise HTTPException(status_code=404, detail="该作业没有任何评分结果可以导出")
-    
-    # 将作业转换为字典列表，方便处理
-    data_to_export = []
+
+    # 1. 准备“评分结果汇总”数据 (与之前逻辑相同)
+    summary_data = []
     for res in results:
         final_score = res.human_score if res.is_human_reviewed and res.human_score is not None else res.score
-
-        # 简化查重报告
+        
         max_plagiarism_score = 0
         if res.plagiarism_reports:
             scores = [r.get('llm_analysis', {}).get('similarity_score', 0) for r in res.plagiarism_reports]
             if scores:
                 max_plagiarism_score = max(scores)
-
-        # 简化AIGC报告
+        
         aigc_risk = "未检测"
         if res.aigc_report:
-            prob = res.aigc_report.get('ai_probability', 0)
+            prob = res.aigc_report.get('ai_probability', 0) * 100
             source = res.aigc_report.get('detection_source', '')
             aigc_risk = f"{prob:.1f}% AI生成 ({source})" if source else f"{prob:.1f}% AI生成"
 
-
-        data_to_export.append({
+        summary_data.append({
             "学生ID": res.student_id,
+            "最终得分": final_score,
             "AI评分": res.score,
-            "AI评语": res.feedback,
             "是否人工复核": "是" if res.is_human_reviewed else "否",
             "人工评分": res.human_score if res.is_human_reviewed else "",
-            "人工评语": res.human_feedback if res.is_human_reviewed else "",
-            "最终得分": final_score,
             "最高抄袭风险(LLM)": f"{max_plagiarism_score}分" if max_plagiarism_score > 0 else "无风险",
             "AIGC风险": aigc_risk,
-            "提交内容摘要": res.merged_content[:200] + "..." if res.merged_content and len(res.merged_content) > 200 else res.merged_content
+            "AI评语": res.feedback,
+            "人工评语": res.human_feedback if res.is_human_reviewed else "",
         })
+    df_summary = pd.DataFrame(summary_data)
 
-    # 2. 使用 Pandas 创建 DataFrame
-    df = pd.DataFrame(data_to_export)
+    # 2. 新增：准备“抄袭检测详情”数据
+    plagiarism_details_data = []
+    for res in results:
+        if not res.plagiarism_reports:
+            continue
+        for report in res.plagiarism_reports:
+            llm_analysis = report.get('llm_analysis', {})
+            
+            # --- 新增逻辑：格式化相似片段证据 ---
+            suspicious_parts_text = ""
+            suspicious_parts = llm_analysis.get('suspicious_parts', [])
+            if suspicious_parts:
+                parts_list = []
+                # 注意：这里的 student_A_content 对应当前行的学生，student_B_content 对应相似对象
+                for i, part in enumerate(suspicious_parts, 1):
+                    part_a = part.get('student_A_content', 'N/A')
+                    part_b = part.get('student_B_content', 'N/A')
+                    parts_list.append(
+                        f"--- 证据 {i} ---\n"
+                        f"学生({res.student_id}):\n{part_a}\n\n"
+                        f"学生({report.get('similar_to')}):\n{part_b}\n"
+                    )
+                suspicious_parts_text = "\n".join(parts_list)
+            # --- 新增逻辑结束 ---
 
-    # 3. 创建一个内存中的二进制流来保存Excel文件
+            plagiarism_details_data.append({
+                "学生ID": res.student_id,
+                "相似对象ID": report.get('similar_to'),
+                "内容类型": "代码" if report.get('content_type') == 'code' else "文本",
+                "LLM评估分数": llm_analysis.get('similarity_score'),
+                "LLM分析理由": llm_analysis.get('reasoning'),
+                "具体相似片段证据": suspicious_parts_text # <-- 新增的列
+            })
+    df_plagiarism = pd.DataFrame(plagiarism_details_data)
+
+
+    # 3. 将多个DataFrame写入不同工作表 (逻辑不变)
     output_stream = io.BytesIO()
-    df.to_excel(output_stream, index=False, sheet_name='评分结果')
-    output_stream.seek(0) # 将指针移到流的开头
+    with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+        df_summary.to_excel(writer, sheet_name='评分结果汇总', index=False)
+        if not df_plagiarism.empty:
+            df_plagiarism.to_excel(writer, sheet_name='抄袭检测详情', index=False)
 
-    # 4. 设置HTTP头，告诉浏览器这是一个需要下载的文件
+    output_stream.seek(0)
+    
     filename = f"{assignment.task_name}_评分结果.xlsx"
     headers = {
         'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}"
