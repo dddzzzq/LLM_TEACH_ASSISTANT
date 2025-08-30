@@ -434,12 +434,11 @@ const submitBatchFile = async () => {
 const deleteSingleResult = async (submissionId: number) => {
   // 1. 使用 submissionId 从原始数组中查找要删除的对象
   const resultToDelete = results.value.find(r => r.id === submissionId);
-  if (!resultToDelete) return; // 如果没找到，则不执行任何操作
+  if (!resultToDelete) return;
 
   // 2. 在确认对话框中显示正确的学生ID
   if (confirm(`确定要删除学生 ${resultToDelete.student_id} 的评分记录吗？`)) {
     try {
-      // 3. API调用仍然使用 submissionId，这是正确的
       await gradingApi.deleteSubmission(submissionId);
       
       results.value = results.value.filter(r => r.id !== submissionId);

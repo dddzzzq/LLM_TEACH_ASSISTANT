@@ -178,7 +178,7 @@ async def export_assignment_results(
     if not results:
         raise HTTPException(status_code=404, detail="该作业没有任何评分结果可以导出")
 
-    # 1. 准备“评分结果汇总”数据 (与之前逻辑相同)
+    # 1. 准备“评分结果汇总”数据
     summary_data = []
     for res in results:
         final_score = res.human_score if res.is_human_reviewed and res.human_score is not None else res.score
@@ -208,7 +208,7 @@ async def export_assignment_results(
         })
     df_summary = pd.DataFrame(summary_data)
 
-    # 2. 新增：准备“抄袭检测详情”数据
+    # 2. 准备“抄袭检测详情”数据
     plagiarism_details_data = []
     for res in results:
         if not res.plagiarism_reports:
@@ -216,12 +216,10 @@ async def export_assignment_results(
         for report in res.plagiarism_reports:
             llm_analysis = report.get('llm_analysis', {})
             
-            # --- 新增逻辑：格式化相似片段证据 ---
             suspicious_parts_text = ""
             suspicious_parts = llm_analysis.get('suspicious_parts', [])
             if suspicious_parts:
                 parts_list = []
-                # 注意：这里的 student_A_content 对应当前行的学生，student_B_content 对应相似对象
                 for i, part in enumerate(suspicious_parts, 1):
                     part_a = part.get('student_A_content', 'N/A')
                     part_b = part.get('student_B_content', 'N/A')
@@ -231,7 +229,6 @@ async def export_assignment_results(
                         f"学生({report.get('similar_to')}):\n{part_b}\n"
                     )
                 suspicious_parts_text = "\n".join(parts_list)
-            # --- 新增逻辑结束 ---
 
             plagiarism_details_data.append({
                 "学生ID": res.student_id,
@@ -239,12 +236,12 @@ async def export_assignment_results(
                 "内容类型": "代码" if report.get('content_type') == 'code' else "文本",
                 "LLM评估分数": llm_analysis.get('similarity_score'),
                 "LLM分析理由": llm_analysis.get('reasoning'),
-                "具体相似片段证据": suspicious_parts_text # <-- 新增的列
+                "具体相似片段证据": suspicious_parts_text 
             })
     df_plagiarism = pd.DataFrame(plagiarism_details_data)
 
 
-    # 3. 将多个DataFrame写入不同工作表 (逻辑不变)
+    # 3. 将多个DataFrame写入不同工作表
     output_stream = io.BytesIO()
     with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
         df_summary.to_excel(writer, sheet_name='评分结果汇总', index=False)
