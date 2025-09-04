@@ -1,0 +1,8 @@
+#################### FINAL EXPERIMENT RESULTS ####################
+
+--- Results for: mixed_homework ---
+                                 accuracy  f1_macro  recall_macro  precision_plag  recall_plag  f1_plag  precision_orig  recall_orig  f1_orig     time (s) llm_calls
+Dual Model (No LLM)                  0.75    0.7333          0.75          0.6667         1.00   0.8000          1.0000          0.5   0.6667   863.554284         0
+Our System (w/ LLM)                  0.80    0.7917          0.80          0.7143         1.00   0.8333          1.0000          0.6   0.7500  3169.871424        75
+Ablation (No Separation w/ LLM)      0.63    0.5713          0.63          1.0000         0.26   0.4127          0.5747          1.0   0.7299   834.290089        15
+

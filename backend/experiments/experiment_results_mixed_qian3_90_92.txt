@@ -1,0 +1,8 @@
+#################### FINAL EXPERIMENT RESULTS ####################
+
+--- Results for: mixed_homework ---
+                          accuracy  f1_macro  recall_macro  precision_plag  recall_plag  f1_plag  precision_orig  recall_orig  f1_orig   time (s) llm_calls
+TF-IDF                        0.59    0.5072          0.59          1.0000         0.18   0.3051          0.5495         1.00   0.7092   0.293164         0
+Single Model (UniXcoder)      0.69    0.6615          0.69          0.9524         0.40   0.5634          0.6203         0.98   0.7597  51.028493         0
+Single Model (BERT)           0.53    0.4930          0.53          0.5195         0.80   0.6299          0.5652         0.26   0.3562  52.156865         0
+

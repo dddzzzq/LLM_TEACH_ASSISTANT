@@ -7,6 +7,8 @@ import pandas as pd
 from typing import Dict, Set, Tuple
 from tqdm import tqdm
 import re
+from docx import Document
+
 
 # 1. 环境设置与模块导入
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +17,7 @@ sys.path.insert(0, project_root)
 
 from app.services.plagiarism_service import PlagiarismService
 from app.services.deepseek_service import DeepSeekService
+from app.services.grading_service import GradingService
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import precision_recall_fscore_support
@@ -28,15 +31,11 @@ CODE_MODEL_PATH = os.path.join(BASE_MODEL_PATH, "unixcoder-base")
 def preprocess_code(code_text: str) -> str:
     if not isinstance(code_text, str):
         return ""
-    
     processed_text = code_text.replace('\\n', '\n').replace('\\r', '')
-    
     processed_text = re.sub(r'\n\s*\n', '\n', processed_text)
     
     lines = [line.strip() for line in processed_text.split('\n')]
-    
     non_empty_lines = [line for line in lines if line]
-    
     return '\n'.join(non_empty_lines)
 
 def parse_soco_ground_truth_qrel(qrel_path: str, lang_ext: str) -> Set[Tuple[str, str]]:
@@ -61,7 +60,7 @@ def parse_soco_ground_truth_qrel(qrel_path: str, lang_ext: str) -> Set[Tuple[str
 
 
 # 4. 数据集加载
-def load_dataset(dataset_type: str, num_positive: int = 50, num_negative: int = 50) -> Tuple[Dict[str, str], Set[Tuple[str, str]], Set[Tuple[str, str]]]:
+def load_dataset(dataset_type: str, grading_service: GradingService, num_positive: int = 50, num_negative: int = 50) -> Tuple[Dict[str, str], Set[Tuple[str, str]], Set[Tuple[str, str]]]:
     """
     加载并构造数据集。
     返回: submissions, ground_truth, all_possible_pairs
@@ -72,6 +71,57 @@ def load_dataset(dataset_type: str, num_positive: int = 50, num_negative: int = 
     ground_truth = set()
     all_possible_pairs = set()
     df = pd.DataFrame()
+
+    if dataset_type in ['mixed_homework_1', 'mixed_homework_2']:
+        if dataset_type == 'mixed_homework_1:':
+            homework_root = r'E:\项目资料\ai_assistant\third\作业'
+            ground_truth_path = r'D:\DZQ\项目\教改项目-批改Agent\论文\数据集\mixed_plagiarism_dataset.csv'
+            print(f"\nLoading Mixed Homework dataset from:{homework_root}")
+            print(f"Using ground truth file:{ground_truth_path}")
+        elif dataset_type == 'mixed_homework_2':
+            homework_root = r'E:\项目资料\ai_assistant\2024研究生课程作业'
+            ground_truth_path = r'D:\DZQ\项目\教改项目-批改Agent\论文\数据集\mixed_embedded_os_dataset.csv'
+            print(f"\nLoading Mixed Homework dataset from:{homework_root}")
+            print(f"Using ground truth file:{ground_truth_path}")
+
+        try:
+            gt_df = pd.read_csv(ground_truth_path, encoding='utf-8')
+        except FileNotFoundError:
+            return {}, set(), set()
+        
+        required_students = set(gt_df['student1'].unique()) | set(gt_df['student2'].unique())
+
+        for student_id in tqdm(required_students, desc='Processing student archives:'):
+            archive_filename = f"{student_id}.zip"
+            archive_path = os.path.join(homework_root, archive_filename)
+
+            if not os.path.exists(archive_path):
+                print(f"找不到学生压缩文件{archive_path}，跳过")
+                continue
+
+            try:
+                with open(archive_path, 'rb') as f:
+                    archive_bytes = f.read()
+
+                    merged_content = grading_service.process_archive(archive_bytes, archive_filename)
+                    submissions[str(student_id)] = merged_content
+
+            except Exception as e:
+                print(f"处理压缩文件{archive_path}时出错{e}")
+
+        # 从csv文件中加载标签和作业对
+        for _, row in gt_df.iterrows():
+            if row['label'] == 1:
+                pair = tuple(sorted((str(row['student1']), str(row['student2']))))
+                ground_truth.add(pair)
+
+        for _, row in gt_df.iterrows():
+            pair = tuple(sorted((str(row['student1']), str(row['student2']))))
+            all_possible_pairs.add(pair)
+
+        print(f"成功加载 {len(submissions)} 份学生作业，定义了 {len(all_possible_pairs)} 个比对样本对，其中包含 {len(ground_truth)} 对真实抄袭样本。")
+        return submissions, ground_truth, all_possible_pairs
+
 
     # SOCO-2014 数据集加载逻辑
     if dataset_type == 'soco_2014':
@@ -290,7 +340,7 @@ def run_baseline_tfidf(submissions: Dict[str, str], all_possible_pairs: Set[Tupl
                 predictions.add(tuple(sorted((file1, file2))))
     return predictions
 
-def run_baseline_single_unixcoder_model(plagiarism_service: PlagiarismService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], threshold: float = 0.85) -> Set[Tuple[str, str]]:
+def run_baseline_single_unixcoder_model(plagiarism_service: PlagiarismService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], threshold: float = 0.92) -> Set[Tuple[str, str]]:
     print("Running Baseline 2: Single Small Model (UniXcoder)...")
     student_ids = list(submissions.keys())
     id_to_index = {id: i for i, id in enumerate(student_ids)}
@@ -310,7 +360,7 @@ def run_baseline_single_unixcoder_model(plagiarism_service: PlagiarismService, s
                 predictions.add(tuple(sorted((file1, file2))))
     return predictions
 
-def run_baseline_single_bert_model(plagiarism_service: PlagiarismService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], threshold: float = 0.95) -> Set[Tuple[str, str]]:
+def run_baseline_single_bert_model(plagiarism_service: PlagiarismService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], threshold: float = 0.90) -> Set[Tuple[str, str]]:
     print("Running Baseline 3: Single Small Model (BERT)...")
     student_ids = list(submissions.keys())
     id_to_index = {id: i for i, id in enumerate(student_ids)}
@@ -407,25 +457,27 @@ def run_ablation_no_separation(plagiarism_service: PlagiarismService, deepseek_s
 def main():
     # 初始化服务及模型
     print("Initializing services and models...")
+    grading_service = GradingService()
     plagiarism_service = PlagiarismService(text_model_name=TEXT_MODEL_PATH, code_model_name=CODE_MODEL_PATH)
     deepseek_service = DeepSeekService()
     print("Initialization complete.")
 
-    dataset_names = ['soco_java', 'lcqmc', 'pawsx_zh', 'soco_2014']
+    # dataset_names = ['soco_java', 'lcqmc', 'pawsx_zh', 'soco_2014']
     # dataset_names = ['pawsx_zh']
     # dataset_names = ['soco_2014']
-    # dataset_names = ['soco_java']
+    dataset_names = ['mixed_homework_2']
     all_results = {}
     
-    output_filename = r"D:\DZQ\项目\教改项目-批改Agent\ai_grading_assistant\backend\experiments\experiment_results_soco_java_2014.txt"
+    output_filename = r"D:\DZQ\项目\教改项目-批改Agent\ai_grading_assistant\backend\experiments\experiment_results_mixed_92_93_2.txt"
 
     for dataset_name in dataset_names:
-        print(f"\n==================== Running experiment for dataset: {dataset_name} ====================")
+        llm_shold = 74
+        print(f"\n==================== Running experiment for dataset: {dataset_name} llm_shold: {llm_shold}====================")
         
-        if dataset_name == 'soco_2014':
-            submissions, ground_truth, all_possible_pairs = load_dataset(dataset_name)
+        if dataset_name in ['soco_2014', 'mixed_homework']:
+            submissions, ground_truth, all_possible_pairs = load_dataset(dataset_name, grading_service)
         else:
-            submissions, ground_truth, all_possible_pairs_from_loader = load_dataset(dataset_name, num_positive=50, num_negative=50)
+            submissions, ground_truth, all_possible_pairs_from_loader = load_dataset(dataset_name, grading_service, num_positive=50, num_negative=50)
             all_possible_pairs = all_possible_pairs_from_loader
         
         if not submissions:
@@ -437,7 +489,7 @@ def main():
             print("Calculating all possible pairs for stratified sample...")
             student_ids = list(submissions.keys())
             all_possible_pairs = {tuple(sorted((student_ids[i], student_ids[j]))) for i in range(len(student_ids)) for j in range(i + 1, len(student_ids))}
-       
+    
         results_for_current_dataset = {}
         
         # 运行实验
@@ -492,7 +544,6 @@ def main():
             f.write("\n\n")
 
     print(f"\n实验结果已成功保存到文件: {output_filename}")
-
 
 if __name__ == "__main__":
     main()

@@ -525,12 +525,12 @@ const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
 };
 
 const hasHighRiskPlagiarism = (reports?: PlagiarismReport[]): boolean => {
-  return getMaxLlmScore(reports) >= 90;
+  return getMaxLlmScore(reports) > 95;
 };
 
 const formatPlagiarismSummary = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
-  if (maxScore >= 90) {
+  if (maxScore > 95) {
     return `高度疑似 (${maxScore}分)`;
   }
   return "不存在抄袭风险";

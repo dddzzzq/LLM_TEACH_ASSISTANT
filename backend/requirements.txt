@@ -14,6 +14,8 @@ python-docx  # 用于读取 .docx 文件
 PyPDF2       # 用于读取 .pdf 文件
 python-multipart # FastAPI需要此库来处理文件上传
 rarfile # 对rar文件的处理
+chardet # 文件编码方式自适应，避免乱码产生
+py7zr # 增加对于7z文件的处理
 
 # 数据库
 sqlalchemy
