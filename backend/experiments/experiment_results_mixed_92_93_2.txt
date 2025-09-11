@@ -1,0 +1,11 @@
+#################### FINAL EXPERIMENT RESULTS ####################
+
+--- Results for: mixed_homework_2 ---
+                                 accuracy  f1_macro  recall_macro  precision_plag  recall_plag  f1_plag  precision_orig  recall_orig  f1_orig     time (s) llm_calls
+TF-IDF                               0.50    0.3333          0.50          0.0000         0.00   0.0000          0.5000         1.00   0.6667     0.132565         0
+Single Model (UniXcoder)             0.82    0.8197          0.82          0.8478         0.78   0.8125          0.7963         0.86   0.8269    23.496559         0
+Single Model (BERT)                  0.69    0.6875          0.69          0.6610         0.78   0.7156          0.7317         0.60   0.6593    23.762907         0
+Dual Model (No LLM)                  0.82    0.8140          0.82          0.7353         1.00   0.8475          1.0000         0.64   0.7805   191.467814         0
+Our System (w/ LLM)                  0.84    0.8358          0.84          0.7576         1.00   0.8621          1.0000         0.68   0.8095  4119.431823        68
+Ablation (No Separation w/ LLM)      0.83    0.8296          0.83          0.8667         0.78   0.8211          0.8000         0.88   0.8381  2595.593054        45
+

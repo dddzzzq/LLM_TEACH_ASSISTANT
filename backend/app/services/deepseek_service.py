@@ -15,9 +15,11 @@ class DeepSeekService:
             "Content-Type": "application/json",
         }
 
-
-    def _call_api(self, user_prompt: str, system_prompt: str) -> str:
-        """一个通用的、私有的API调用方法，增加自动重试和对不完整/无效JSON响应、多种编码格式的安全处理。"""
+    def _call_api_with_usage(self, user_prompt: str, system_prompt: str) -> Optional[Dict]:
+        """
+        一个通用的、私有的API调用方法，返回完整的API响应体（包含usage）。
+        增加自动重试和对不完整/无效JSON响应、多种编码格式的安全处理。
+        """
         payload = {
             "model": "deepseek-chat",
             "messages": [
@@ -28,13 +30,14 @@ class DeepSeekService:
         
         max_retries = 3
         backoff_factor = 2
-        response = None # 将response初始化为None
+        response = None
 
         for attempt in range(max_retries):
             try:
                 response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
                 response.raise_for_status() 
                 
+                # 强制UTF-8编码
                 if response.encoding is None or response.encoding.lower() == 'iso-8859-1':
                     response.encoding = 'utf-8'
                 
@@ -43,23 +46,11 @@ class DeepSeekService:
                 if not response_text.strip():
                     raise ValueError("API返回了空响应内容")
 
-                data = json.loads(response_text)
-                
-                choices = data.get('choices')
-                if choices and isinstance(choices, list) and len(choices) > 0:
-                    message = choices[0].get('message')
-                    if message and isinstance(message, dict):
-                        content = message.get('content')
-                        if content and isinstance(content, str):
-                            return content
-
-                print(f"警告: LLM API返回了不完整的JSON数据: {data}")
-                raise ValueError("Incomplete JSON data from API")
+                # 直接返回解析后的完整JSON数据
+                return json.loads(response_text)
 
             except (requests.exceptions.RequestException, ValueError, json.JSONDecodeError) as e:
-                # 新增诊断代码，判断编码哪里出问题
                 if response is not None:
-                    # 打印出导致错误的原始响应内容
                     print("========================= DEBUG INFO =========================")
                     print(f"原始响应状态码 (Status Code): {response.status_code}")
                     print(f"原始响应内容 (Raw Response Text): '{response.text}'")
@@ -73,20 +64,22 @@ class DeepSeekService:
                     time.sleep(wait_time)
                 else:
                     print("调用DeepSeek API失败，已达到最大重试次数。")
-                    raise
+                    # 返回None而不是抛出异常，让调用方处理
+                    return None
+        return None
 
-        raise Exception("调用API后未能获取有效内容，且未触发异常")
-    # def _call_api(self, user_prompt: str, system_prompt: str) -> str:
-    #     """一个通用的、私有的API调用方法。"""
-    #     payload = {"model": "deepseek-chat", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]}
-    #     try:
-    #         response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
-    #         response.raise_for_status()
-    #         return response.json()['choices'][0]['message']['content']
-    #     except Exception as e:
-    #         print(f"调用DeepSeek API时出错: {e}")
-    #         raise
-
+    def _call_api(self, user_prompt: str, system_prompt: str) -> str:
+        """一个通用的、私有的API调用方法，增加自动重试和对不完整/无效JSON响应、多种编码格式的安全处理。"""
+        full_response = self._call_api_with_usage(user_prompt, system_prompt)
+        
+        if full_response:
+            try:
+                return full_response['choices'][0]['message']['content']
+            except (KeyError, IndexError):
+                print(f"警告: LLM API返回了不完整的JSON数据: {full_response}")
+                return None
+        return None
+    
 #     def analyze_plagiarism(self, text1: str, student1_id: str, text2: str, student2_id: str) -> Optional[LLMAnalysis]:
 #         """调用LLM来深度分析两个文本的相似性，即查重检测"""
 #         text1 = json.dumps(text1[:20000])
@@ -267,16 +260,46 @@ class DeepSeekService:
         elif content_type == 'code':
             user_prompt = self._get_code_plagiarism_prompt(content1, content2)
         else:
-            return None
+            # 确保在任何情况下都返回正确的元组格式
+            return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+        # 默认的usage信息，以防API调用失败
+        usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        analysis_result = None
+
+        # try:
+        #     response_str = self._call_api(user_prompt, system_prompt)
+        #     json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
+        #     if json_match:
+        #         return json.loads(json_match.group(0))
+        # except Exception as e:
+        #     print(f"LLM抄袭分析时出错: {e}")
+        # return None
         try:
-            response_str = self._call_api(user_prompt, system_prompt)
-            json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
+            # 调用能返回完整响应（包括usage）的新方法
+            full_response = self._call_api_with_usage(user_prompt, system_prompt)
+            
+            if full_response:
+                # 提取 content 和 usage
+                response_str = full_response.get('choices', [{}])[0].get('message', {}).get('content')
+                usage_data = full_response.get('usage', {})
+                
+                # 更新usage信息
+                usage_info = {
+                    "prompt_tokens": usage_data.get("prompt_tokens", 0),
+                    "completion_tokens": usage_data.get("completion_tokens", 0),
+                    "total_tokens": usage_data.get("total_tokens", 0)
+                }
+
+                if response_str:
+                    json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
+                    if json_match:
+                        analysis_result = json.loads(json_match.group(0))
+
         except Exception as e:
             print(f"LLM抄袭分析时出错: {e}")
-        return None
+        
+        return analysis_result, usage_info
     
 #   def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_report: Optional[PlagiarismReport] = None, aigc_report: Optional[AIGCReport] = None) -> dict:
 #         """调用DeepSeek API来批改作业，现在可以接收查重报告和AIGC检测报告作为参考。"""
@@ -389,7 +412,7 @@ class DeepSeekService:
         {plagiarism_context}
         {aigc_context}
         [学生提交内容]
-        {json.dumps(student_answer[:20000])}
+        {json.dumps(student_answer[:50000])}
         ---
         请严格按照以下JSON格式提供你的最终评估:
         {{

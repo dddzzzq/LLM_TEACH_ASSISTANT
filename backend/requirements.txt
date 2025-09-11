@@ -23,3 +23,6 @@ aiosqlite # 对sqlite的异步处理
 
 # 查重检测
 scikit-learn
+
+# 画图
+matplotlib
