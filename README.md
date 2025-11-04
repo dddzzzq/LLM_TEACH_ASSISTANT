@@ -38,7 +38,7 @@ HTTP客户端: Axios
 大语言模型: DeepSeek API (可替换)
 
 # 快速开始
-1. 环境准备
+## 1. 环境准备
 
 Python: 版本 3.8 或更高。
 
@@ -52,37 +52,19 @@ macOS: brew install unrar
 
 Linux (Ubuntu/Debian): sudo apt-get install unrar
 
-2. 后端配置与启动
-## 1. 进入后端项目目录 (例如: backend/)
-cd path/to/your/backend
+## 2. 后端配置与启动
 
-## 2. (推荐) 创建并激活Python虚拟环境
-conda create -n assistant python=3.11.13
+1. 安装所有python依赖库
+2. 配置API密钥
+3. 启动后端服务器
+   1. `uvicorn app.main:app --reload`
 
-## 3. 安装所有Python依赖库
-pip install -r requirements.txt(可使用镜像源加速-i + 镜像地址)
+## 3. 前端配置与启动
 
-## 4. 配置API密钥
-##    - 将 .env.example 文件复制并重命名为 .env
-##    - 在 .env 文件中填入您的DEEPSEEK_API_KEY
-##     DEEPSEEK_API_KEY="your_deepseek_api_key_here"
-
-## 5. 启动后端服务器
-uvicorn app.main:app --reload
-
-后端服务现在应该运行在 http://127.0.0.1:8000。第一次启动时，它会自动在项目根目录下创建一个grading_system.db数据库文件。
-
-3. 前端配置与启动
-## 1. 进入前端项目目录 (例如: vue-grading-frontend/)
-cd path/to/your/frontend
-
-## 2. 安装所有Node.js依赖库
-npm install
-
-## 3. 启动前端开发服务器
-npm run dev
-
-前端应用现在应该运行在 http://localhost:5173 (或命令行提示的其他端口)。在浏览器中打开此地址即可开始使用。
+1. 安装所有Node.js依赖库
+   1. `npm install`
+2. 启动前端开发服务器
+   1. `npm run dev`
 
 # 使用流程
 启动服务: 确保后端和前端服务都已成功启动。
