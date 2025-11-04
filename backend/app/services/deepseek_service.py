@@ -1,14 +1,15 @@
 import re
 import json
 import time
+import os
 import requests
 from ..core.config import settings
-from typing import List, Optional, Dict
-from ..schemas.models import PlagiarismReport, AIGCReport
+from typing import List, Optional, Dict, Tuple
+from ..schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport
 
 class DeepSeekService:
     def __init__(self):
-        self.api_key = settings.DEEPSEEK_API_KEY
+        self.api_key = os.environ.get("DEEPSEEK_API_KEY")
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -301,6 +302,70 @@ class DeepSeekService:
         
         return analysis_result, usage_info
     
+    def analyze_code_doc_match(self, code_content: str, doc_content: str) -> Tuple[Optional[Dict], Dict]:
+        """调用LLM来评估代码和文档的匹配度。"""
+        system_prompt = "你是一位经验丰富的计算机科学课程助教。你的输出必须是一个单一、有效的JSON对象，不能包含任何其他内容。"
+        
+        user_prompt = f"""
+        你是一位经验丰富的计算机科学课程助教，你的任务是评估学生提交的作业中，代码和项目文档之间的一致性和匹配程度。但是可能存在上下文限制，请你适当给出分数。
+
+        ---
+        【项目代码】
+        ```
+        {json.dumps(code_content[:30000], ensure_ascii=False)}
+        ```
+
+        ---
+        【项目文档】
+        ```text
+        {json.dumps(doc_content[:25000], ensure_ascii=False)}
+        ```
+
+        请基于上面提供的【项目代码】和【项目文档】，进行综合评估，并遵循以下要求：
+
+        1.  **评估维度**：
+            * **完整性**：文档是否覆盖了代码中的主要功能、模块和核心逻辑？
+            * **准确性**：文档的描述是否准确地反映了代码的实际功能和实现方式？
+            * **清晰度**：文档的语言是否清晰易懂，有助于理解代码？
+
+        2.  **评分标准**：
+            * 请给出一个0到100的匹配度总分。
+            * 90-100分：完美匹配，文档详尽、准确、清晰。
+            * 70-89分：良好匹配，大部分功能有描述，但有少量遗漏或不准确之处。
+            * 50-69分：基本匹配，文档只描述了部分核心功能，或存在明显与代码不符之处。
+            * 0-49分：严重不匹配，文档内容空洞、错误，或与代码完全脱节。
+
+        3.  **输出格式**：
+        请严格按照以下JSON格式返回你的分析报告:
+        {{
+          "score": <number>,
+          "reasoning": "<string>",
+        }}
+            * `score` 字段为0-100的整数。
+            * `reasoning` 字段为一段不超过100字的简短评语，总结你的评估依据。
+        """
+
+        usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        analysis_result = None
+        try:
+            full_response = self._call_api_with_usage(user_prompt, system_prompt)
+            if full_response:
+                response_str = full_response.get('choices', [{}])[0].get('message', {}).get('content')
+                usage_data = full_response.get('usage', {})
+                usage_info = {
+                    "prompt_tokens": usage_data.get("prompt_tokens", 0),
+                    "completion_tokens": usage_data.get("completion_tokens", 0),
+                    "total_tokens": usage_data.get("total_tokens", 0)
+                }
+                if response_str:
+                    json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
+                    if json_match:
+                        analysis_result = json.loads(json_match.group(0))
+        except Exception as e:
+            print(f"LLM代码-文档匹配度分析时出错: {e}")
+
+        return analysis_result, usage_info
+    
 #   def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_report: Optional[PlagiarismReport] = None, aigc_report: Optional[AIGCReport] = None) -> dict:
 #         """调用DeepSeek API来批改作业，现在可以接收查重报告和AIGC检测报告作为参考。"""
 #         MAX_CHARS = 40000 
@@ -376,7 +441,7 @@ class DeepSeekService:
 
 # deepseek_service = DeepSeekService()
 
-    def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_reports: List[PlagiarismReport] = [], aigc_report: Optional[AIGCReport] = None) -> dict:
+    def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_reports: List[PlagiarismReport] = [], aigc_report: Optional[AIGCReport] = None, code_doc_match_report: Optional[CodeDocMatchReport] = None) -> dict:
         plagiarism_context = ""
         if plagiarism_reports:
             highest_plagiarism_score = 0
@@ -398,10 +463,21 @@ class DeepSeekService:
         if aigc_report and aigc_report.ai_probability > 0.8:
             aigc_context = f"""
             [AIGC内容警报]:
-            检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability:.1f}% 的可能性由AI生成。
+            检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability * 100:.1f}% 的可能性由AI生成。
             ---
             """
         
+        # 新增匹配报告
+        match_context = ""
+        if code_doc_match_report and code_doc_match_report.score < 70:
+            match_context = f"""
+            [代码-文档不匹配警报]:
+            AI分析发现，代码与文档的匹配度较低（{code_doc_match_report.score}/100分）。
+            理由: {code_doc_match_report.reasoning}
+            这可能表明学生未认真撰写文档，请在评分时予以考虑。
+            ---
+            """
+
         system_prompt = "你是一位一丝不苟的大学教授AI。你的输出必须是一个单一、有效的JSON对象。"
         user_prompt = f"""
         请为学生的项目评分。
@@ -411,6 +487,7 @@ class DeepSeekService:
         ---
         {plagiarism_context}
         {aigc_context}
+        {match_context}
         [学生提交内容]
         {json.dumps(student_answer[:50000])}
         ---
@@ -425,11 +502,13 @@ class DeepSeekService:
         """
         try:
             response_str = self._call_api(user_prompt, system_prompt)
-            json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
-        except Exception:
-            pass
+            if response_str:
+                json_match = re.search(r'\{.*\}', response_str, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(0))
+        except Exception as e:
+            print(f"评分时发生错误: {e}")
+
         return {"total_score": -1, "overall_feedback": "AI评分服务出错", "score_details": []}
 
 deepseek_service = DeepSeekService()

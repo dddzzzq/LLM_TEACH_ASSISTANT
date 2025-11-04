@@ -3,8 +3,6 @@ from pydantic_settings import BaseSettings
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
-# 定义项目根目录的路径 (config.py往上两级)
-# backend/app/core/config.py -> backend/ -> ai_grading_assistant/
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # 定义属于我们项目的基础设置，包括项目名称、API路径、数据库URL和DeepSeek API密钥

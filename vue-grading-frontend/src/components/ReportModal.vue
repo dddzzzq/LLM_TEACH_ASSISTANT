@@ -34,13 +34,10 @@
         </p>
       </div>
 
-      <!-- 修改抄袭检测报告的形式  -->
       <div v-if="reportType === 'plagiarism'">
         <h2 class="text-2xl font-bold text-gray-800 mb-4">抄袭检测详细报告</h2>
         <div
-          v-if="
-            !submission.plagiarism_reports || submission.plagiarism_reports.length === 0
-          "
+          v-if="!submission.plagiarism_reports || submission.plagiarism_reports.length === 0"
         >
           <p class="text-gray-600">未发现与该学生相关的可疑抄袭记录。</p>
         </div>
@@ -54,7 +51,7 @@
               与 {{ report.similar_to }} 的
               {{ report.content_type === "code" ? "代码" : "文本" }} 相似度分析
             </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div class="p-3 bg-gray-50 rounded">
                 <p class="text-sm text-gray-500">初步语义相似度</p>
                 <p class="text-xl font-bold">
@@ -67,11 +64,26 @@
                   {{ report.llm_analysis.similarity_score }} / 100
                 </p>
               </div>
+               <!-- +++ 新增代码/文档匹配度得分展示 +++ -->
+              <div class="p-3 bg-gray-50 rounded" v-if="submission.code_doc_match_report">
+                <p class="text-sm text-gray-500">代码/文档匹配度</p>
+                <p class="text-xl font-bold" :class="getCodeDocMatchColor(submission.code_doc_match_report)">
+                  {{ submission.code_doc_match_report.score }} / 100
+                </p>
+              </div>
             </div>
+
             <div class="mt-4">
               <h4 class="font-semibold text-gray-700">AI 分析理由:</h4>
               <p class="mt-1 p-3 bg-blue-50 text-gray-700 rounded-md whitespace-pre-wrap">
                 {{ report.llm_analysis.reasoning }}
+              </p>
+            </div>
+             <!-- +++ 新增代码/文档匹配度理由展示 +++ -->
+            <div class="mt-4" v-if="submission.code_doc_match_report">
+              <h4 class="font-semibold text-gray-700">代码/文档匹配度分析理由:</h4>
+              <p class="mt-1 p-3 bg-yellow-50 text-gray-700 rounded-md whitespace-pre-wrap">
+                {{ submission.code_doc_match_report.reasoning }}
               </p>
             </div>
             <div
@@ -136,5 +148,13 @@ const getReportHeaderClass = (report) => {
   if (report.llm_analysis && report.llm_analysis.similarity_score > 70)
     return "text-yellow-600";
   return "text-gray-800";
+};
+
+// +++ 新增辅助函数 +++
+const getCodeDocMatchColor = (report) => {
+  if (!report) return "text-gray-400";
+  if (report.score < 50) return "text-red-600";
+  if (report.score < 70) return "text-yellow-600";
+  return "text-green-600";
 };
 </script>

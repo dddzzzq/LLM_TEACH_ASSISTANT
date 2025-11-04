@@ -26,3 +26,6 @@ scikit-learn
 
 # 画图
 matplotlib
+
+# OCR识别
+paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/

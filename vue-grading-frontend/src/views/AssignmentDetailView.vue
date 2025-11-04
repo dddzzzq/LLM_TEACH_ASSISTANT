@@ -115,6 +115,12 @@
                 >
                   AIGC检测
                 </th>
+                <!-- +++ 新增列 +++ -->
+                <th
+                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
+                >
+                  代码/文档匹配度
+                </th>
                 <th
                   class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
                 >
@@ -128,7 +134,7 @@
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-              <tr v-for="(result, index) in sortedResults" :key="result.id">
+              <tr v-for="result in sortedResults" :key="result.id">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                   <div class="flex items-center">
                     <span>{{ result.student_id }}</span>
@@ -180,6 +186,14 @@
                   :class="getAIGCColor(result.aigc_report)"
                 >
                   {{ formatAIGC(result.aigc_report) }}
+                </td>
+                <!-- +++ 新增列的渲染逻辑 +++ -->
+                <td
+                  class="px-6 py-4 whitespace-nowrap text-sm font-semibold"
+                  :class="getCodeDocMatchColor(result.code_doc_match_report)"
+                  :title="result.code_doc_match_report?.reasoning"
+                >
+                  {{ formatCodeDocMatch(result.code_doc_match_report) }}
                 </td>
                 <td
                   class="px-6 py-4 text-sm text-gray-500 whitespace-normal truncate max-w-xs"
@@ -279,6 +293,10 @@ import ReportModal from "../components/ReportModal.vue";
 import ReviewModal from "../components/ReviewModal.vue";
 
 // --- 接口 ---
+interface CodeDocMatchReport {
+  score: number;
+  reasoning: string;
+}
 interface AIGCReport {
   predicted_label: string;
   confidence: number;
@@ -303,6 +321,7 @@ interface SubmissionResult {
   feedback: string;
   plagiarism_reports: PlagiarismReport[];
   aigc_report?: AIGCReport;
+  code_doc_match_report?: CodeDocMatchReport;
   is_human_reviewed: boolean;
   human_feedback?: string;
   human_score?: number;
@@ -332,9 +351,8 @@ const submissionError = ref(false);
 const reportType = ref("feedback");
 const isReviewModalVisible = ref(false);
 const submissionToReview = ref<SubmissionResult | null>(null);
-const isExporting = ref(false);  // 导出按钮
+const isExporting = ref(false);
 
-// 将结果导出excel
 const exportResults = async () => {
   if (results.value.length === 0) {
     alert("没有可导出的评分结果");
@@ -345,38 +363,35 @@ const exportResults = async () => {
     const response = await gradingApi.exportAssignment(props.id);
     const blob = new Blob([response.data], { type: response.headers['content-type'] });
 
-            // 从 Content-Disposition 头中提取文件名
-        const contentDisposition = response.headers['content-disposition'];
-        let filename = `${assignment.value?.task_name || 'assignment'}_results.xlsx`; // 默认文件名
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-            if (filenameMatch && filenameMatch.length > 1) {
-                filename = decodeURIComponent(filenameMatch[1]);
-            }
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = `${assignment.value?.task_name || 'assignment'}_results.xlsx`;
+    if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch && filenameMatch.length > 1) {
+            filename = decodeURIComponent(filenameMatch[1].replace(/['"]/g, ''));
         }
-
-        // 创建一个隐藏的a标签来触发下载
-        const link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(link.href);
-
-    } catch (e: any) {
-        if (e.response && e.response.status === 404) {
-             alert("导出失败: 该作业没有任何评分结果。");
-        } else {
-             alert("导出失败，请检查网络或联系管理员。");
-        }
-        console.error("导出时发生错误:", e);
-    } finally {
-        isExporting.value = false;
     }
+
+    const link = document.createElement('a');
+    link.href = window.URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(link.href);
+
+  } catch (e: any) {
+    if (e.response && e.response.status === 404) {
+         alert("导出失败: 该作业没有任何评分结果。");
+    } else {
+         alert("导出失败，请检查网络或联系管理员。");
+    }
+    console.error("导出时发生错误:", e);
+  } finally {
+    isExporting.value = false;
+  }
 };
 
-// sort the details
 const sortedResults = computed(() => {
   return [...results.value].sort((a, b) => {
     const scoreA = typeof a.human_score === 'number' ? a.human_score : a.score;
@@ -385,7 +400,6 @@ const sortedResults = computed(() => {
   });
 });
 
-// --- API Methods ---
 const fetchAssignmentDetails = async () => {
   isLoadingAssignment.value = true;
   try {
@@ -399,6 +413,7 @@ const fetchAssignmentDetails = async () => {
     isLoadingAssignment.value = false;
   }
 };
+
 const fetchResults = async () => {
   isLoadingResults.value = true;
   try {
@@ -410,6 +425,7 @@ const fetchResults = async () => {
     isLoadingResults.value = false;
   }
 };
+
 const submitBatchFile = async () => {
   if (!file.value) return;
   isSubmitting.value = true;
@@ -432,17 +448,12 @@ const submitBatchFile = async () => {
 };
 
 const deleteSingleResult = async (submissionId: number) => {
-  // 1. 使用 submissionId 从原始数组中查找要删除的对象
   const resultToDelete = results.value.find(r => r.id === submissionId);
   if (!resultToDelete) return;
-
-  // 2. 在确认对话框中显示正确的学生ID
   if (confirm(`确定要删除学生 ${resultToDelete.student_id} 的评分记录吗？`)) {
     try {
       await gradingApi.deleteSubmission(submissionId);
-      
       results.value = results.value.filter(r => r.id !== submissionId);
-
     } catch (e) {
       alert("删除失败，请重试。");
       console.error(e);
@@ -462,7 +473,6 @@ const deleteAllResults = async () => {
   }
 };
 
-// --- 界面逻辑 ---
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const selectedFile = target.files?.[0];
@@ -473,15 +483,7 @@ const handleFileChange = (event: Event) => {
 };
 
 const showReport = (submission: SubmissionResult, type: string) => {
-  if (type === "plagiarism") {
-    const submissionCopy = JSON.parse(JSON.stringify(submission));
-    submissionCopy.plagiarism_reports = submissionCopy.plagiarism_reports.filter(
-      (report: PlagiarismReport) => (report.llm_analysis?.similarity_score || 0) >= 90
-    );
-    selectedSubmission.value = submissionCopy;
-  } else {
-    selectedSubmission.value = submission;
-  }
+  selectedSubmission.value = submission;
   reportType.value = type;
   isModalVisible.value = true;
 };
@@ -493,7 +495,7 @@ const openReviewModal = (submission: SubmissionResult) => {
 
 const handleSaveReview = async (updatedData: {
   id: number;
-  human_score: number;
+  score: number;
   human_feedback: string;
 }) => {
   try {
@@ -518,35 +520,33 @@ const getScoreColor = (score: number) => {
   return "text-red-600";
 };
 
-// --- 辅助函数 ---
 const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
   if (!reports || reports.length === 0) return 0;
   return Math.max(0, ...reports.map((r) => r.llm_analysis?.similarity_score || 0));
 };
 
 const hasHighRiskPlagiarism = (reports?: PlagiarismReport[]): boolean => {
-  return getMaxLlmScore(reports) > 95;
+    if (!reports) return false;
+    return reports.some(r => (r.llm_analysis?.similarity_score || 0) > 85);
 };
 
 const formatPlagiarismSummary = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
-  if (maxScore > 95) {
-    return `高度疑似 (${maxScore}分)`;
-  }
-  return "不存在抄袭风险";
+  if (maxScore > 85) return `高度疑似 (${maxScore}分)`;
+  if (maxScore > 70) return `中度疑似 (${maxScore}分)`;
+  return "无风险";
 };
 
 const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
-  if (maxScore >= 90) {
-    return "text-red-600";
-  }
+  if (maxScore > 85) return "text-red-600";
+  if (maxScore > 70) return "text-yellow-600";
   return "text-green-600";
 };
 
 const formatAIGC = (report?: AIGCReport): string => {
   if (!report) return "未检测";
-  const probability = (report.ai_probability).toFixed(1);
+  const probability = (report.ai_probability * 100).toFixed(1);
   const source = report.detection_source ? ` (${report.detection_source})` : "";
   return `${probability}% AI生成${source}`;
 };
@@ -555,6 +555,19 @@ const getAIGCColor = (report?: AIGCReport): string => {
   if (!report) return "text-gray-400";
   if (report.ai_probability > 0.8) return "text-red-600";
   if (report.ai_probability > 0.5) return "text-yellow-600";
+  return "text-green-600";
+};
+
+// +++ 新增辅助函数 +++
+const formatCodeDocMatch = (report?: CodeDocMatchReport): string => {
+  if (!report) return "未检测";
+  return `${report.score}分`;
+};
+
+const getCodeDocMatchColor = (report?: CodeDocMatchReport): string => {
+  if (!report) return "text-gray-400";
+  if (report.score < 50) return "text-red-600";
+  if (report.score < 70) return "text-yellow-600";
   return "text-green-600";
 };
 

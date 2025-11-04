@@ -322,40 +322,99 @@ def run_dual_model_no_llm(plagiarism_service: PlagiarismService, submissions: Di
 #             predictions.add(tuple(sorted((s1, s2))))
 #     return predictions, llm_calls, prompt_tokens, completion_tokens
 
-def run_our_system(plagiarism_service: PlagiarismService, deepseek_service: DeepSeekService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], llm_threshold: int = 75) -> Tuple[Set[Tuple[str, str]], int, int, int]:
-    print("Running Our System: Two-Stage Hybrid Model...")
+# def run_our_system(plagiarism_service: PlagiarismService, deepseek_service: DeepSeekService, submissions: Dict[str, str], all_possible_pairs: Set[Tuple[str, str]], llm_threshold: int = 75) -> Tuple[Set[Tuple[str, str]], int, int, int]:
+#     print("Running Our System: Two-Stage Hybrid Model...")
 
-    # ==================== 代码修改部分 ====================
-    # 1. 从 all_possible_pairs 提取出所有需要参与比对的独立 submission ID
-    print(f"Optimizing Stage 1: Analyzing {len(all_possible_pairs)} submissions")
+#     # ==================== 代码修改部分 ====================
+#     # 1. 从 all_possible_pairs 提取出所有需要参与比对的独立 submission ID
+#     print(f"Optimizing Stage 1: Analyzing {len(all_possible_pairs)} submissions")
 
-    # 3. 在第一阶段的查重中，只使用这个精简后的字典
-    stage1_results = plagiarism_service.check_plagiarism_in_batch(submissions)
-    # =======================================================
+#     # 3. 在第一阶段的查重中，只使用这个精简后的字典
+#     stage1_results = plagiarism_service.check_plagiarism_in_batch(all_possible_pairs)
+#     # =======================================================
     
-    suspicious_pairs_info = {}
-    for s1, s2, score in stage1_results["suspicious_text_pairs"]:
-        suspicious_pairs_info[tuple(sorted((s1, s2)))] = {'type': 'text', 'score': score}
-    for s1, s2, score in stage1_results["suspicious_code_pairs"]:
-        pair = tuple(sorted((s1, s2)))
-        if pair not in suspicious_pairs_info or score > suspicious_pairs_info[pair]['score']:
-            suspicious_pairs_info[pair] = {'type': 'code', 'score': score}
+#     suspicious_pairs_info = {}
+#     for s1, s2, score in stage1_results["suspicious_text_pairs"]:
+#         suspicious_pairs_info[tuple(sorted((s1, s2)))] = {'type': 'text', 'score': score}
+#     for s1, s2, score in stage1_results["suspicious_code_pairs"]:
+#         pair = tuple(sorted((s1, s2)))
+#         if pair not in suspicious_pairs_info or score > suspicious_pairs_info[pair]['score']:
+#             suspicious_pairs_info[pair] = {'type': 'code', 'score': score}
             
-    # 这里的 valid_suspicious_pairs 逻辑保持不变，它会自然地过滤出属于 all_possible_pairs 的可疑对
-    valid_suspicious_pairs = {k for k in suspicious_pairs_info if k in all_possible_pairs}
+#     # 这里的 valid_suspicious_pairs 逻辑保持不变，它会自然地过滤出属于 all_possible_pairs 的可疑对
+#     valid_suspicious_pairs = {k for k in suspicious_pairs_info if k in all_possible_pairs}
     
+#     llm_calls, prompt_tokens, completion_tokens = 0, 0, 0
+#     predictions = set()
+    
+#     # separated_contents 也是从精简后的 pair_submissions 中获取的，因此这里的 separated 变量名改为 stage1_results["separated_contents"] 
+#     separated = stage1_results["separated_contents"]
+#     for s1, s2 in tqdm(valid_suspicious_pairs, desc="Running Our System (LLM Analysis)"):
+#         info = suspicious_pairs_info[tuple(sorted((s1, s2)))]
+#         c_type = info['type']
+#         content1, content2 = separated.get(s1, {}).get(c_type, ""), separated.get(s2, {}).get(c_type, "")
+#         if not content1 or not content2: continue
+        
+#         llm_analysis, usage = deepseek_service.analyze_plagiarism(content1, content2, c_type)
+#         llm_calls += 1
+#         prompt_tokens += usage.get("prompt_tokens", 0)
+#         completion_tokens += usage.get("completion_tokens", 0)
+        
+#         if llm_analysis and llm_analysis.get("similarity_score", 0) >= llm_threshold:
+#             predictions.add(tuple(sorted((s1, s2))))
+            
+#     return predictions, llm_calls, prompt_tokens, completion_tokens
+def run_our_system_with_single_model_stage1(
+    plagiarism_service: PlagiarismService, 
+    deepseek_service: DeepSeekService, 
+    submissions: Dict[str, str], 
+    all_possible_pairs: Set[Tuple[str, str]], 
+    model_type: str,
+    threshold: float, 
+    llm_threshold: int = 74
+) -> Tuple[Set[Tuple[str, str]], int, int, int]:
+    """
+    一个修改版的混合模型，第一阶段使用快速的单一模型矩阵计算方法进行筛选。
+    此版本接受 model_type 参数来选择使用哪个模型。
+    """
+    model_name = "UniXcoder" if model_type == 'code' else "BERT"
+    print(f"Running Modified System: Fast {model_name} Stage 1 + LLM Stage 2...")
+    
+    # --- STAGE 1: 快速筛选，逻辑同 run_baseline_single_model ---
+    print(f"Stage 1: Generating all embeddings with {model_name}...")
+    
+    student_ids, contents = list(submissions.keys()), list(submissions.values())
+    id_to_index = {id: i for i, id in enumerate(student_ids)}
+    
+    embeddings = np.vstack([plagiarism_service._get_embedding(c, model_type) for c in tqdm(contents, desc=f"Generating embeddings ({model_name})")])
+    
+    print("Stage 1: Calculating full similarity matrix...")
+    similarity_matrix = cosine_similarity(embeddings)
+    
+    suspicious_pairs = set()
+    print(f"Stage 1: Filtering pairs with threshold > {threshold}...")
+    for file1, file2 in tqdm(all_possible_pairs, desc=f"Filtering pairs ({model_name})"):
+        idx1, idx2 = id_to_index.get(file1), id_to_index.get(file2)
+        if idx1 is not None and idx2 is not None:
+            score = similarity_matrix[idx1, idx2]
+            if score >= threshold:
+                suspicious_pairs.add(tuple(sorted((file1, file2))))
+
+    print(f"Stage 1 completed. Found {len(suspicious_pairs)} suspicious pairs.")
+
+    # --- STAGE 2: LLM 深度分析 ---
     llm_calls, prompt_tokens, completion_tokens = 0, 0, 0
     predictions = set()
     
-    # separated_contents 也是从精简后的 pair_submissions 中获取的，因此这里的 separated 变量名改为 stage1_results["separated_contents"] 
-    separated = stage1_results["separated_contents"]
-    for s1, s2 in tqdm(valid_suspicious_pairs, desc="Running Our System (LLM Analysis)"):
-        info = suspicious_pairs_info[tuple(sorted((s1, s2)))]
-        c_type = info['type']
-        content1, content2 = separated.get(s1, {}).get(c_type, ""), separated.get(s2, {}).get(c_type, "")
-        if not content1 or not content2: continue
+    separated_contents = plagiarism_service._separate_content_for_each_student(submissions)
+
+    for s1, s2 in tqdm(suspicious_pairs, desc="Stage 2: Running LLM Analysis"):
+        content1 = separated_contents.get(s1, {}).get(model_type, submissions.get(s1, ""))
+        content2 = separated_contents.get(s2, {}).get(model_type, submissions.get(s2, ""))
         
-        llm_analysis, usage = deepseek_service.analyze_plagiarism(content1, content2, c_type)
+        if not content1 or not content2: continue
+
+        llm_analysis, usage = deepseek_service.analyze_plagiarism(content1, content2, model_type)
         llm_calls += 1
         prompt_tokens += usage.get("prompt_tokens", 0)
         completion_tokens += usage.get("completion_tokens", 0)
@@ -391,82 +450,104 @@ def main():
     # dataset_names = ['lcqmc', 'pawsx_zh', 'soco_2014', 'mixed_homework_1', 'mixed_homework_2']
     # dataset_names = ['pawsx_zh', 'mixed_homework_1', 'mixed_homework_2']
     # dataset_names = ['lcqmc', 'soco_2014']
+    # dataset_names = ['lcqmc', 'pawsx_zh', 'soco_2014']
     dataset_names = ['pawsx_zh']
-    output_filename = r"D:\DZQ\项目\教改项目-批改Agent\ai_grading_assistant\backend\experiments\experiment_results_test.txt"
+    output_filename = r"D:\DZQ\项目\教改项目-批改Agent\ai_grading_assistant\backend\experiments\experiment_results_test_pawsx_zh.txt"
 
     with open(output_filename, 'w', encoding='utf-8') as f:
         f.write("#################### FINAL EXPERIMENT RESULTS ####################\n\n")
+    # llm_sholds = [70, 72, 74, 76, 78 ,80]
+    llm_sholds = [72]
 
     for dataset_name in dataset_names:
-        llm_shold = 72
-        print(f"\n==================== Running experiment for dataset: {dataset_name} llm_shold: {llm_shold} ====================")
+        print(f"\n==================== Running experiment for dataset: {dataset_name}  ====================")
         
         if dataset_name in ['soco_2014', 'mixed_homework_1', 'mixed_homework_2']:
             submissions, ground_truth, all_possible_pairs = load_dataset(dataset_name, grading_service)
         else:
-            submissions, ground_truth, all_possible_pairs = load_dataset(dataset_name, grading_service, num_positive=2, num_negative=2)
+            submissions, ground_truth, all_possible_pairs = load_dataset(dataset_name, grading_service, num_positive=50, num_negative=50)
         
         if not submissions:
             print(f"数据集 {dataset_name} 为空，跳过此实验。")
             continue
 
-        # if all_possible_pairs is None:
-        #     # student_ids = list(submissions.keys())
-        #     # all_possible_pairs = {tuple(sorted((student_ids[i], student_ids[j]))) for i in range(len(student_ids)) for j in range(i + 1, len(student_ids))}
-        #     all_possible_pairs = ground_truth
+        if dataset_name == 'soco_2014':
+            model_for_hybrid = 'code'
+            threshold_for_hybrid = 0.88 
+        else: # lcqmc, pawsx_zh
+            model_for_hybrid = 'text'
+            threshold_for_hybrid = 0.95
 
-        results = {}
-        experiments = {
-            # "TF-IDF": (run_baseline_tfidf, (dataset_name, submissions, all_possible_pairs, 0.9)),
-            # "Single Model (UniXcoder)": (run_baseline_single_model, (plagiarism_service, submissions, all_possible_pairs, 'code', 0.92)),
-            # "Single Model (BERT)": (run_baseline_single_model, (plagiarism_service, submissions, all_possible_pairs, 'text', 0.90)),
-            # "Dual Model (No LLM)": (run_dual_model_no_llm, (plagiarism_service, submissions, all_possible_pairs)),
-            "Our System (w/ LLM)": (run_our_system, (plagiarism_service, deepseek_service, submissions, all_possible_pairs, llm_shold)),
-            # "Ablation (No Separation w/ LLM)": (run_ablation_no_separation, (plagiarism_service, deepseek_service, submissions, all_possible_pairs, 0.95, llm_shold))
-        }
+        for llm_shold in llm_sholds:
+            print(f"\n==================== Running experiment for dataset: {dataset_name}  llm_shold: {llm_shold}====================")
+            # if all_possible_pairs is None:
+            #     # student_ids = list(submissions.keys())
+            #     # all_possible_pairs = {tuple(sorted((student_ids[i], student_ids[j]))) for i in range(len(student_ids)) for j in range(i + 1, len(student_ids))}
+            #     all_possible_pairs = ground_truth
 
-        for name, (func, args) in experiments.items():
-            start_time = time.time()
-            result = func(*args)
-            end_time = time.time()
-            
-            prompt_tokens, completion_tokens = 0, 0
-            if name in ["Our System (w/ LLM)", "Ablation (No Separation w/ LLM)"]:
-                preds, llm_calls, prompt_tokens, completion_tokens = result
-            else:
-                preds, llm_calls = result, 0
-            
-            results[name] = {
-                'metrics': calculate_metrics(ground_truth, preds, all_possible_pairs),
-                'time (s)': end_time - start_time,
-                'llm_calls': llm_calls,
-                'prompt_tokens': prompt_tokens,
-                'completion_tokens': completion_tokens
+            results = {}
+            experiments = {
+                # "TF-IDF": (run_baseline_tfidf, (dataset_name, submissions, all_possible_pairs, 0.9)),
+                # "Single Model (UniXcoder)": (run_baseline_single_model, (plagiarism_service, submissions, all_possible_pairs, 'code', 0.92)),
+                # "Single Model (BERT)": (run_baseline_single_model, (plagiarism_service, submissions, all_possible_pairs, 'text', 0.88)),
+                # "Dual Model (No LLM)": (run_dual_model_no_llm, (plagiarism_service, submissions, all_possible_pairs)),
+                # "Our System (w/ LLM)": (run_our_system, (plagiarism_service, deepseek_service, submissions, all_possible_pairs, llm_shold)),
+                "Our System": (run_our_system_with_single_model_stage1, (plagiarism_service, deepseek_service, submissions, all_possible_pairs, model_for_hybrid, threshold_for_hybrid, llm_shold))
+                # "Ablation (No Separation w/ LLM)": (run_ablation_no_separation, (plagiarism_service, deepseek_service, submissions, all_possible_pairs, 0.95, llm_shold))
             }
-        
-        df = pd.DataFrame(results).T
-        df_metrics = df['metrics'].apply(pd.Series)
-        df_final = df.drop('metrics', axis=1).join(df_metrics)
 
-        # 跑完一个数据集后立即追加保存结果
-        print(f"\n--- Saving results for: {dataset_name} ---")
-        with open(output_filename, 'a', encoding='utf-8') as f:
-            columns_to_display = [
-                'accuracy', 'f1_macro', 'recall_macro',
-                'precision_plag', 'recall_plag', 'f1_plag', 
-                'precision_orig', 'recall_orig', 'f1_orig',
-                'time (s)', 'llm_calls', 'prompt_tokens', 'completion_tokens'
-            ]
-            df_display = df_final.reindex(columns=columns_to_display).fillna(0)
+            for name, (func, args) in experiments.items():
+                start_time = time.time()
+                result = func(*args)
+                end_time = time.time()
+                
+                # prompt_tokens, completion_tokens = 0, 0
+                # if name in ["Our System (w/ LLM)", "Ablation (No Separation w/ LLM)"]:
+                #     preds, llm_calls, prompt_tokens, completion_tokens = result
+                # else:
+                #     preds, llm_calls = result, 0
+                preds = set()
+                llm_calls, prompt_tokens, completion_tokens = 0, 0, 0
+
+                # Unpack results safely by checking the type
+                if isinstance(result, tuple):
+                    # Handles functions returning a tuple, e.g., (predictions, calls, ...)
+                    preds, llm_calls, prompt_tokens, completion_tokens = result
+                elif isinstance(result, set):
+                    # Handles functions returning only the prediction set
+                    preds = result
+                    
+                results[name] = {
+                    'metrics': calculate_metrics(ground_truth, preds, all_possible_pairs),
+                    'time (s)': end_time - start_time,
+                    'llm_calls': llm_calls,
+                    'prompt_tokens': prompt_tokens,
+                    'completion_tokens': completion_tokens
+                }
             
-            print(f"\n--- Results for: {dataset_name} ---")
-            print(df_display.round(4))
+            df = pd.DataFrame(results).T
+            df_metrics = df['metrics'].apply(pd.Series)
+            df_final = df.drop('metrics', axis=1).join(df_metrics)
+
+            # 跑完一个数据集后立即追加保存结果
+            print(f"\n--- Saving results for: {dataset_name} --- llm_shold: {llm_shold}")
+            with open(output_filename, 'a', encoding='utf-8') as f:
+                columns_to_display = [
+                    'accuracy', 'f1_macro', 'recall_macro',
+                    'precision_plag', 'recall_plag', 'f1_plag', 
+                    'precision_orig', 'recall_orig', 'f1_orig',
+                    'time (s)', 'llm_calls', 'prompt_tokens', 'completion_tokens'
+                ]
+                df_display = df_final.reindex(columns=columns_to_display).fillna(0)
+                
+                print(f"\n--- Results for: {dataset_name} ---")
+                print(df_display.round(4))
+                
+                f.write(f"--- Results for: {dataset_name} ---\n")
+                f.write(df_display.round(4).to_string())
+                f.write("\n\n")
             
-            f.write(f"--- Results for: {dataset_name} ---\n")
-            f.write(df_display.round(4).to_string())
-            f.write("\n\n")
-        
-        print(f"Results for {dataset_name} have been appended to {output_filename}")
+            print(f"Results for {dataset_name} have been appended to {output_filename}")
 
     print(f"\n实验全部完成。最终结果已保存到文件: {output_filename}")
 

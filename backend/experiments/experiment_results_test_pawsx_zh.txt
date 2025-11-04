@@ -1,0 +1,6 @@
+#################### FINAL EXPERIMENT RESULTS ####################
+
+--- Results for: pawsx_zh ---
+            accuracy  f1_macro  recall_macro  precision_plag  recall_plag  f1_plag  precision_orig  recall_orig  f1_orig  time (s)  llm_calls  prompt_tokens  completion_tokens
+Our System      0.49    0.4895          0.49          0.4906         0.52   0.5049          0.4894         0.46   0.4742  586.8634         54          15980              11714
+

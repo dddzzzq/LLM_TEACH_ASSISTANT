@@ -68,9 +68,12 @@ async def create_submission(db: AsyncSession, submission: schemas.SubmissionCrea
         feedback=submission.feedback,
         merged_content=submission.merged_content,
         assignment_id=submission.assignment_id,
-        plagiarism_reports=submission.plagiarism_reports,  # 修改提交的参数，抄袭检测报告是一个list
+        plagiarism_reports=submission.plagiarism_reports,
         aigc_report=submission.aigc_report,
-        is_human_reviewed=False # 新建时默认为未复查
+        code_doc_match_report=submission.code_doc_match_report,
+        is_human_reviewed=submission.is_human_reviewed,
+        human_feedback=submission.human_feedback,
+        human_score=submission.human_score
     )
     db.add(db_submission)
     await db.commit()

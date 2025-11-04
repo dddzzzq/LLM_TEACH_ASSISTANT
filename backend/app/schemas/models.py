@@ -43,6 +43,12 @@ class PlagiarismReport(BaseModel):
     content_type: str = Field(description="内容类型: 'text' 或 'code'")
     llm_analysis: Optional[LLMPlagiarismAnalysis] = None
 
+# 新增代码文档匹配得分
+# +++ 新增代码与文档匹配度报告模型 +++
+class CodeDocMatchReport(BaseModel):
+    score: int = Field(description="LLM给出的0-100的匹配度分数")
+    reasoning: str = Field(description="LLM给出的详细分析理由")
+
 
 # --- 提交记录模型 ---
 class SubmissionBase(BaseModel):
@@ -54,6 +60,7 @@ class SubmissionBase(BaseModel):
     is_human_reviewed: bool     # 新增字段：是否人工复查
     human_feedback: Optional[str] = None    # 新增字段：教师评语
     human_score: Optional[float] = None # <-- 修改这里，允许为None      # 新增字段：教师评分
+    code_doc_match_report: Optional[CodeDocMatchReport] = None  # 新增代码文档匹配报告
 
 
 class SubmissionCreate(SubmissionBase):

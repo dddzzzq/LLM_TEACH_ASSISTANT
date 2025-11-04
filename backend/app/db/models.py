@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 import json
 from .database import Base
-from ..schemas.models import PlagiarismReport, AIGCReport # 引入aigc检测模型模块
+from ..schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport# 引入aigc检测模型模块，代码文档匹配度得分
 from typing import List, Optional, Dict
 
 # 数据库中主要有两个数据模型，一是任务/作业模型，二是提交记录模型
@@ -34,6 +34,8 @@ class Submission(Base):
     _aigc_report_json = Column("aigc_report", Text, nullable=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"))
     assignment = relationship("Assignment", back_populates="submissions")
+    # 新增代码文档匹配得分
+    _code_doc_match_report_json = Column("code_doc_match_report", Text, nullable=True)
     # 新增教师复查功能
     is_human_reviewed = Column(Boolean, default=False, nullable=False)
     human_feedback = Column(Text, nullable=True) # 存储教师的最终评语
@@ -43,7 +45,9 @@ class Submission(Base):
     def plagiarism_reports(self):
         if self._plagiarism_reports_json is None:
             return []
-        return json.loads(self._plagiarism_reports_json)
+        reports = json.loads(self._plagiarism_reports_json)
+        # 兼容旧数据格式
+        return [PlagiarismReport.model_validate(r) for r in reports]
 
     @plagiarism_reports.setter
     def plagiarism_reports(self, value: Optional[List[Dict]]):   # 修改为报告列表
@@ -52,6 +56,23 @@ class Submission(Base):
         else:
             reports_as_dicts = [report.model_dump(by_alias=True) for report in value]
             self._plagiarism_reports_json = json.dumps(reports_as_dicts, ensure_ascii=False)
+
+    # 新增代码和文档匹配得分属性
+    @property
+    def code_doc_match_report(self) -> Optional[CodeDocMatchReport]:
+        if self._code_doc_match_report_json is None:
+            return None
+        try:
+            return CodeDocMatchReport.model_validate(json.loads(self._code_doc_match_report_json))
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @code_doc_match_report.setter
+    def code_doc_match_report(self, value: Optional[CodeDocMatchReport]):
+        if value is None:
+            self._code_doc_match_report_json = None
+        else:
+            self._code_doc_match_report_json = value.model_dump_json() if hasattr(value, 'model_dump_json') else value.json()
 
     @property
     def aigc_report(self):
