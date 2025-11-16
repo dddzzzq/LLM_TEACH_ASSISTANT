@@ -37,7 +37,9 @@
       <div v-if="reportType === 'plagiarism'">
         <h2 class="text-2xl font-bold text-gray-800 mb-4">抄袭检测详细报告</h2>
         <div
-          v-if="!submission.plagiarism_reports || submission.plagiarism_reports.length === 0"
+          v-if="
+            !submission.plagiarism_reports || submission.plagiarism_reports.length === 0
+          "
         >
           <p class="text-gray-600">未发现与该学生相关的可疑抄袭记录。</p>
         </div>
@@ -64,10 +66,13 @@
                   {{ report.llm_analysis.similarity_score }} / 100
                 </p>
               </div>
-               <!-- +++ 新增代码/文档匹配度得分展示 +++ -->
+              <!-- +++ 新增代码/文档匹配度得分展示 +++ -->
               <div class="p-3 bg-gray-50 rounded" v-if="submission.code_doc_match_report">
                 <p class="text-sm text-gray-500">代码/文档匹配度</p>
-                <p class="text-xl font-bold" :class="getCodeDocMatchColor(submission.code_doc_match_report)">
+                <p
+                  class="text-xl font-bold"
+                  :class="getCodeDocMatchColor(submission.code_doc_match_report)"
+                >
                   {{ submission.code_doc_match_report.score }} / 100
                 </p>
               </div>
@@ -79,10 +84,12 @@
                 {{ report.llm_analysis.reasoning }}
               </p>
             </div>
-             <!-- +++ 新增代码/文档匹配度理由展示 +++ -->
+            <!-- +++ 新增代码/文档匹配度理由展示 +++ -->
             <div class="mt-4" v-if="submission.code_doc_match_report">
               <h4 class="font-semibold text-gray-700">代码/文档匹配度分析理由:</h4>
-              <p class="mt-1 p-3 bg-yellow-50 text-gray-700 rounded-md whitespace-pre-wrap">
+              <p
+                class="mt-1 p-3 bg-yellow-50 text-gray-700 rounded-md whitespace-pre-wrap"
+              >
                 {{ submission.code_doc_match_report.reasoning }}
               </p>
             </div>
@@ -125,14 +132,14 @@
 </template>
 
 <script setup>
-import { computed }from 'vue';
+import { computed } from "vue";
 
 const props = defineProps({ submission: Object, reportType: String });
 const emit = defineEmits(["close"]);
 
 const sortedPlagiarismReports = computed(() => {
   if (!props.submission || !props.submission.plagiarism_reports) {
-    return []
+    return [];
   }
   return [...props.submission.plagiarism_reports].sort((a, b) => {
     const scoreA = a.llm_analysis?.similarity_score || 0;
@@ -143,9 +150,9 @@ const sortedPlagiarismReports = computed(() => {
 
 const close = () => emit("close");
 const getReportHeaderClass = (report) => {
-  if (report.llm_analysis && report.llm_analysis.similarity_score > 85)
+  if (report.llm_analysis && report.llm_analysis.similarity_score >= 85)
     return "text-red-600";
-  if (report.llm_analysis && report.llm_analysis.similarity_score > 70)
+  if (report.llm_analysis && report.llm_analysis.similarity_score >= 70)
     return "text-yellow-600";
   return "text-gray-800";
 };

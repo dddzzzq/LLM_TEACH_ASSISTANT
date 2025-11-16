@@ -27,8 +27,8 @@ class PlagiarismService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # 如果外部没有指定路径，就使用默认的硬编码路径
-        self.text_model_name = text_model_name or r"D:\DZQ\项目\教改项目-批改Agent\models\bert-base-chinese"
-        self.code_model_name = code_model_name or r"D:\DZQ\项目\教改项目-批改Agent\models\unixcoder-base"
+        self.text_model_name = text_model_name or r"/root/autodl-tmp/dzq/ai_grading_assistant/models/bert-base-chinese"
+        self.code_model_name = code_model_name or r"/root/autodl-tmp/dzq/ai_grading_assistant/models/unixcoder-base"
         
         cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
         os.makedirs(cache_dir, exist_ok=True)
@@ -107,7 +107,7 @@ class PlagiarismService:
 
         # 关键参数：可以根据内存大小调整这个值
         # 如果内存紧张，调小（如5）；如果内存充裕，可以调大以提升速度
-        BATCH_SIZE = 5
+        BATCH_SIZE = 50
 
         total_comparisons = (num_students * (num_students - 1)) // 2
         
@@ -165,8 +165,8 @@ class PlagiarismService:
         返回一个包含所有分析结果的结构化字典。
         """
         separated_data = self._separate_content_for_each_student(submissions)
-        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.92)
-        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.93)
+        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.95)
+        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.96)
         # suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.95)
         # suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.98)
         return {

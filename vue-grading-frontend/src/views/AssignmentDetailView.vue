@@ -63,12 +63,12 @@
           <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
           <div class="flex items-center gap-4">
             <button
-                @click="exportResults"
-                :disabled="isExporting || results.length === 0"
-                class="text-sm font-semibold text-green-600 hover:text-green-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+              @click="exportResults"
+              :disabled="isExporting || results.length === 0"
+              class="text-sm font-semibold text-green-600 hover:text-green-800 disabled:text-gray-400 disabled:cursor-not-allowed"
             >
-                <span v-if="!isExporting">导出为Excel</span>
-                <span v-else>正在导出...</span>
+              <span v-if="!isExporting">导出为Excel</span>
+              <span v-else>正在导出...</span>
             </button>
             <button
               @click="deleteAllResults"
@@ -86,7 +86,6 @@
             </button>
           </div>
         </div>
-        
 
         <div v-if="isLoadingResults" class="py-5 text-center">
           <Loader />
@@ -361,30 +360,29 @@ const exportResults = async () => {
   isExporting.value = true;
   try {
     const response = await gradingApi.exportAssignment(props.id);
-    const blob = new Blob([response.data], { type: response.headers['content-type'] });
+    const blob = new Blob([response.data], { type: response.headers["content-type"] });
 
-    const contentDisposition = response.headers['content-disposition'];
-    let filename = `${assignment.value?.task_name || 'assignment'}_results.xlsx`;
+    const contentDisposition = response.headers["content-disposition"];
+    let filename = `${assignment.value?.task_name || "assignment"}_results.xlsx`;
     if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (filenameMatch && filenameMatch.length > 1) {
-            filename = decodeURIComponent(filenameMatch[1].replace(/['"]/g, ''));
-        }
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+      if (filenameMatch && filenameMatch.length > 1) {
+        filename = decodeURIComponent(filenameMatch[1].replace(/['"]/g, ""));
+      }
     }
 
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = window.URL.createObjectURL(blob);
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(link.href);
-
   } catch (e: any) {
     if (e.response && e.response.status === 404) {
-         alert("导出失败: 该作业没有任何评分结果。");
+      alert("导出失败: 该作业没有任何评分结果。");
     } else {
-         alert("导出失败，请检查网络或联系管理员。");
+      alert("导出失败，请检查网络或联系管理员。");
     }
     console.error("导出时发生错误:", e);
   } finally {
@@ -394,8 +392,8 @@ const exportResults = async () => {
 
 const sortedResults = computed(() => {
   return [...results.value].sort((a, b) => {
-    const scoreA = typeof a.human_score === 'number' ? a.human_score : a.score;
-    const scoreB = typeof b.human_score === 'number' ? b.human_score : b.score;
+    const scoreA = typeof a.human_score === "number" ? a.human_score : a.score;
+    const scoreB = typeof b.human_score === "number" ? b.human_score : b.score;
     return scoreB - scoreA;
   });
 });
@@ -448,12 +446,12 @@ const submitBatchFile = async () => {
 };
 
 const deleteSingleResult = async (submissionId: number) => {
-  const resultToDelete = results.value.find(r => r.id === submissionId);
+  const resultToDelete = results.value.find((r) => r.id === submissionId);
   if (!resultToDelete) return;
   if (confirm(`确定要删除学生 ${resultToDelete.student_id} 的评分记录吗？`)) {
     try {
       await gradingApi.deleteSubmission(submissionId);
-      results.value = results.value.filter(r => r.id !== submissionId);
+      results.value = results.value.filter((r) => r.id !== submissionId);
     } catch (e) {
       alert("删除失败，请重试。");
       console.error(e);
@@ -526,8 +524,8 @@ const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
 };
 
 const hasHighRiskPlagiarism = (reports?: PlagiarismReport[]): boolean => {
-    if (!reports) return false;
-    return reports.some(r => (r.llm_analysis?.similarity_score || 0) > 85);
+  if (!reports) return false;
+  return reports.some((r) => (r.llm_analysis?.similarity_score || 0) >= 85);
 };
 
 const formatPlagiarismSummary = (reports?: PlagiarismReport[]): string => {
@@ -539,8 +537,8 @@ const formatPlagiarismSummary = (reports?: PlagiarismReport[]): string => {
 
 const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
-  if (maxScore > 85) return "text-red-600";
-  if (maxScore > 70) return "text-yellow-600";
+  if (maxScore >= 85) return "text-red-600";
+  if (maxScore >= 70) return "text-yellow-600";
   return "text-green-600";
 };
 

@@ -1,3 +1,10 @@
+import re
+import json
+import time
+import os
+import traceback
+import asyncio
+from typing import List, Optional
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -11,14 +18,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import zipfile
 import io
-import os
-import traceback
-import asyncio
-from typing import List, Optional
-from tqdm import tqdm
 import pandas as pd
 from urllib.parse import quote
 import pprint
+from tqdm import tqdm
 
 from ..db import crud, database
 from ..schemas import models as schemas
@@ -31,13 +34,37 @@ router = APIRouter(prefix="/assignments", tags=["作业与评分"])
 submission_router = APIRouter(prefix="/submissions", tags=["学生提交"])
 
 async def process_batch_file(assignment_id: int, batch_bytes: bytes):
+    # 记录批处理开始时间和初始化日志数据
+    batch_start_time = time.time()
+    batch_log_data = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "assignment_id": assignment_id,
+        "status": "processing",
+        "student_count": 0,
+        "total_processing_time_seconds": 0,
+        "step1_unzip_time_seconds": 0,
+        "step2_plagiarism_check_time_seconds": 0,
+        "step3_code_doc_match_time_seconds": 0,
+        "step4_llm_analysis_time_seconds": 0,
+        "step5_aigc_detect_time_seconds": 0,
+        "step6_grading_time_seconds": 0,
+        "error_message": None
+    }
+    
     async with database.AsyncSessionLocal() as db_session:
         assignment = await crud.get_assignment(db=db_session, assignment_id=assignment_id)
         if not assignment:
-            print(f"错误：在后台任务中找不到作业ID {assignment_id}")
+            error_msg = f"错误：在后台任务中找不到作业ID {assignment_id}"
+            print(error_msg)
+            # 记录失败日志
+            batch_log_data["status"] = "failed"
+            batch_log_data["error_message"] = error_msg
+            _save_batch_log(batch_log_data)
             return
 
         try:
+            # ===== 步骤 1/5: 解压并提取文件 =====
+            step1_start = time.time()
             student_texts = {}
             with zipfile.ZipFile(io.BytesIO(batch_bytes), "r") as zip_ref:
                 for item_info in tqdm(zip_ref.infolist(), desc="步骤 1/5: 解压并提取文件"):
@@ -49,15 +76,23 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                     if student_id not in student_texts: student_texts[student_id] = ""
                     file_content = grading_service.process_archive(zip_ref.read(item_info), student_filename)
                     student_texts[student_id] += f"--- 文件开始: {student_filename} ---\n\n{file_content}\n\n--- 文件结束: {student_filename} ---\n\n"
-
+            batch_log_data["step1_unzip_time_seconds"] = round(time.time() - step1_start, 2)
+            
+            # 更新学生数量
+            batch_log_data["student_count"] = len(student_texts)
+            
+            # ===== 步骤 2/5: 初步查重与内容分离 =====
+            step2_start = time.time()
             print("步骤 2/5: 初步查重与内容分离...")
             plagiarism_results = plagiarism_service.check_plagiarism_in_batch(student_texts)
             suspicious_text_pairs = plagiarism_results["suspicious_text_pairs"]
             suspicious_code_pairs = plagiarism_results["suspicious_code_pairs"]
             separated_contents = plagiarism_results["separated_contents"]
             print(f"初步查重完成。发现 {len(suspicious_text_pairs)} 对可疑文本, {len(suspicious_code_pairs)} 对可疑代码。")
+            batch_log_data["step2_plagiarism_check_time_seconds"] = round(time.time() - step2_start, 2)
             
-            # +++ 新增步骤：代码-文档匹配度分析 +++
+            # ===== 步骤 3/5: 代码-文档匹配度分析 =====
+            step3_start = time.time()
             print("步骤 3/5: 对每个学生提交的代码和文档进行匹配度分析...")
             code_doc_match_reports = {}
             for sid, content in tqdm(separated_contents.items(), desc="步骤 3/5: 代码-文档匹配度分析"):
@@ -82,8 +117,10 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
             print("代码-文档匹配度分析完成。")
             print("DEBUG: Final code_doc_match_reports dictionary:")
             pprint.pprint(code_doc_match_reports)
+            batch_log_data["step3_code_doc_match_time_seconds"] = round(time.time() - step3_start, 2)
 
-
+            # ===== 步骤 4/5: 对可疑配对进行LLM深度分析 =====
+            step4_start = time.time()
             print("步骤 4/5: 对可疑配对进行LLM深度分析...")
             llm_analysis_cache = {}
             all_suspicious_pairs = [(*pair, 'text') for pair in suspicious_text_pairs] + [(*pair, 'code') for pair in suspicious_code_pairs]
@@ -97,13 +134,17 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                 if llm_analysis:
                     llm_analysis_cache[(s1, s2, content_type)] = {'initial_score': initial_score, 'llm_analysis': llm_analysis}
             print("LLM深度分析完成。")
+            batch_log_data["step4_llm_analysis_time_seconds"] = round(time.time() - step4_start, 2)
 
+            # ===== 步骤 5/5: 对所有提交内容进行AIGC检测 =====
+            step5_start = time.time()
             print("步骤 5/5: 对所有提交内容进行AIGC检测...")
             aigc_reports = {
                 sid: aigc_detector_service.detect(content) 
                 for sid, content in tqdm(student_texts.items(), desc="步骤 5/5: AIGC内容检测")
             }
             print("AIGC检测完成。")
+            batch_log_data["step5_aigc_detect_time_seconds"] = round(time.time() - step5_start, 2)
 
             print("整理报告并准备评分...")
             final_student_data = {
@@ -133,6 +174,8 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                     )
                     final_student_data[s2]["plagiarism_reports"].append(report_for_s2)
 
+            # ===== 步骤 6/6: 开始逐一评分并保存 =====
+            step6_start = time.time()
             print("步骤 6/6: 开始逐一评分并保存...")
             for student_id, merged_content in tqdm(student_texts.items(), desc="步骤 6/6: LLM评分并保存"):
                 student_data = final_student_data[student_id]
@@ -158,10 +201,36 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                 await crud.create_submission(db=db_session, submission=submission_data)
             
             print("所有学生的作业处理完成并已存入数据库。")
-
+            batch_log_data["step6_grading_time_seconds"] = round(time.time() - step6_start, 2)
+            
+            # 记录成功完成
+            batch_log_data["status"] = "completed"
+            
         except Exception as e:
-            print(f"处理作业ID {assignment_id} 的批量文件时发生严重错误: {e}")
+            error_msg = f"处理作业ID {assignment_id} 的批量文件时发生严重错误: {e}"
+            print(error_msg)
             traceback.print_exc()
+            # 记录失败状态
+            batch_log_data["status"] = "failed"
+            batch_log_data["error_message"] = str(e)
+        
+        finally:
+            # 计算总处理时间并保存日志
+            batch_end_time = time.time()
+            batch_log_data["total_processing_time_seconds"] = round(batch_end_time - batch_start_time, 2)
+            _save_batch_log(batch_log_data)
+
+def _save_batch_log(log_data: dict):
+    """保存批处理日志到文件"""
+    try:
+        log_dir = "logs"
+        log_file = os.path.join(log_dir, "batch_processing.log")
+        os.makedirs(log_dir, exist_ok=True)
+        
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_data, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"警告：保存批处理日志时出错: {e}")
 
 # 创建任务路由
 @router.post("/", response_model=schemas.AssignmentInDB)
@@ -365,6 +434,3 @@ async def delete_single_submission(
     deleted_submission = await crud.delete_submission(db=db_session, submission_id=submission_id)
     if not deleted_submission:
         raise HTTPException(status_code=404, detail="未找到该提交记录")
-
-
-
