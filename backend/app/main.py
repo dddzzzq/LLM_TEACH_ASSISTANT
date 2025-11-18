@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .db.database import Base, engine
-from .routers import assignments
+from .routers import assignments, exams # 导入新的 exams 路由
 
 app = FastAPI(
     title="智能化作业与试卷批改系统",
-    description="一个基于FastAPI和LLM的AI助教系统，用于自动化批改作业。",
-    version="2.1.0"
+    description="一个基于FastAPI和LLM的AI助教系统，用于自动化批改作业和试卷。",
+    version="2.2.0" # 版本升级
 )
 
 @app.on_event("startup")
@@ -23,8 +23,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 注册作业路由
 app.include_router(assignments.router)
 app.include_router(assignments.submission_router) # 增加提交路由
+
+# 注册新的试卷路由
+app.include_router(exams.router)
 
 @app.get("/", tags=["Root"])
 async def read_root():

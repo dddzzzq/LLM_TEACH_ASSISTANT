@@ -1,19 +1,32 @@
 <template>
-  <div class="text-center">
-    <h1 class="text-4xl font-bold text-gray-800 mb-4">欢迎使用智能化作业试卷批改助手</h1>
-    <p class="text-lg text-gray-600 mb-8">请选择您需要使用的功能</p>
-    <div class="flex justify-center gap-8">
-      <router-link to="/grade-exam" class="bg-teal-500 text-white font-bold py-4 px-8 rounded-lg shadow-lg hover:bg-teal-600 transition-colors">
-        试卷批改(等待开发中...)
-      </router-link>
-      <router-link to="/assignments" class="bg-indigo-600 text-white font-bold py-4 px-8 rounded-lg shadow-lg hover:bg-indigo-700 transition-colors text-lg">
-        作业批改
-      </router-link>
+  <div
+    class="h-full flex flex-col justify-center items-center bg-white rounded-lg shadow-xl p-8 md:p-12"
+  >
+    <h1 class="text-4xl md:text-5xl font-bold text-gray-800 mb-8 tracking-wide">
+      欢迎使用作业&amp;试题智能评分系统
+    </h1>
+
+    <p class="text-xl text-gray-600 mb-12">请使用左侧菜单栏选择您需要的功能</p>
+
+    <div class="mb-12 transform transition hover:scale-105 duration-300">
+      <img :src="logo" alt="西电logo" class="h-48 w-auto mx-auto object-contain" />
+    </div>
+
+    <div class="max-w-3xl text-center">
+      <p class="text-gray-500 text-lg leading-loose">
+        本系统基于大语言模型（LLM）技术构建，<br />
+        旨在为教师提供高效的
+        <span class="font-bold text-indigo-600">作业自动查重</span>、
+        <span class="font-bold text-indigo-600">作业智能评分</span>
+        以及
+        <span class="font-bold text-indigo-600">主观题自动批改</span>
+        辅助功能。
+      </p>
     </div>
   </div>
 </template>
 
 <script setup>
-
-import { RouterLink } from 'vue-router';
+// 导入本地 logo 图片
+import logo from "@/assets/logo.png";
 </script>

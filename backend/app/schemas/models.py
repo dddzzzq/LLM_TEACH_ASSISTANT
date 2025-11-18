@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
+# --- 现有模型 ---
+
 # --- 新增教师人工审查更新模型 ---
 class SubmissionUpdate(BaseModel):
     human_score: float    # 得分
@@ -14,20 +16,6 @@ class AIGCReport(BaseModel):
     detection_source: Optional[str] = Field(None, description="风险最高的文本来源，如 '文字报告' 或 '源代码'")
 
 # --- 查重报告模型 ---
-# class SimilarityMatch(BaseModel):
-#     similar_to: str = Field(description="最高相似度对应的学生ID")
-#     score: float = Field(description="TF-IDF计算出的最高相似度分数")
-
-# class LLMAnalysis(BaseModel):
-#     is_plagiarized: bool = Field(description="LLM判断是否构成抄袭")
-#     reasoning: str = Field(description="LLM给出的判断理由")
-#     suspicious_parts: List[str] = Field(description="LLM找出的可疑文本片段")
-
-# class PlagiarismReport(BaseModel):
-#     highest_similarity: Optional[SimilarityMatch] = None
-#     llm_analysis: Optional[LLMAnalysis] = None
-
-# 修改抄袭检测数据模型
 class SuspiciousPart (BaseModel):
     student_A_content: str
     student_B_content: str
@@ -88,7 +76,95 @@ class AssignmentWithSubmissions(AssignmentBase):
     class Config:
         from_attributes = True
 
-class AssignmentInDB(AssignmentBase):
+class AssignmentInDB(BaseModel):
     id: int
+    class Config:
+        from_attributes = True
+
+# --- 新增试卷模型 ---
+
+# 试卷 (Exam)
+class ExamBase(BaseModel):
+    name: str
+
+class ExamCreate(ExamBase):
+    pass
+
+class ExamInDB(ExamBase):
+    id: int
+    question_count: int
+
+    class Config:
+        from_attributes = True
+
+# 试卷题目 (ExamQuestion)
+class ExamQuestionBase(BaseModel):
+    question_number: int
+    question_text: str
+    standard_answer: str
+    rubric: str # <--- 修改：从 Dict[str, Any] 改为 str
+    max_score: float # <--- 新增
+
+class ExamQuestionCreate(ExamQuestionBase):
+    pass
+
+class ExamQuestionInDB(ExamQuestionBase):
+    id: int
+    exam_id: int
+
+    class Config:
+        from_attributes = True
+
+# 包含题目的试卷详情
+class ExamWithQuestions(ExamInDB):
+    questions: List[ExamQuestionInDB] = []
+
+# 学生单题答案 (StudentQuestionAnswer)
+class StudentQuestionAnswerBase(BaseModel):
+    student_answer_text: str
+    score: float
+    feedback: str
+
+class StudentQuestionAnswerCreate(StudentQuestionAnswerBase):
+    student_exam_id: int
+    exam_question_id: int
+
+class StudentQuestionAnswerInDB(StudentQuestionAnswerBase):
+    id: int
+    student_exam_id: int
+    exam_question_id: int
+    question: ExamQuestionInDB # 嵌套题目信息
+
+    class Config:
+        from_attributes = True
+
+# 学生总结报告 (StudentExamReport)
+class StudentExamReportBase(BaseModel):
+    total_score: float
+    summary_report: str
+
+class StudentExamReportCreate(StudentExamReportBase):
+    student_exam_id: int
+
+class StudentExamReportInDB(StudentExamReportBase):
+    id: int
+    student_exam_id: int
+
+    class Config:
+        from_attributes = True
+
+# 试卷的学生成绩列表（简要）
+class StudentExamResultSummary(BaseModel):
+    student_id: str
+    total_score: float
+    student_exam_id: int # 用于跳转到详细页
+
+# 学生的详细报告（总结 + 题目列表）
+class StudentExamDetailedReport(BaseModel):
+    student_id: str
+    exam_id: int
+    report: StudentExamReportInDB
+    answers: List[StudentQuestionAnswerInDB]
+
     class Config:
         from_attributes = True

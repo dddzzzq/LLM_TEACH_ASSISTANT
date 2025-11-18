@@ -27,8 +27,8 @@ class PlagiarismService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # 如果外部没有指定路径，就使用默认的硬编码路径
-        self.text_model_name = text_model_name or r"/root/autodl-tmp/dzq/ai_grading_assistant/models/bert-base-chinese"
-        self.code_model_name = code_model_name or r"/root/autodl-tmp/dzq/ai_grading_assistant/models/unixcoder-base"
+        self.text_model_name = text_model_name or r"/root/autodl-tmp/dzq/models/bert-base-chinese"
+        self.code_model_name = code_model_name or r"/root/autodl-tmp/dzq/models/unixcoder-base"
         
         cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
         os.makedirs(cache_dir, exist_ok=True)

@@ -1,3 +1,10 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 新增：确保应用铺满整个视口 */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
