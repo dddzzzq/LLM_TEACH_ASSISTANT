@@ -6,10 +6,10 @@ from typing import List, Optional, Dict, Any
 from . import models
 from ..schemas import models as schemas
 
-# --- Exam (试卷) ---
+#  Exam (试卷) 
 
 async def create_exam(db: AsyncSession, exam: schemas.ExamCreate) -> models.Exam:
-    db_exam = models.Exam(name=exam.name, question_count=0)
+    db_exam = models.Exam(name=exam.name, question_count=0, total_score=0.0) # 初始化
     db.add(db_exam)
     await db.commit()
     await db.refresh(db_exam)
@@ -33,9 +33,6 @@ async def get_exams(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[m
     return result.scalars().all()
 
 async def delete_exam(db: AsyncSession, exam_id: int) -> Optional[models.Exam]:
-    """
-    根据ID删除一个试卷及其所有关联的题目、学生答案和报告。
-    """
     exam = await db.get(models.Exam, exam_id)
     if exam:
         await db.delete(exam)
@@ -43,7 +40,7 @@ async def delete_exam(db: AsyncSession, exam_id: int) -> Optional[models.Exam]:
         return exam
     return None
 
-# --- ExamQuestion (试卷题目) ---
+#  ExamQuestion (试卷题目) 
 
 async def create_exam_question(db: AsyncSession, exam_id: int, question: schemas.ExamQuestionCreate) -> models.ExamQuestion:
     db_question = models.ExamQuestion(
@@ -51,15 +48,16 @@ async def create_exam_question(db: AsyncSession, exam_id: int, question: schemas
         question_number=question.question_number,
         question_text=question.question_text,
         standard_answer=question.standard_answer,
-        rubric=question.rubric, # <--- 修改：直接保存字符串
-        max_score=question.max_score  # <--- 新增
+        rubric=question.rubric,
+        max_score=question.max_score
     )
     db.add(db_question)
     
-    # 更新试卷题目总数
+    # 更新试卷题目总数和总分
     exam = await db.get(models.Exam, exam_id)
     if exam:
         exam.question_count = (exam.question_count or 0) + 1
+        exam.total_score = (exam.total_score or 0.0) + question.max_score # < 累加总分
         
     await db.commit()
     await db.refresh(db_question)
@@ -73,7 +71,7 @@ async def get_exam_questions(db: AsyncSession, exam_id: int) -> List[models.Exam
     )
     return result.scalars().all()
 
-# --- StudentExam (学生试卷) ---
+#  StudentExam (学生试卷) 
 
 async def create_student_exam(db: AsyncSession, exam_id: int, student_id: str) -> models.StudentExam:
     """
@@ -81,20 +79,23 @@ async def create_student_exam(db: AsyncSession, exam_id: int, student_id: str) -
     """
     result = await db.execute(
         select(models.StudentExam)
-        .options( # <--- 新增此 .options() 调用
+        .options(
             selectinload(models.StudentExam.report),
-            selectinload(models.StudentExam.answers)
+            selectinload(models.StudentExam.answers),
+            selectinload(models.StudentExam.images) 
         )
         .filter_by(exam_id=exam_id, student_id=student_id)
     )
     db_student_exam = result.scalars().first()
     
     if db_student_exam:
-        # 如果已存在，先删除旧的答案和报告，准备重新评分
         if db_student_exam.report:
             await db.delete(db_student_exam.report)
         for answer in db_student_exam.answers:
             await db.delete(answer)
+        for img in db_student_exam.images:
+            await db.delete(img)
+            
         await db.commit()
     else:
         db_student_exam = models.StudentExam(exam_id=exam_id, student_id=student_id)
@@ -104,7 +105,19 @@ async def create_student_exam(db: AsyncSession, exam_id: int, student_id: str) -
         
     return db_student_exam
 
-# --- StudentQuestionAnswer (学生答案) ---
+#  保存学生试卷图片记录，支持关联题目ID 
+async def create_student_exam_image(db: AsyncSession, student_exam_id: int, image_path: str, exam_question_id: Optional[int] = None) -> models.StudentExamImage:
+    db_image = models.StudentExamImage(
+        student_exam_id=student_exam_id,
+        image_path=image_path,
+        exam_question_id=exam_question_id 
+    )
+    db.add(db_image)
+    await db.commit()
+    await db.refresh(db_image)
+    return db_image
+
+#  StudentQuestionAnswer (学生答案) 
 
 async def create_student_question_answer(db: AsyncSession, answer_data: schemas.StudentQuestionAnswerCreate) -> models.StudentQuestionAnswer:
     db_answer = models.StudentQuestionAnswer(
@@ -119,7 +132,7 @@ async def create_student_question_answer(db: AsyncSession, answer_data: schemas.
     await db.refresh(db_answer)
     return db_answer
 
-# --- StudentExamReport (学生报告) ---
+#  StudentExamReport (学生报告) 
 
 async def create_student_exam_report(db: AsyncSession, report_data: schemas.StudentExamReportCreate) -> models.StudentExamReport:
     db_report = models.StudentExamReport(
@@ -142,21 +155,25 @@ async def get_student_exam_reports(db: AsyncSession, exam_id: int) -> List[Dict[
         .filter(models.StudentExam.exam_id == exam_id)
     )
     reports = result.all()
-    # 将结果转换为字典列表以便Pydantic模型验证
     return [
         {"student_id": r.student_id, "total_score": r.total_score, "student_exam_id": r.student_exam_id}
         for r in reports
     ]
 
-
 async def get_student_detailed_report(db: AsyncSession, student_exam_id: int) -> Optional[Dict[str, Any]]:
     """
     获取单个学生的详细报告，包括总结和所有题目的得分详情
+    修改说明：增加了对 student_exam.images 的预加载，并将其加入返回结果
     """
-    # 获取总结报告
+    # 1. 获取报告，同时加载关联的 student_exam 和 student_exam 里的 images
     report_result = await db.execute(
         select(models.StudentExamReport)
-        .options(joinedload(models.StudentExamReport.student_exam))
+        .options(
+            # 加载 student_exam
+            joinedload(models.StudentExamReport.student_exam)
+            # 进一步加载 student_exam 下的 images (关键修改)
+            .selectinload(models.StudentExam.images)
+        )
         .filter(models.StudentExamReport.student_exam_id == student_exam_id)
     )
     report = report_result.scalars().first()
@@ -164,7 +181,7 @@ async def get_student_detailed_report(db: AsyncSession, student_exam_id: int) ->
     if not report:
         return None
 
-    # 获取所有题目的答案
+    # 2. 获取每道题的回答详情
     answers_result = await db.execute(
         select(models.StudentQuestionAnswer)
         .options(joinedload(models.StudentQuestionAnswer.question))
@@ -173,18 +190,17 @@ async def get_student_detailed_report(db: AsyncSession, student_exam_id: int) ->
     )
     answers = answers_result.scalars().all()
     
+    # 3. 构建符合 Pydantic Schema (StudentExamDetailedReport) 的字典
     return {
         "report": report,
         "answers": answers,
         "student_id": report.student_exam.student_id,
-        "exam_id": report.student_exam.exam_id
+        "exam_id": report.student_exam.exam_id,
+        # 显式将加载出来的图片列表传给 schema 中的 images 字段
+        "images": report.student_exam.images 
     }
 
-# --- 新增删除学生试卷 ---
 async def delete_student_exam(db: AsyncSession, student_exam_id: int) -> bool:
-    """
-    删除单个学生的试卷提交记录（级联删除答案和报告）
-    """
     student_exam = await db.get(models.StudentExam, student_exam_id)
     if student_exam:
         await db.delete(student_exam)

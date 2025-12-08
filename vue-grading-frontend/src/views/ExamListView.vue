@@ -37,6 +37,8 @@
               <p class="text-lg font-semibold text-indigo-700">{{ exam.name }}</p>
               <p class="mt-1 text-sm text-gray-600">
                 题目数量: {{ exam.question_count }}
+                <span class="mx-2 text-gray-300">|</span>
+                总分: {{ exam.total_score }}
               </p>
             </div>
             <svg
@@ -53,7 +55,6 @@
             </svg>
           </router-link>
 
-          <!-- 新增删除按钮 -->
           <button
             @click.prevent="deleteExam(exam.id, index)"
             :disabled="isDeleting[exam.id]"
@@ -73,7 +74,6 @@
                 clip-rule="evenodd"
               />
             </svg>
-            <!-- 简易加载中图标 -->
             <svg
               v-else
               class="animate-spin h-5 w-5 text-red-600"
@@ -111,7 +111,7 @@ import Loader from "../components/Loader.vue";
 const exams = ref([]);
 const isLoading = ref(true);
 const error = ref(null);
-const isDeleting = ref({}); // 用于跟踪删除状态
+const isDeleting = ref({});
 
 const fetchExams = async () => {
   isLoading.value = true;
@@ -127,18 +127,16 @@ const fetchExams = async () => {
   }
 };
 
-// 新增删除逻辑
 const deleteExam = async (id, index) => {
-  // 注意：没有使用 confirm()，因为这在 iframe 中可能被阻止。
-  // 在真实应用中，这里应该替换为一个自定义的模态框（Modal）来确认。
+  if (!window.confirm("确定要删除这个试卷吗？")) return;
+
   isDeleting.value[id] = true;
-  error.value = null; // 清除之前的错误
+  error.value = null;
   try {
     await gradingApi.deleteExam(id);
     exams.value.splice(index, 1);
   } catch (e) {
     console.error(e);
-    // 确保在访问 exams.value[index] 之前检查它是否存在
     const examName = exams.value[index] ? exams.value[index].name : id;
     error.value = `删除试卷 "${examName}" 失败。`;
   } finally {

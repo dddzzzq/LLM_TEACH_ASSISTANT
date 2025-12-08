@@ -2,10 +2,9 @@ from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 import json
 from .database import Base
-from ..schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport # 引入aigc检测模型模块，代码文档匹配度得分
+from ..schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport
 from typing import List, Optional, Dict
 
-# --- 现有模型 (作业) ---
 
 class Assignment(Base):
     __tablename__ = "assignments"
@@ -34,30 +33,27 @@ class Submission(Base):
     _aigc_report_json = Column("aigc_report", Text, nullable=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"))
     assignment = relationship("Assignment", back_populates="submissions")
-    # 新增代码文档匹配得分
+    
     _code_doc_match_report_json = Column("code_doc_match_report", Text, nullable=True)
-    # 新增教师复查功能
     is_human_reviewed = Column(Boolean, default=False, nullable=False)
-    human_feedback = Column(Text, nullable=True) # 存储教师的最终评语
-    human_score = Column(Float)     # 存储教师评分
+    human_feedback = Column(Text, nullable=True)
+    human_score = Column(Float)
 
     @property
     def plagiarism_reports(self):
         if self._plagiarism_reports_json is None:
             return []
         reports = json.loads(self._plagiarism_reports_json)
-        # 兼容旧数据格式
         return [PlagiarismReport.model_validate(r) for r in reports]
 
     @plagiarism_reports.setter
-    def plagiarism_reports(self, value: Optional[List[Dict]]):   # 修改为报告列表
+    def plagiarism_reports(self, value: Optional[List[Dict]]):
         if value is None:
             self._plagiarism_reports_json = None
         else:
             reports_as_dicts = [report.model_dump(by_alias=True) for report in value]
             self._plagiarism_reports_json = json.dumps(reports_as_dicts, ensure_ascii=False)
 
-    # 新增代码和文档匹配得分属性
     @property
     def code_doc_match_report(self) -> Optional[CodeDocMatchReport]:
         if self._code_doc_match_report_json is None:
@@ -88,75 +84,78 @@ class Submission(Base):
             self._aigc_report_json = value.model_dump_json()
 
 
-# --- 新增模型 (试卷) ---
+#  试卷相关模型 
 
 class Exam(Base):
-    """
-    试卷模型
-    """
     __tablename__ = "exams"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     question_count = Column(Integer, default=0)
+    total_score = Column(Float, default=0.0)
     
     questions = relationship("ExamQuestion", back_populates="exam", cascade="all, delete-orphan")
     student_exams = relationship("StudentExam", back_populates="exam", cascade="all, delete-orphan")
 
 class ExamQuestion(Base):
-    """
-    试卷中的题目
-    """
     __tablename__ = "exam_questions"
     id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exams.id"))
     question_number = Column(Integer)
     question_text = Column(Text)
     standard_answer = Column(Text)
-    rubric = Column(Text) # <--- 修改：不再是JSON，而是纯文本
-    max_score = Column(Float, default=10.0) # <--- 新增：题目总分
+    rubric = Column(Text) 
+    max_score = Column(Float, default=10.0) 
     
     exam = relationship("Exam", back_populates="questions")
     student_answers = relationship("StudentQuestionAnswer", back_populates="question")
-
-    # <--- 删除：移除 @property 和 @setter for rubric ---
+    # 反向关联图片（可选，如果需要直接通过题目找图片）
+    # images = relationship("StudentExamImage", back_populates="question")
 
 class StudentExam(Base):
-    """
-    学生的一次试卷提交（关联所有图片和答案）
-    """
     __tablename__ = "student_exams"
     id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exams.id"))
     student_id = Column(String, index=True)
-    # student_name = Column(String, nullable=True) # 暂时先用 student_id
     
     exam = relationship("Exam", back_populates="student_exams")
     answers = relationship("StudentQuestionAnswer", back_populates="student_exam", cascade="all, delete-orphan")
     report = relationship("StudentExamReport", back_populates="student_exam", uselist=False, cascade="all, delete-orphan")
+    
+    # 关联图片
+    images = relationship("StudentExamImage", back_populates="student_exam", cascade="all, delete-orphan")
+
+class StudentExamImage(Base):
+    """
+    存储学生上传的试卷图片路径
+    """
+    __tablename__ = "student_exam_images"
+    id = Column(Integer, primary_key=True, index=True)
+    student_exam_id = Column(Integer, ForeignKey("student_exams.id"))
+    image_path = Column(String) # 存储相对路径
+    
+    # 关联具体的题目ID。如果一张图包含多道题，这里可以存第一道题的ID，或者改为多对多（为了简单，我们假设主要归属于某一道题，或者为NULL表示未识别/公共页）
+    exam_question_id = Column(Integer, ForeignKey("exam_questions.id"), nullable=True)
+    
+    student_exam = relationship("StudentExam", back_populates="images")
+    question = relationship("ExamQuestion") # 关联到题目
 
 class StudentQuestionAnswer(Base):
-    """
-    学生对单个题目的回答、得分和评语
-    """
     __tablename__ = "student_question_answers"
     id = Column(Integer, primary_key=True, index=True)
     student_exam_id = Column(Integer, ForeignKey("student_exams.id"))
     exam_question_id = Column(Integer, ForeignKey("exam_questions.id"))
-    student_answer_text = Column(Text) # LLM从OCR结果中提取的学生答案
+    student_answer_text = Column(Text) 
     score = Column(Float)
-    feedback = Column(Text) # LLM给出的评判依据
+    feedback = Column(Text) 
     
     student_exam = relationship("StudentExam", back_populates="answers")
     question = relationship("ExamQuestion", back_populates="student_answers")
 
 class StudentExamReport(Base):
-    """
-    学生的总成绩和总结报告
-    """
     __tablename__ = "student_exam_reports"
     id = Column(Integer, primary_key=True, index=True)
     student_exam_id = Column(Integer, ForeignKey("student_exams.id"), unique=True)
     total_score = Column(Float)
-    summary_report = Column(Text) # LLM生成的总结
+    summary_report = Column(Text) 
     
     student_exam = relationship("StudentExam", back_populates="report")

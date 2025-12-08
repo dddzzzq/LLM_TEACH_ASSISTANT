@@ -20,7 +20,7 @@
           作业自动评分
         </router-link>
         <router-link
-          to="/exams"
+          to="/assignments"
           class="text-gray-600 hover:text-indigo-600"
           active-class="text-indigo-700 font-semibold"
         >

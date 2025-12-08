@@ -1,13 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles # 导入 StaticFiles
+import os
 from .db.database import Base, engine
-from .routers import assignments, exams # 导入新的 exams 路由
+from .routers import assignments, exams 
+
+# 确保上传目录存在，避免启动报错
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
     title="智能化作业与试卷批改系统",
     description="一个基于FastAPI和LLM的AI助教系统，用于自动化批改作业和试卷。",
-    version="2.2.0" # 版本升级
+    version="2.2.0" 
 )
+
+#  新增：挂载静态文件目录：可以在前端展示图片 
+# 这样 /uploads/exams/xxx.png 就可以通过 http://localhost:8000/uploads/exams/xxx.png 访问
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 @app.on_event("startup")
 async def startup():
@@ -25,7 +35,7 @@ app.add_middleware(
 
 # 注册作业路由
 app.include_router(assignments.router)
-app.include_router(assignments.submission_router) # 增加提交路由
+app.include_router(assignments.submission_router) 
 
 # 注册新的试卷路由
 app.include_router(exams.router)

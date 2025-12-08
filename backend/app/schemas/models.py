@@ -1,21 +1,21 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
-# --- 现有模型 ---
+#  现有模型 
 
-# --- 新增教师人工审查更新模型 ---
+#  新增教师人工审查更新模型 
 class SubmissionUpdate(BaseModel):
     human_score: float    # 得分
     human_feedback: str     # 评语
 
-# --- AIGC检测报告模型 ---
+#  AIGC检测报告模型 
 class AIGCReport(BaseModel):
     predicted_label: str = Field(description="预测标签，如 'AI生成' 或 '人类写作'")
     confidence: float = Field(description="模型对预测标签的置信度")
     ai_probability: float = Field(description="文本由AI生成的概率")
     detection_source: Optional[str] = Field(None, description="风险最高的文本来源，如 '文字报告' 或 '源代码'")
 
-# --- 查重报告模型 ---
+#  查重报告模型
 class SuspiciousPart (BaseModel):
     student_A_content: str
     student_B_content: str
@@ -31,14 +31,13 @@ class PlagiarismReport(BaseModel):
     content_type: str = Field(description="内容类型: 'text' 或 'code'")
     llm_analysis: Optional[LLMPlagiarismAnalysis] = None
 
-# 新增代码文档匹配得分
-# +++ 新增代码与文档匹配度报告模型 +++
+# 代码文档匹配得分
 class CodeDocMatchReport(BaseModel):
     score: int = Field(description="LLM给出的0-100的匹配度分数")
     reasoning: str = Field(description="LLM给出的详细分析理由")
 
 
-# --- 提交记录模型 ---
+#  提交记录模型 
 class SubmissionBase(BaseModel):
     student_id: str
     score: float
@@ -47,7 +46,7 @@ class SubmissionBase(BaseModel):
     aigc_report: Optional[AIGCReport] = None  # 新增aigc检测报告
     is_human_reviewed: bool     # 新增字段：是否人工复查
     human_feedback: Optional[str] = None    # 新增字段：教师评语
-    human_score: Optional[float] = None # <-- 修改这里，允许为None      # 新增字段：教师评分
+    human_score: Optional[float] = None     # 新增字段：教师评分
     code_doc_match_report: Optional[CodeDocMatchReport] = None  # 新增代码文档匹配报告
 
 
@@ -61,7 +60,7 @@ class SubmissionInDB(SubmissionBase):
     class Config:
         from_attributes = True
 
-# --- 作业任务模型 ---
+#  作业任务模型 
 class AssignmentBase(BaseModel):
     task_name: str
     question: str
@@ -76,14 +75,13 @@ class AssignmentWithSubmissions(AssignmentBase):
     class Config:
         from_attributes = True
 
-class AssignmentInDB(BaseModel):
+class AssignmentInDB(AssignmentBase): 
     id: int
     class Config:
         from_attributes = True
 
-# --- 新增试卷模型 ---
+#  新增试卷模型 
 
-# 试卷 (Exam)
 class ExamBase(BaseModel):
     name: str
 
@@ -93,17 +91,17 @@ class ExamCreate(ExamBase):
 class ExamInDB(ExamBase):
     id: int
     question_count: int
+    total_score: float = 0.0
 
     class Config:
         from_attributes = True
 
-# 试卷题目 (ExamQuestion)
 class ExamQuestionBase(BaseModel):
     question_number: int
     question_text: str
     standard_answer: str
-    rubric: str # <--- 修改：从 Dict[str, Any] 改为 str
-    max_score: float # <--- 新增
+    rubric: str 
+    max_score: float 
 
 class ExamQuestionCreate(ExamQuestionBase):
     pass
@@ -115,11 +113,11 @@ class ExamQuestionInDB(ExamQuestionBase):
     class Config:
         from_attributes = True
 
-# 包含题目的试卷详情
 class ExamWithQuestions(ExamInDB):
     questions: List[ExamQuestionInDB] = []
 
-# 学生单题答案 (StudentQuestionAnswer)
+#  学生答案模型 
+
 class StudentQuestionAnswerBase(BaseModel):
     student_answer_text: str
     score: float
@@ -133,12 +131,22 @@ class StudentQuestionAnswerInDB(StudentQuestionAnswerBase):
     id: int
     student_exam_id: int
     exam_question_id: int
-    question: ExamQuestionInDB # 嵌套题目信息
+    question: ExamQuestionInDB 
 
     class Config:
         from_attributes = True
 
-# 学生总结报告 (StudentExamReport)
+#  图片模型 
+class StudentExamImageInDB(BaseModel):
+    id: int
+    image_path: str
+    exam_question_id: Optional[int] = None # 新增
+
+    class Config:
+        from_attributes = True
+
+#  报告模型 
+
 class StudentExamReportBase(BaseModel):
     total_score: float
     summary_report: str
@@ -153,18 +161,17 @@ class StudentExamReportInDB(StudentExamReportBase):
     class Config:
         from_attributes = True
 
-# 试卷的学生成绩列表（简要）
 class StudentExamResultSummary(BaseModel):
     student_id: str
     total_score: float
-    student_exam_id: int # 用于跳转到详细页
+    student_exam_id: int
 
-# 学生的详细报告（总结 + 题目列表）
 class StudentExamDetailedReport(BaseModel):
     student_id: str
     exam_id: int
     report: StudentExamReportInDB
     answers: List[StudentQuestionAnswerInDB]
+    images: List[StudentExamImageInDB] = [] 
 
     class Config:
         from_attributes = True

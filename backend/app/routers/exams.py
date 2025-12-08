@@ -18,7 +18,7 @@ from ..services import exam_grading_service
 
 router = APIRouter(prefix="/exams", tags=["试卷与评分"])
 
-# --- 试卷 (Exam) ---
+#  试卷 (Exam) 
 
 @router.post("/", response_model=schemas.ExamInDB, status_code=status.HTTP_201_CREATED)
 async def create_new_exam(
@@ -69,7 +69,7 @@ async def delete_single_exam(
         raise HTTPException(status_code=404, detail="未找到该试卷")
     return None # 204 No Content
 
-# --- 试卷题目 (ExamQuestion) ---
+#  试卷题目 (ExamQuestion) 
 
 @router.post("/{exam_id}/questions", response_model=schemas.ExamQuestionInDB, status_code=status.HTTP_201_CREATED)
 async def add_question_to_exam(
@@ -86,7 +86,7 @@ async def add_question_to_exam(
     
     return await crud_exams.create_exam_question(db=db_session, exam_id=exam_id, question=question)
 
-# --- 试卷评分 (Grading) ---
+#  试卷评分 (Grading) 
 
 @router.post("/{exam_id}/grade_submission", status_code=status.HTTP_202_ACCEPTED)
 async def grade_student_exam_submission(
@@ -159,7 +159,7 @@ async def get_student_detailed_report(
     # Pydantic 模型会自动处理 report 和 answers
     return report_data
 
-# --- 新增删除路由 ---
+#  新增删除路由 
 @router.delete("/{exam_id}/results/{student_exam_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_student_exam_result(
     exam_id: int,

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 // 设置后端的 API 基础 URL
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = 'https://53ee3fcb.r25.cpolar.top';   // 8000端口
+// const API_URL = 'http://450992b4.r7.cpolar.cn';
 
 const apiClient = axios.create({
   baseURL: API_URL,

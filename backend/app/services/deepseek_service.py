@@ -159,13 +159,13 @@ class DeepSeekService:
         user_prompt = f"""
         你是一位经验丰富的计算机科学课程助教，你的任务是评估学生提交的作业中，代码和项目文档之间的一致性和匹配程度。但是可能存在上下文限制，请你适当给出分数。
 
-        ---
+        
         【项目代码】
         ```
         {json.dumps(code_content[:30000], ensure_ascii=False)}
         ```
 
-        ---
+        
         【项目文档】
         ```text
         {json.dumps(doc_content[:25000], ensure_ascii=False)}
@@ -229,7 +229,7 @@ class DeepSeekService:
                 [学术诚信警报]:
                 AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
                 分析理由: {worst_report.llm_analysis.reasoning}
-                ---
+                
                 """
         
         aigc_context = ""
@@ -237,7 +237,7 @@ class DeepSeekService:
             aigc_context = f"""
             [AIGC内容警报]:
             检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability * 100:.1f}% 的可能性由AI生成。
-            ---
+            
             """
         
         # 新增匹配报告
@@ -248,7 +248,7 @@ class DeepSeekService:
             AI分析发现，代码与文档的匹配度较低（{code_doc_match_report.score}/100分）。
             理由: {code_doc_match_report.reasoning}
             这可能表明学生未认真撰写文档，请在评分时予以考虑。
-            ---
+            
             """
 
         system_prompt = "你是一位一丝不苟的大学教授AI。你的输出必须是一个单一、有效的JSON对象。"
@@ -257,13 +257,13 @@ class DeepSeekService:
         [任务信息]
         题目: {question}
         评分细则: {json.dumps(rubric, ensure_ascii=False)}
-        ---
+        
         {plagiarism_context}
         {aigc_context}
         {match_context}
         [学生提交内容]
         {json.dumps(student_answer[:50000])}
-        ---
+        
         请严格按照以下JSON格式提供你的最终评估:
         {{
           "total_score": <number>,
@@ -283,7 +283,7 @@ class DeepSeekService:
 
         return {"total_score": -1, "overall_feedback": "AI评分服务出错", "score_details": []}
 
-    # --- 辅助函数 (原版，保持不变) ---
+    #  辅助函数 (原版，保持不变) 
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
         escaped_text1 = json.dumps(text1[:25000], ensure_ascii=False)
         escaped_text2 = json.dumps(text2[:25000], ensure_ascii=False)
@@ -295,13 +295,13 @@ class DeepSeekService:
         3.  列出1-3个最能支撑你结论的**核心文本片段**作为证据。
 
         [报告 A]:
-        ---
+        
         {escaped_text1}
-        ---
+        
         [报告 B]:
-        ---
+        
         {escaped_text2}
-        ---
+        
         请严格按照以下JSON格式返回你的分析报告:
         {{
           "similarity_score": <number>,
@@ -323,13 +323,13 @@ class DeepSeekService:
         3.  列出1-3个最能支撑你结论的**核心文本片段**作为证据。
 
         [报告 A]:
-        ---
+        
         {escaped_code1}
-        ---
+        
         [报告 B]:
-        ---
+        
         {escaped_code2}
-        ---
+        
         请严格按照以下JSON格式返回你的分析报告:
         {{
           "similarity_score": <number>,
@@ -339,16 +339,69 @@ class DeepSeekService:
           ]
         }}
         """
+    
+    async def identify_question_number(self, ocr_text: str, question_list: str) -> int:
+        """
+        判断OCR文本最可能属于试卷中的哪一道题。
+        返回题号 (1, 2, 3...)，如果无法识别则返回 0。
+        """
+        # 修复：在 System Prompt 中明确包含 "JSON" 关键字
+        system_prompt = (
+            "你是一个智能试卷分析助手。"
+            "你的任务是根据提供的OCR文本片段和试卷题目列表，判断这段文本最可能是对哪道题的回答。"
+            "请务必以 JSON 格式输出结果 (Must output JSON)."
+        )
+        
+        user_prompt = f"""
+        [试卷题目列表]:
+        {question_list}
+        
+        [图片OCR文本]:
+        
+        {ocr_text[:2000]} 
+        
+        
+        [任务]:
+        请分析[图片OCR文本]的内容，它看起来是针对[试卷题目列表]中哪一道题的回答？
+        请注意：
+        1. 学生可能会写 "1. xxx", "第一题", "(1)" 等标识。
+        2. 如果没有明确标识，请根据语义内容匹配题目。
+        3. 如果文本包含多道题的回答，请返回第一道出现的题号。
+        4. 如果完全无关或无法识别，返回0。
+        
+        [输出格式]:
+        请严格返回如下 JSON 格式：
+        {{
+            "question_number": <int>
+        }}
+        """
+        
+        try:
+            response_json = await asyncio.to_thread(
+                self._call_api_json,
+                user_prompt,
+                system_prompt,
+                0.1
+            )
+            if response_json:
+                return response_json.get("question_number", 0)
+        except Exception as e:
+            print(f"识别题号失败: {e}")
+        return 0
 
-    # --- 试卷评分新方法 (已更新) ---
+
+    #  试卷评分新方法 
 
     async def grade_exam_question(self, question: str, standard_answer: str, rubric: str, max_score: float, full_student_text: str) -> Optional[Dict[str, Any]]:
         """
         调用DeepSeek API批改单个试卷题目（可能包含多个子问题）
+        优化：采用 Chain of Thought (CoT) 策略，强制要求先生成评语，最后生成分数。
         """
         system_prompt = (
-            "你是一位严格、公正且细致的AI阅卷教师。"
-            "你的任务是根据提供的题目（可能包含多个子问题）、标准答案、评分标准（自然语言描述）和题目总分，在学生的完整试卷文本中找到对应答案，要考虑到OCR识别可能出现的识别错误，然后评分。"
+            "你是一位经验丰富、富有洞察力且评分人性化的大学教授。"
+            "你非常擅长理解由OCR（光学字符识别）生成的文本，能够自动纠正识别错误并还原学生原意。"
+            "在评分时，请注重语义的正确性，对OCR错误保持高度包容，并乐于给予学生鼓励分。"
+            "**核心指令**：为了保证评分的准确性和逻辑一致性，请务必**先进行详细的分析和点评（Thinking）**，仔细推导每一步的得分和扣分，**最后**再根据你的分析总结出最终得分。"
             "你必须严格按照指定的JSON格式返回结果。"
         )
         
@@ -368,31 +421,29 @@ class DeepSeekService:
         {rubric}
 
         [学生试卷完整OCR文本]:
-        (学生在试卷上所有题目的作答内容都在这里)
-        ---
+        (学生在试卷上所有题目的作答内容都在这里，请仔细查找对应的作答区域)
+        
         {full_student_text[:50000]}
-        ---
+        
 
-        [你的任务]:
-        1.  **分析题目**: 仔细阅读[题目内容]、[标准答案]和[评分标准]，理解该题（可能包含多个子问题）的考点和得分点。
-        2.  **提取答案**: 从[学生试卷完整OCR文本]中找到并提取出该学生对[题目内容]中所有子问题的回答。
-        3.  **逐项评分**: 严格对照[评分标准]，逐条判断学生的回答是否满足得分点。
-        4.  **计算总分**: 累加所有得分点的分数，得出该题的总分。总分不能超过[题目总分]。
-        5.  **撰写评语**: 撰写评判依据，清晰地说明*每个子问题*的得分和扣分原因。
-        6.  **格式化输出**: 严格按照下面的JSON格式返回。
+        [评分原则 / Grading Philosophy]:
+        1.  **思维链 (Chain of Thought)**: 请不要直接给出分数。**必须先在 'feedback' 字段中详细写出你的思考过程**。逐条对比评分标准，说明学生答对了哪些点，答错了哪些点，哪些地方因为OCR错误被纠正了。
+        2.  **分数一致性**: 'score' 字段的值必须是你 'feedback' 中所有得分点的总和。**先写评语，根据评语算分。**
+        3.  **OCR容错**: 自动修正OCR错误。只要推断出原意，不扣分。
+        4.  **概念理解满分策略**: 意思对就给满分，不要死扣字眼。
 
-        [输出格式]:
-        请严格按照以下JSON格式返回，不要包含任何其他说明文字：
+        [你的任务步骤]:
+        1.  **提取**: 从OCR文本中定位学生答案。
+        2.  **分析 (Feedback Generation)**: 编写评语。逐项分析得分点。如果扣分，明确写出理由。**在评语的最后，请显式地写出计算过程，例如：“得分点1得3分，得分点2得4分，扣分点X扣1分，总计XX分”。**
+        3.  **总结 (Final Score)**: 将第2步计算出的总分填入 'score' 字段。
+
+        [输出格式 - 务必遵守字段顺序]:
+        请严格按照以下JSON格式返回，**注意字段顺序**：
         {{
-          "score": <number>,
-          "feedback": "<string>",
-          "student_answer_extracted": "<string>"
+          "student_answer_extracted": "<string, 提取出的学生作答内容>",
+          "feedback": "<string, 详细的评分理由和计算过程>",
+          "score": <number, 最终得分，必须与feedback中的计算一致>
         }}
-
-        [输出JSON字段说明]:
-        - "score": <number> - 该题(包含所有子问题)的总得分，不能超过 {max_score} 分。
-        - "feedback": "<string>" - 详细的评判依据。如果题目包含多个子问题（例如 1. 2. 3. 4.），请分点说明每个子问题的得分情况。例如："1. ... (得分) ... 2. ... (得分) ..."
-        - "student_answer_extracted": "<string>" - 从[学生试卷完整OCR文本]中提取出的、与本题相关的学生答案。如果包含多个子问题，请尽量分点展示。
         """
         
         try:
@@ -406,7 +457,8 @@ class DeepSeekService:
             
             # 确保分数不会超过最大分
             if response_json and 'score' in response_json:
-                response_json['score'] = min(max_score, response_json['score'])
+                # 再次做一层防御性编程：确保分数不超过max_score
+                response_json['score'] = min(max_score, float(response_json['score']))
                 
             return response_json
         except Exception as e:
@@ -429,9 +481,9 @@ class DeepSeekService:
         user_prompt = f"""
         以下是学生在一张试卷上所有题目的得分和评语列表：
 
-        ---
+        
         {feedback_str}
-        ---
+        
 
         [任务]:
         请根据以上信息，为该学生撰写一份100-200字的试卷总结报告，包括：

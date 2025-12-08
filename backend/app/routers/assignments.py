@@ -309,7 +309,7 @@ async def export_assignment_results(
             "人工评分": res.human_score if res.is_human_reviewed else "",
             "最高抄袭风险(LLM)": f"{max_plagiarism_score}分" if max_plagiarism_score > 0 else "无风险",
             "AIGC风险": aigc_risk,
-            "代码-文档匹配度": code_doc_match, # 新增列
+            "代码-文档匹配度": code_doc_match, 
             "AI评语": res.feedback,
             "人工评语": res.human_feedback if res.is_human_reviewed else "",
         })

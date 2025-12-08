@@ -80,7 +80,7 @@ async def create_submission(db: AsyncSession, submission: schemas.SubmissionCrea
     await db.refresh(db_submission)
     return db_submission
 
-# --- 更新教师复查提交记录的函数 ---
+#  更新教师复查提交记录的函数 
 async def update_submission(db: AsyncSession, submission_id: int, submission_update: schemas.SubmissionUpdate) -> Optional[models.Submission]:
     """根据教师的复查结果更新一条提交记录。"""
     result = await db.execute(select(models.Submission).filter(models.Submission.id == submission_id))

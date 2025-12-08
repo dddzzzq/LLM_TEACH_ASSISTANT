@@ -9,25 +9,39 @@
     </div>
 
     <div v-else-if="exam" class="space-y-8">
-      <!-- 试卷信息 -->
       <div class="p-6 bg-white rounded-lg shadow-lg">
-        <h1 class="text-3xl font-bold text-gray-800">{{ exam.name }}</h1>
-        <p class="mt-2 text-gray-600">共 {{ exam.question_count }} 道题目</p>
+        <div class="flex justify-between items-start">
+          <div>
+            <h1 class="text-3xl font-bold text-gray-800">{{ exam.name }}</h1>
+            <p class="mt-2 text-gray-600">
+              共 {{ exam.question_count }} 道题目，
+              <span class="font-semibold text-indigo-600"
+                >满分 {{ exam.total_score }} 分</span
+              >
+            </p>
+          </div>
+        </div>
 
         <details class="mt-4">
           <summary class="cursor-pointer font-semibold text-indigo-600">
             查看题目详情
           </summary>
           <ul class="mt-2 space-y-2 text-sm text-gray-700">
-            <li v-for="q in exam.questions" :key="q.id" class="p-2 bg-gray-50 rounded">
-              <strong class="font-bold">{{ q.question_number }}.</strong>
-              {{ q.question_text }}
+            <li
+              v-for="q in exam.questions"
+              :key="q.id"
+              class="p-2 bg-gray-50 rounded flex justify-between"
+            >
+              <span
+                ><strong class="font-bold">{{ q.question_number }}.</strong>
+                {{ q.question_text }}</span
+              >
+              <span class="font-mono text-gray-500">({{ q.max_score }}分)</span>
             </li>
           </ul>
         </details>
       </div>
 
-      <!-- 提交试卷 -->
       <div class="p-6 bg-white rounded-lg shadow-lg">
         <h2 class="mb-4 text-2xl font-bold text-gray-800">提交学生试卷评分</h2>
         <form @submit.prevent="submitStudentExam">
@@ -84,7 +98,6 @@
         </div>
       </div>
 
-      <!-- 评分结果 -->
       <div class="p-6 bg-white rounded-lg shadow-lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
@@ -112,7 +125,7 @@
                 <th
                   class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
                 >
-                  总分
+                  得分 / 总分
                 </th>
                 <th
                   class="px-6 py-3 text-xs font-medium text-right text-gray-500 uppercase"
@@ -131,6 +144,10 @@
                   :class="getScoreColor(result.total_score)"
                 >
                   {{ result.total_score.toFixed(1) }}
+                  <span class="text-gray-400 font-normal mx-1">/</span>
+                  <span class="text-gray-500 font-medium">{{
+                    exam.total_score.toFixed(1)
+                  }}</span>
                 </td>
                 <td
                   class="px-6 py-4 text-sm font-medium text-right whitespace-nowrap space-x-4"
@@ -162,7 +179,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted } from "vue"; // 修改：移除了 computed
 import { useRoute, RouterLink } from "vue-router";
 import gradingApi from "../services/gradingApi";
 import Loader from "../components/Loader.vue";
@@ -183,6 +200,8 @@ const isDeleting = ref(null);
 const error = ref(null);
 const submissionMessage = ref("");
 const submissionError = ref(false);
+
+// 修改：删除了 examTotalScore 的 computed 属性，因为现在后端直接返回 total_score
 
 const fetchExamDetails = async () => {
   isLoadingExam.value = true;
@@ -263,7 +282,6 @@ const deleteResult = async (studentExamId) => {
   isDeleting.value = studentExamId;
   try {
     await gradingApi.deleteStudentExamResult(props.id, studentExamId);
-    // 从列表中移除
     results.value = results.value.filter((r) => r.student_exam_id !== studentExamId);
   } catch (e) {
     console.error(e);
@@ -274,8 +292,14 @@ const deleteResult = async (studentExamId) => {
 };
 
 const getScoreColor = (score) => {
-  if (score >= 85) return "text-green-600";
-  if (score >= 60) return "text-yellow-600";
+  // 修改：直接使用 exam.value.total_score
+  const max = exam.value ? exam.value.total_score : 0;
+  if (!max) return "text-gray-800";
+
+  const ratio = score / max;
+
+  if (ratio >= 0.85) return "text-green-600";
+  if (ratio >= 0.6) return "text-yellow-600";
   return "text-red-600";
 };
 
