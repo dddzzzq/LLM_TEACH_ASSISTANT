@@ -74,7 +74,7 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
                     if student_filename.startswith("__MACOSX/") or os.path.basename(student_filename) == ".DS_Store": continue
                     student_id = os.path.splitext(os.path.basename(student_filename))[0]
                     if student_id not in student_texts: student_texts[student_id] = ""
-                    file_content = grading_service.process_archive(zip_ref.read(item_info), student_filename)
+                    file_content = grading_service.process_archive(zip_ref.read(item_info), student_filename, 0)
                     student_texts[student_id] += f"--- 文件开始: {student_filename} ---\n\n{file_content}\n\n--- 文件结束: {student_filename} ---\n\n"
             batch_log_data["step1_unzip_time_seconds"] = round(time.time() - step1_start, 2)
             
@@ -98,7 +98,11 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
             for sid, content in tqdm(separated_contents.items(), desc="步骤 3/5: 代码-文档匹配度分析"):
                 if content.get("code") and content.get("text"):
                     print(f"\nDEBUG: Analyzing code/doc match for {sid}...")
-                    match_analysis, _ = deepseek_service.analyze_code_doc_match(content["code"], content["text"])
+                    match_analysis, _ = deepseek_service.analyze_code_doc_match(
+                        code_content=content["code"], 
+                        doc_content=content["text"],
+                        assignment_requirement=assignment.question # 传入作业要求
+                    )
                     print(f"DEBUG: LLM raw result for {sid}:")
                     pprint.pprint(match_analysis)
                     if match_analysis:
@@ -295,7 +299,7 @@ async def export_assignment_results(
             source = aigc_report_obj.detection_source
             aigc_risk = f"{prob:.1f}% AI生成 ({source})" if source else f"{prob:.1f}% AI生成"
         
-        # +++ 新增代码文档匹配度信息 +++
+        # 因为学生的代码可能包含库函数实现，因此修改prompt，将任务内容传入，方便比对
         code_doc_match = "未检测"
         if res.code_doc_match_report:
             match_report = schemas.CodeDocMatchReport.model_validate(res.code_doc_match_report)

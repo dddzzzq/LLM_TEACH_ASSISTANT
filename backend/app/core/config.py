@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Grading Assistant"
     API_V1_STR: str = "/api/v1"
-    DATABASE_URL: str = "sqlite:///./sql_app.db"
+    DATABASE_URL: str = "mysql+aiomysql://root:123456@localhost:3306/grading_system"
     DEEPSEEK_API_KEY: str
 
     

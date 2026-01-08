@@ -4,21 +4,11 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path' // 导入 path 模块
 
-// export default defineConfig({
-//   plugins: [
-//     vue(),
-//   ],
-//   resolve: {
-//     alias: {
-//       '@': fileURLToPath(new URL('./src', import.meta.url))
-//     }
-//   }
-// })
 export default defineConfig({
   plugins: [vue()],
   server: {
     host: true,
-    allowedHosts: ['http://localhost:5173'],    // 5173端口网址
+    // allowedHosts: ['http://localhost:5173'],    // 5173端口网址
     // 新增 proxy 配置
     proxy: {
       '/api': {

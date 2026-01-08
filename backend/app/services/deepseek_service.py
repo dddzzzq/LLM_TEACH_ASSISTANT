@@ -152,47 +152,53 @@ class DeepSeekService:
         return analysis_result, usage_info
     
     
-    def analyze_code_doc_match(self, code_content: str, doc_content: str) -> Tuple[Optional[Dict], Dict]:
-        """调用LLM来评估代码和文档的匹配度。"""
+    def analyze_code_doc_match(self, code_content: str, doc_content: str, assignment_requirement: str) -> Tuple[Optional[Dict], Dict]:
+        """调用LLM来评估代码和文档的匹配度，结合作业要求过滤无关代码。"""
+        
         system_prompt = "你是一位经验丰富的计算机科学课程助教。你的输出必须是一个单一、有效的JSON对象，不能包含任何其他内容。"
         
+        # 修改包含作业要求的新prompt
         user_prompt = f"""
-        你是一位经验丰富的计算机科学课程助教，你的任务是评估学生提交的作业中，代码和项目文档之间的一致性和匹配程度。但是可能存在上下文限制，请你适当给出分数。
+        你是一位经验丰富的计算机科学课程助教，你的任务是评估学生提交的作业中，代码和项目文档之间的一致性和匹配程度。
 
-        
+        【作业具体要求】
+        {json.dumps(assignment_requirement, ensure_ascii=False)}
+
         【项目代码】
+        (可能包含第三方库、框架生成代码，请自动忽略这些非核心部分)
         ```
         {json.dumps(code_content[:30000], ensure_ascii=False)}
         ```
 
-        
         【项目文档】
         ```text
         {json.dumps(doc_content[:25000], ensure_ascii=False)}
         ```
 
-        请基于上面提供的【项目代码】和【项目文档】，进行综合评估，并遵循以下要求：
+        请基于【作业具体要求】，对【项目代码】和【项目文档】进行综合评估。
+        
+        **重要指令**：
+        1.  **聚焦核心任务**：学生提交的代码可能包含大量库函数、框架自动生成文件或非作业要求的辅助代码。请**忽略**这些无关部分，只检查**实现【作业具体要求】的核心逻辑代码**是否与文档一致。
+        2.  **评估维度**：
+            * **覆盖度**：文档是否描述了作业要求中规定的关键功能实现？
+            * **一致性**：文档中描述的逻辑（如算法步骤、类设计）是否与核心代码实际实现一致？
+            * **准确性**：文档是否如实反映了代码的功能，没有夸大或编造未实现的功能？
 
-        1.  **评估维度**：
-            * **完整性**：文档是否覆盖了代码中的主要功能、模块和核心逻辑？
-            * **准确性**：文档的描述是否准确地反映了代码的实际功能和实现方式？
-            * **清晰度**：文档的语言是否清晰易懂，有助于理解代码？
+        **评分标准**：
+        * 请给出一个0到100的匹配度总分。
+        * 90-100分：针对作业要求的核心功能，文档描述详尽且与代码完全一致。
+        * 70-89分：覆盖了主要作业要求，但文档细节与代码有少量出入。
+        * 50-69分：文档只描述了部分作业要求，或包含大量与核心代码无关的废话。
+        * 0-49分：文档与作业要求脱节，或描述的功能代码中根本不存在。
 
-        2.  **评分标准**：
-            * 请给出一个0到100的匹配度总分。
-            * 90-100分：完美匹配，文档详尽、准确、清晰。
-            * 70-89分：良好匹配，大部分功能有描述，但有少量遗漏或不准确之处。
-            * 50-69分：基本匹配，文档只描述了部分核心功能，或存在明显与代码不符之处。
-            * 0-49分：严重不匹配，文档内容空洞、错误，或与代码完全脱节。
-
-        3.  **输出格式**：
+        **输出格式**：
         请严格按照以下JSON格式返回你的分析报告:
         {{
-          "score": <number>,
-          "reasoning": "<string>",
+        "score": <number>,
+        "reasoning": "<string>"
         }}
             * `score` 字段为0-100的整数。
-            * `reasoning` 字段为一段不超过100字的简短评语，总结你的评估依据。
+            * `reasoning` 字段为一段不超过150字的评语，需明确指出文档是否覆盖了作业要求的核心功能。
         """
 
         usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -283,7 +289,7 @@ class DeepSeekService:
 
         return {"total_score": -1, "overall_feedback": "AI评分服务出错", "score_details": []}
 
-    #  辅助函数 (原版，保持不变) 
+    #  辅助函数
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
         escaped_text1 = json.dumps(text1[:25000], ensure_ascii=False)
         escaped_text2 = json.dumps(text2[:25000], ensure_ascii=False)
@@ -345,7 +351,6 @@ class DeepSeekService:
         判断OCR文本最可能属于试卷中的哪一道题。
         返回题号 (1, 2, 3...)，如果无法识别则返回 0。
         """
-        # 修复：在 System Prompt 中明确包含 "JSON" 关键字
         system_prompt = (
             "你是一个智能试卷分析助手。"
             "你的任务是根据提供的OCR文本片段和试卷题目列表，判断这段文本最可能是对哪道题的回答。"

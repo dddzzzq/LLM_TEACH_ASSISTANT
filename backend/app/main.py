@@ -4,6 +4,9 @@ from fastapi.staticfiles import StaticFiles # 导入 StaticFiles
 import os
 from .db.database import Base, engine
 from .routers import assignments, exams 
+import sys
+import asyncio # 1. 导入 asyncio
+
 
 # 确保上传目录存在，避免启动报错
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
@@ -15,7 +18,7 @@ app = FastAPI(
     version="2.2.0" 
 )
 
-#  新增：挂载静态文件目录：可以在前端展示图片 
+#  挂载静态文件目录：可以在前端展示图片 
 # 这样 /uploads/exams/xxx.png 就可以通过 http://localhost:8000/uploads/exams/xxx.png 访问
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 

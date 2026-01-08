@@ -5,18 +5,21 @@ from .database import Base
 from ..schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport
 from typing import List, Optional, Dict
 
-
+# 与sqlite相比，mysql的String需要指定长度
 class Assignment(Base):
     __tablename__ = "assignments"
     id = Column(Integer, primary_key=True, index=True)
-    task_name = Column(String, index=True)
+    task_name = Column(String(255), index=True)
     question = Column(Text)
     _rubric_json = Column("rubric", Text)
     submissions = relationship("Submission", back_populates="assignment", cascade="all, delete-orphan")
 
     @property
     def rubric(self):
-        return json.loads(self._rubric_json)
+        try:
+            return json.loads(self._rubric_json)
+        except (TypeError, json.JSONDecodeError):
+            return {}
 
     @rubric.setter
     def rubric(self, value):
@@ -25,7 +28,7 @@ class Assignment(Base):
 class Submission(Base):
     __tablename__ = "submissions"
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(String, index=True)
+    student_id = Column(String(64), index=True)
     score = Column(Float)
     feedback = Column(Text)
     merged_content = Column(Text)
@@ -43,15 +46,23 @@ class Submission(Base):
     def plagiarism_reports(self):
         if self._plagiarism_reports_json is None:
             return []
-        reports = json.loads(self._plagiarism_reports_json)
-        return [PlagiarismReport.model_validate(r) for r in reports]
+        try:
+            reports = json.loads(self._plagiarism_reports_json)
+            return [PlagiarismReport.model_validate(r) for r in reports]
+        except Exception:
+            return []
 
     @plagiarism_reports.setter
     def plagiarism_reports(self, value: Optional[List[Dict]]):
         if value is None:
             self._plagiarism_reports_json = None
         else:
-            reports_as_dicts = [report.model_dump(by_alias=True) for report in value]
+            reports_as_dicts = []
+            for report in value:
+                if hasattr(report, 'model_dump'):
+                    reports_as_dicts.append(report.model_dump(by_alias=True))
+                else:
+                    reports_as_dicts.append(report)
             self._plagiarism_reports_json = json.dumps(reports_as_dicts, ensure_ascii=False)
 
     @property
@@ -68,20 +79,23 @@ class Submission(Base):
         if value is None:
             self._code_doc_match_report_json = None
         else:
-            self._code_doc_match_report_json = value.model_dump_json() if hasattr(value, 'model_dump_json') else value.json()
+            self._code_doc_match_report_json = value.model_dump_json() if hasattr(value, 'model_dump_json') else json.dumps(value)
 
     @property
     def aigc_report(self):
         if self._aigc_report_json is None:
             return None
-        return json.loads(self._aigc_report_json)
+        try:
+            return json.loads(self._aigc_report_json)
+        except Exception:
+            return None
 
     @aigc_report.setter
     def aigc_report(self, value: Optional[AIGCReport]):
         if value is None:
             self._aigc_report_json = None
         else:
-            self._aigc_report_json = value.model_dump_json()
+            self._aigc_report_json = value.model_dump_json() if hasattr(value, 'model_dump_json') else json.dumps(value)
 
 
 #  试卷相关模型 
@@ -89,7 +103,7 @@ class Submission(Base):
 class Exam(Base):
     __tablename__ = "exams"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
+    name = Column(String(255), index=True)
     question_count = Column(Integer, default=0)
     total_score = Column(Float, default=0.0)
     
@@ -108,14 +122,12 @@ class ExamQuestion(Base):
     
     exam = relationship("Exam", back_populates="questions")
     student_answers = relationship("StudentQuestionAnswer", back_populates="question")
-    # 反向关联图片（可选，如果需要直接通过题目找图片）
-    # images = relationship("StudentExamImage", back_populates="question")
 
 class StudentExam(Base):
     __tablename__ = "student_exams"
     id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exams.id"))
-    student_id = Column(String, index=True)
+    student_id = Column(String(64), index=True)
     
     exam = relationship("Exam", back_populates="student_exams")
     answers = relationship("StudentQuestionAnswer", back_populates="student_exam", cascade="all, delete-orphan")
@@ -131,13 +143,13 @@ class StudentExamImage(Base):
     __tablename__ = "student_exam_images"
     id = Column(Integer, primary_key=True, index=True)
     student_exam_id = Column(Integer, ForeignKey("student_exams.id"))
-    image_path = Column(String) # 存储相对路径
+    image_path = Column(String(512)) 
     
-    # 关联具体的题目ID。如果一张图包含多道题，这里可以存第一道题的ID，或者改为多对多（为了简单，我们假设主要归属于某一道题，或者为NULL表示未识别/公共页）
+    # 关联具体的题目ID
     exam_question_id = Column(Integer, ForeignKey("exam_questions.id"), nullable=True)
     
     student_exam = relationship("StudentExam", back_populates="images")
-    question = relationship("ExamQuestion") # 关联到题目
+    question = relationship("ExamQuestion") 
 
 class StudentQuestionAnswer(Base):
     __tablename__ = "student_question_answers"
