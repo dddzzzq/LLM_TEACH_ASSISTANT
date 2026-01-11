@@ -12,6 +12,7 @@ from fastapi import (
     File,
     HTTPException,
     UploadFile,
+    logger,
     status,
 )
 from fastapi.responses import StreamingResponse
@@ -63,19 +64,110 @@ async def process_batch_file(assignment_id: int, batch_bytes: bytes):
             return
 
         try:
-            # ===== 步骤 1/5: 解压并提取文件 =====
+            # 步骤 1/5: 解压并提取文件 (支持 Zip/Rar/7z 及智能容错)
+            # 出现学生私自更改文件格式的问题，完善处理，增加兜底策略
             step1_start = time.time()
             student_texts = {}
-            with zipfile.ZipFile(io.BytesIO(batch_bytes), "r") as zip_ref:
-                for item_info in tqdm(zip_ref.infolist(), desc="步骤 1/5: 解压并提取文件"):
-                    if item_info.is_dir(): continue
-                    try: student_filename = item_info.filename.encode("cp437").decode("gbk")
-                    except: student_filename = item_info.filename
-                    if student_filename.startswith("__MACOSX/") or os.path.basename(student_filename) == ".DS_Store": continue
-                    student_id = os.path.splitext(os.path.basename(student_filename))[0]
-                    if student_id not in student_texts: student_texts[student_id] = ""
-                    file_content = grading_service.process_archive(zip_ref.read(item_info), student_filename, 0)
-                    student_texts[student_id] += f"--- 文件开始: {student_filename} ---\n\n{file_content}\n\n--- 文件结束: {student_filename} ---\n\n"
+            
+            # 定义统一的归档迭代器：输入二进制流，输出 [(filename, bytes), ...]
+            def extract_batch_archive(data_bytes):
+                import io, zipfile, rarfile, py7zr, tempfile, os
+
+                buffer = io.BytesIO(data_bytes)
+                results = [] # 存储 (filename, content_bytes)
+
+                # 策略 1: 尝试作为 ZIP
+                def try_zip():
+                    try:
+                        buffer.seek(0)
+                        if not zipfile.is_zipfile(buffer): return False
+                        buffer.seek(0)
+                        with zipfile.ZipFile(buffer, "r") as z:
+                            for info in z.infolist():
+                                if info.is_dir(): continue
+                                results.append((info.filename, z.read(info)))
+                        return True
+                    except: return False
+
+                # 策略 2: 尝试作为 RAR
+                def try_rar():
+                    try:
+                        buffer.seek(0)
+                        with rarfile.RarFile(buffer, "r") as r:
+                            for info in r.infolist():
+                                if info.isdir(): continue
+                                results.append((info.filename, r.read(info)))
+                        return True
+                    except: return False
+
+                # 策略 3: 尝试作为 7Z (因为7z压缩类型特殊，使用临时目录提取)
+                def try_7z():
+                    try:
+                        buffer.seek(0)
+                        if not py7zr.is_7zfile(buffer): return False
+                        buffer.seek(0)
+                        with tempfile.TemporaryDirectory() as tmp_dir:
+                            with py7zr.SevenZipFile(buffer, 'r') as z:
+                                z.extractall(path=tmp_dir)
+                            # 遍历临时目录回填数据
+                            for root, dirs, files in os.walk(tmp_dir):
+                                for file in files:
+                                    full_path = os.path.join(root, file)
+                                    rel_path = os.path.relpath(full_path, tmp_dir).replace("\\", "/")
+                                    with open(full_path, 'rb') as f:
+                                        results.append((rel_path, f.read()))
+                        return True
+                    except: return False
+
+                # 按顺序执行策略 (优先 Zip -> Rar -> 7z)
+                if try_zip(): return results
+                if try_rar(): return results
+                if try_7z(): return results
+                
+                # 如果都失败，抛出异常让外层捕获
+                raise Exception("无法识别的压缩包格式 (Not Zip/Rar/7z)")
+
+            # 执行解压 (获取所有文件列表)
+            try:
+                # 这里会智能识别格式并提取出所有文件
+                extracted_items = extract_batch_archive(batch_bytes)
+            except Exception as e:
+                # 记录错误并抛出，让任务变为 failed 状态
+                logger.error(f"批量包解压失败: {e}")
+                raise HTTPException(status_code=400, detail=f"上传的压缩包无法解压: {str(e)}")
+
+            # 开始遍历提取出的文件列表
+            for filename_raw, file_content_bytes in tqdm(extracted_items, desc="步骤 1/5: 提取学生作业"):
+                
+                # 1. 处理文件名编码 (主要针对 Windows Zip 的乱码问题)
+                student_filename = filename_raw
+                try:
+                    # 尝试修复常见的 gbk 乱码
+                    student_filename = filename_raw.encode("cp437").decode("gbk")
+                except:
+                    pass # 如果不是 cp437 编码或者本身就是 utf-8，保持原样即可
+
+                # 2. 过滤系统文件
+                if student_filename.startswith("__MACOSX/") or os.path.basename(student_filename) == ".DS_Store":
+                    continue
+                
+                # 3. 提取学生信息
+                # 使用 splitext 拿到文件名主体，再简单处理
+                student_id = os.path.splitext(os.path.basename(student_filename))[0]
+                # 简单处理：如果文件名包含路径，只取最后一部分
+                
+                if student_id not in student_texts: 
+                    student_texts[student_id] = ""
+                
+                # 4. 调用 Service 处理单个学生的压缩包
+                # 注意：这里调用的是 Service 层的 process_archive，它内部也有了我们刚才加的智能兜底逻辑
+                # 形成了 双重保险 (Batch包智能解压 -> 学生包智能解压)
+                file_text_content = grading_service.process_archive(file_content_bytes, student_filename, 0)
+                
+                # 5. 拼接文本
+                if file_text_content and file_text_content.strip():
+                    student_texts[student_id] += f"--- 文件开始: {student_filename} ---\n\n{file_text_content}\n\n--- 文件结束: {student_filename} ---\n\n"
+
             batch_log_data["step1_unzip_time_seconds"] = round(time.time() - step1_start, 2)
             
             # 更新学生数量

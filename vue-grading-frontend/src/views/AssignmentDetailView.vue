@@ -544,19 +544,19 @@ const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
 
 const formatAIGC = (report?: AIGCReport): string => {
   if (!report) return "未检测";
-  const probability = (report.ai_probability * 100).toFixed(1);
+  const probability = (report.ai_probability * 100).toFixed(1); 
   const source = report.detection_source ? ` (${report.detection_source})` : "";
   return `${probability}% AI生成${source}`;
 };
 
 const getAIGCColor = (report?: AIGCReport): string => {
   if (!report) return "text-gray-400";
-  if (report.ai_probability > 0.8) return "text-red-600";
-  if (report.ai_probability > 0.5) return "text-yellow-600";
+  const probPercent = report.ai_probability * 100;
+  if (probPercent > 80) return "text-red-600";
+  if (probPercent > 50) return "text-yellow-600";
   return "text-green-600";
 };
 
-// +++ 新增辅助函数 +++
 const formatCodeDocMatch = (report?: CodeDocMatchReport): string => {
   if (!report) return "未检测";
   return `${report.score}分`;

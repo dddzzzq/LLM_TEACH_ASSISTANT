@@ -1,5 +1,7 @@
 import tempfile
 import zipfile
+import PyPDF2
+from docx import Document
 import rarfile
 import io
 import os
@@ -8,7 +10,30 @@ import py7zr
 import logging
 import sys
 import textract
-from .file_processor import read_text_from_docx, read_text_from_pdf
+# 为本地测试时使用时兜底
+try:
+    from .file_processor import read_text_from_docx, read_text_from_pdf
+except:
+    def read_text_from_docx(file_bytes: bytes) -> str:
+        """从.docx文件的字节流中读取文本。"""
+        try:
+            doc = Document(io.BytesIO(file_bytes))
+            return "\n".join([para.text for para in doc.paragraphs])
+        except Exception as e:
+            print(f"读取DOCX文件时出错: {e}")
+            return ""
+        
+    def read_text_from_pdf(file_bytes: bytes) -> str:
+        """从.pdf文件的字节流中读取文本。"""
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except Exception as e:
+            print(f"读取PDF文件时出错: {e}")
+            return ""
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -17,7 +42,8 @@ logger = logging.getLogger(__name__)
 IGNORED_DIRS = {
     '__pycache__', 'node_modules', '.git', 
     '.idea', '.vscode', 'venv', 'env', 
-    'build', 'dist', 'target', 'bin', 'obj', 'migrations', 'cmake-build-debug', '__MACOSX'
+    'build', 'dist', 'target', 'bin', 'obj', 'migrations', 'cmake-build-debug', '__MACOSX',
+    'downloads'
 }
 
 ALLOWED_EXTENSIONS = {
@@ -26,7 +52,7 @@ ALLOWED_EXTENSIONS = {
     '.html', '.css', '.scss', '.less',
     '.go', '.rs', '.php', '.rb', '.lua', '.swift',
     '.sql', '.sh', '.bat', '.ps1', 
-    '.zip', '.rar', '.7z'
+    '.zip', '.rar', '.7z',
     '.txt', '.md', '.docx', '.doc', '.pdf' 
 }
 
@@ -91,14 +117,88 @@ class GradingService:
             # 日志观察是否删掉文件
             logger.debug(f"🚫 [忽略-后缀] {file_path} (后缀 '{ext}' 不在白名单)")
             return True
+        
+        # 4. 删掉特殊的文件
+        if filename in ['download.txt', 'output.txt', 'rfc.txt', 'test.txt', 'duopu.txt', 'sample.txt', 'jquery.js',
+                        'package.json', 'package-lock.json', 'tsconfig.json', 'large-file.md',
+                        'large-text.md', 'test.pdf', 'test-explorer.txt', 'test-final.md'
+                        ]:
+            return True
             
         return False
-
+    
+    def _is_likely_text(self, text: str, threshold: float = 0.3) -> bool:
+        """
+        判断解码后的字符串是否像正常文本。
+        如果有太多不可打印字符（乱码），则返回 False。
+        """
+        if not text:
+            return True
+            
+        # 统计文本中“不可打印字符”的数量 (排除换行符、制表符等正常空白符)
+        # category 'Cc' 代表 Control characters (如 NUL, SOH 等)
+        # category 'Cn' 代表 Not assigned (通常是乱码)
+        import unicodedata
+        
+        non_printable_count = 0
+        check_length = min(len(text), 1000) # 只检查前1000个字符以提高效率
+        
+        for char in text[:check_length]:
+            if char in ('\n', '\r', '\t'):
+                continue
+            category = unicodedata.category(char)
+            if category.startswith('C') or category == 'Co':
+                non_printable_count += 1
+        
+        ratio = non_printable_count / check_length
+        return ratio < threshold
+    
     def _get_content_from_file(self, filename: str, file_bytes: bytes) -> str:
+        """
+        由于学生很可能私自更改文件格式，导致读取错误
+        在这部分加入兜底策略，一步步试探文件正确格式
+        
+        :param self: Description
+        :param filename: Description
+        :type filename: str
+        :param file_bytes: Description
+        :type file_bytes: bytes
+        :return: Description
+        :rtype: str
+        """
         lower_filename = filename.lower()
         
         if not file_bytes:
             return ""
+
+        # 策略1：优先基于文件头的纠错机制
+        
+        # 1.1 检测是否为被改名的 Zip/Docx (以 PK 开头)
+        if file_bytes.startswith(b'PK\x03\x04'):
+            # 很多学生会把 .docx 改名为 .ts 或 .c 交上来
+            # 尝试作为 docx 解析
+            try:
+                logger.info(f"🔍 [智能修正] 检测到 {filename} 可能是伪装的 docx，尝试解析...")
+                text = read_text_from_docx(file_bytes)
+                if text and len(text.strip()) > 0:
+                     return f"【系统提示：该文件名为 {filename}，但检测到其实际为 Office/Zip 格式。已尝试提取文本内容：】\n\n{text}"
+            except Exception as e:
+                logger.debug(f"Docx 解析尝试失败: {e}")
+        
+        # 1.2 检测是否为被改名的 PDF (以 %PDF 开头)
+        if file_bytes.startswith(b'%PDF'):
+            try:
+                logger.info(f"🔍 [智能修正] 检测到 {filename} 可能是伪装的 PDF，尝试解析...")
+                text = read_text_from_pdf(file_bytes)
+                return f"【系统提示：该文件名为 {filename}，但检测到其实际为 PDF 格式。已尝试提取文本内容：】\n\n{text}"
+            except:
+                pass
+
+        # 1.3 检测是否为二进制 Word doc (以 0xD0CF11E0 开头)
+        if file_bytes.startswith(b'\xD0\xCF\x11\xE0'):
+             return self._read_text_from_doc(file_bytes, filename)
+
+        # 正常流程：按后缀名处理
 
         if lower_filename.endswith(".doc"):
             return self._read_text_from_doc(file_bytes, filename)
@@ -109,14 +209,28 @@ class GradingService:
         if lower_filename.endswith(".pdf"):
             return read_text_from_pdf(file_bytes)
             
-        # 文本/代码处理
+        # 策略2：文本解码与乱码过滤
+        
+        decoded_text = ""
+        encoding_used = "utf-8"
+        
         try:
-            return file_bytes.decode('utf-8')
+            decoded_text = file_bytes.decode('utf-8')
         except UnicodeDecodeError:
             try:
-                return file_bytes.decode('gbk')
+                decoded_text = file_bytes.decode('gbk')
+                encoding_used = "gbk"
             except:
-                return file_bytes.decode('utf-8', errors='ignore')
+                # 最后的尝试：忽略错误解码
+                decoded_text = file_bytes.decode('utf-8', errors='ignore')
+                encoding_used = "utf-8-ignore"
+
+        # 核心兜底：检查解码后的内容是否包含大量控制字符（即截图中的 NUL, ETX 等）
+        if not self._is_likely_text(decoded_text):
+            logger.warning(f"⚠️ [乱码拦截] {filename} 解码后包含大量二进制控制字符，已忽略。")
+            return f"【系统提示：文件 {filename} 无法作为文本读取。它可能是一个二进制文件（如编译后的程序、图片或加密文件）被错误重命名了。】"
+
+        return decoded_text
 
     def _process_archive_items(self, archive_ref, item_infos, depth) -> str:
         merged_contents = []
@@ -157,11 +271,19 @@ class GradingService:
                     # 计算文件名中连字符 '-' 的出现次数
                     hyphen_count = filename.lower().count('-')
                     
-                    # 如果连字符数量是 3 或 4 个，则跳过
+                    # 如果连字符数量是 3 或 4 个，则跳过系统生成的doc文件
                     if 3 <= hyphen_count <= 4:
                         logger.info(f"🗑️ [规则过滤] 跳过特定格式Doc文件(含{hyphen_count}个'-'): {filename.lower()}")
                         continue
+            basename = os.path.basename(filename).lower()
+                    
+                    # 2. 定义黑名单
+            BLOCK_LIST = ['axios.zip', 'node_modules.zip', 'vendor.zip']
 
+            # 3. 检查纯文件名是否在黑名单中
+            if basename in BLOCK_LIST:
+                logger.info(f"🚫 [忽略-黑名单压缩包] {filename}")
+                continue
             try:
                 # 读取内容
                 if hasattr(archive_ref, 'read'):
@@ -192,81 +314,169 @@ class GradingService:
                 merged_contents.append(f"--- 读取失败: {filename} ({e}) ---\n")
                     
         return "\n".join(merged_contents)
-    
+
     def _process_7z_items(self, archive_ref) -> str:
-        """专门遍历和解析 .7z 压缩包内的项目"""
+        """
+        专门遍历和解析 .7z 压缩包内的项目
+        使用 extractall + TemporaryDirectory 替代已移除的 readall() 方法
+        """
         merged_contents = []
         
-        # py7zr 使用 readall() 一次性读取所有文件到内存
-        all_files = archive_ref.readall()
-        
-        # archive_ref.list() 用于获取文件元信息列表
-        for item_info in sorted(archive_ref.list(), key=lambda x: x.filename):
-            if item_info.is_directory:
-                continue
+        # 使用临时目录进行解压，处理完后自动清理
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                # 将所有文件解压到临时目录
+                archive_ref.extractall(path=tmp_dir)
+            except Exception as e:
+                logger.error(f"7z解压失败: {e}")
+                return f"--- 7z解压失败: {e} ---\n"
 
-            filename = item_info.filename
-            if filename.startswith("__MACOSX/") or os.path.basename(filename) == ".DS_Store":
-                continue
-
-            # 从 all_files 字典中获取文件内容
-            file_obj = all_files[filename]
-            file_content_bytes = file_obj.read()
-            raw_answer = ""
-
-            if filename.lower().endswith((".zip", ".rar", ".7z")):
-                try:
-                    nested_content = self.process_archive(file_content_bytes, filename)
-                    if nested_content.strip():
-                        raw_answer = (
-                            f"--- 嵌套压缩包 '{filename}' 内容开始 ---\n\n"
-                            f"{nested_content}\n"
-                            f"--- 嵌套压缩包 '{filename}' 内容结束 ---"
-                        )
-                except Exception as e:
-                    raw_answer = f"--- 无法处理嵌套压缩文件: {filename} (错误: {e}) ---"
-            else:
-                raw_answer = self._get_content_from_file(filename, file_content_bytes)
-
-            if raw_answer and raw_answer.strip():
-                if not filename.lower().endswith((".zip", ".rar", ".7z")):
-                    merged_contents.append(
-                        f"--- 文件开始: {filename} ---\n\n"
-                        f"{raw_answer}\n\n"
-                        f"--- 文件结束: {filename} ---\n\n"
-                    )
-                else:
-                    merged_contents.append(raw_answer)
+            # 遍历临时目录下的所有文件
+            for root, dirs, files in os.walk(tmp_dir):
+                # 排序确保处理顺序一致
+                for filename in sorted(files):
+                    full_path = os.path.join(root, filename)
                     
+                    # 计算相对路径（去除临时目录前缀），用于展示文件名
+                    rel_path = os.path.relpath(full_path, tmp_dir).replace("\\", "/")
+                    
+                    # 过滤掉不需要的文件
+                    if rel_path.startswith("__MACOSX") or ".DS_Store" in rel_path:
+                        continue
+                    
+                    # 基础黑名单/白名单过滤 (复用已有的 is_ignored_file 逻辑)
+                    if self.is_ignored_file(rel_path):
+                        continue
+
+                    try:
+                        # 读取文件内容为 bytes
+                        with open(full_path, 'rb') as f:
+                            file_content_bytes = f.read()
+                        
+                        raw_answer = ""
+
+                        # 递归处理嵌套压缩包
+                        if rel_path.lower().endswith((".zip", ".rar", ".7z")):
+                            try:
+                                nested_content = self.process_archive(file_content_bytes, rel_path)
+                                if nested_content.strip():
+                                    raw_answer = (
+                                        f"--- 嵌套压缩包 '{rel_path}' 内容开始 ---\n\n"
+                                        f"{nested_content}\n"
+                                        f"--- 嵌套压缩包 '{rel_path}' 内容结束 ---"
+                                    )
+                            except Exception as e:
+                                raw_answer = f"--- 无法处理嵌套压缩文件: {rel_path} (错误: {e}) ---"
+                        else:
+                            # 普通文件处理：调用已有的内容提取逻辑
+                            raw_answer = self._get_content_from_file(rel_path, file_content_bytes)
+
+                        # 只有非空内容才添加
+                        if raw_answer and raw_answer.strip():
+                            if not rel_path.lower().endswith((".zip", ".rar", ".7z")):
+                                merged_contents.append(
+                                    f"--- 文件开始: {rel_path} ---\n\n"
+                                    f"{raw_answer}\n\n"
+                                    f"--- 文件结束: {rel_path} ---\n\n"
+                                )
+                            else:
+                                merged_contents.append(raw_answer)
+                                
+                    except Exception as e:
+                        logger.error(f"读取解压后的文件失败 {rel_path}: {e}")
+                        merged_contents.append(f"--- 读取失败: {rel_path} ({e}) ---\n")
+
         return "".join(merged_contents)
 
     def process_archive(self, file_bytes: bytes, original_filename: str, depth=0) -> str:
-        """入口函数"""
-        file_type = os.path.splitext(original_filename)[1].lower()
-        logger.info(f"--- 开始处理压缩包 (Depth={depth}): {original_filename} ---")
+        """
+        入口函数：处理压缩包，包含文件后缀伪造的智能兜底策略。
+        逻辑：优先尝试后缀名对应的格式，失败后轮询其他格式。
+        """
+        import io
+        import zipfile
+        import rarfile
+        import py7zr
+
+        ext = os.path.splitext(original_filename)[1].lower()
+        logger.info(f"--- 开始处理文件 (Depth={depth}): {original_filename} ---")
         
-        try:
-            buffer = io.BytesIO(file_bytes)
-            if file_type == ".zip":
+        buffer = io.BytesIO(file_bytes)
+
+        # 同样因为有些学生私自更改文件后缀名导致提取失败，使用兜底策略
+        
+        def try_zip():
+            try:
+                buffer.seek(0) # 关键：重置指针
+                # 预检查，快速失败
+                if not zipfile.is_zipfile(buffer):
+                    return None
+                buffer.seek(0)
                 with zipfile.ZipFile(buffer, "r") as z:
                     return self._process_archive_items(z, z.infolist(), depth)
-            elif file_type == ".rar":
+            except Exception:
+                return None
+
+        def try_rar():
+            try:
+                buffer.seek(0)
+                # rarfile 没有像 is_zipfile 那么方便的预检查，直接尝试打开
                 with rarfile.RarFile(buffer, "r") as r:
                     return self._process_archive_items(r, r.infolist(), depth)
-            elif file_type == ".7z":
-                with py7zr.SevenZipFile(buffer, 'r') as archive_ref:
-                    return self._process_7z_items(archive_ref)
-            else:
-                return self._get_content_from_file(original_filename, file_bytes)
+            except Exception:
+                return None
 
-        except Exception as e:
-            return f"处理异常: {e}"
+        def try_7z():
+            try:
+                buffer.seek(0)
+                if not py7zr.is_7zfile(buffer):
+                    return None
+                buffer.seek(0)
+                with py7zr.SevenZipFile(buffer, 'r') as z:
+                    return self._process_7z_items(z)
+            except Exception:
+                return None
+
+        # --- 策略编排 ---
+
+        # 1. 如果不是常见的压缩包后缀，直接当做普通文件读取
+        if ext not in ['.zip', '.rar', '.7z']:
+            return self._get_content_from_file(original_filename, file_bytes)
+
+        # 2. 根据后缀名决定尝试顺序
+        strategies = []
+        if ext == ".zip":
+            strategies = [("zip", try_zip), ("rar", try_rar), ("7z", try_7z)]
+        elif ext == ".rar":
+            strategies = [("rar", try_rar), ("zip", try_zip), ("7z", try_7z)]
+        elif ext == ".7z":
+            strategies = [("7z", try_7z), ("zip", try_zip), ("rar", try_rar)]
+        
+        # 3. 执行策略链
+        errors = []
+        for fmt_name, handler in strategies:
+            result = handler()
+            if result is not None:
+                # 成功解压
+                if f".{fmt_name}" != ext:
+                    logger.warning(f"文件 {original_filename} 后缀为 {ext} 但实际是 {fmt_name} 格式")
+                return result
+            else:
+                errors.append(fmt_name)
+
+        # 4. 所有策略都失败了
+        error_msg = f"处理异常: 无法解压文件 {original_filename}。已尝试格式: {', '.join(errors)}。文件可能已损坏。"
+        logger.error(error_msg)
+        return error_msg
         
 grading_service = GradingService()
 
 # 本地测试
 if __name__ == "__main__":
-    TARGET = "/root/autodl-tmp/dzq/LLM_TEACH_ASSISTANT/backend/app/dataset/homework/2.zip" 
+    # 输入文件路径
+    TARGET = "/root/autodl-tmp/dzq/homework/p1.zip" 
+    # 输出文件路径
+    OUTPUT_FILE = "extraction_result.txt"
     
     TEST_DEPTH = 0
 
@@ -276,6 +486,14 @@ if __name__ == "__main__":
             svc = GradingService()
             result = svc.process_archive(data, TARGET, depth=TEST_DEPTH)
             
+            try:
+                with open(OUTPUT_FILE, "w", encoding="utf-8") as out_f:
+                    out_f.write(result)
+                print(f"\n✅ 成功！结果已保存至: {os.path.abspath(OUTPUT_FILE)}")
+            except Exception as e:
+                print(f"\n❌ 保存文件失败: {e}")
+            # --- 修改部分结束 ---
+
             print("\n" + "="*30)
             print(f"最终提取结果长度: {len(result)} 字符")
             if len(result) < 500:

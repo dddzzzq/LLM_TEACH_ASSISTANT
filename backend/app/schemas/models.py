@@ -23,7 +23,7 @@ class SuspiciousPart (BaseModel):
 class LLMPlagiarismAnalysis(BaseModel):
     similarity_score: int = Field(description="LLM给出的0-100的相似度分数")
     reasoning: str = Field(description="LLM给出的详细分析理由")
-    suspicious_parts: List[SuspiciousPart] = Field(description="具体的相似片段证据")
+    suspicious_parts: List[SuspiciousPart] = Field(default=[], description="具体的相似片段证据")   # 默认为空列表，不然后续在LLM评测会报错
 
 class PlagiarismReport(BaseModel):
     similar_to: str = Field(description="与哪个学生最相似")

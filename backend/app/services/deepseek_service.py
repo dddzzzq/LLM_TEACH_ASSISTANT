@@ -222,21 +222,21 @@ class DeepSeekService:
     
     def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_reports: List[PlagiarismReport] = [], aigc_report: Optional[AIGCReport] = None, code_doc_match_report: Optional[CodeDocMatchReport] = None) -> dict:
         plagiarism_context = ""
-        if plagiarism_reports:
-            highest_plagiarism_score = 0
-            worst_report = None
-            for report in plagiarism_reports:
-                if report.llm_analysis and report.llm_analysis.similarity_score > highest_plagiarism_score:
-                    highest_plagiarism_score = report.llm_analysis.similarity_score
-                    worst_report = report
+        # if plagiarism_reports:
+        #     highest_plagiarism_score = 0
+        #     worst_report = None
+        #     for report in plagiarism_reports:
+        #         if report.llm_analysis and report.llm_analysis.similarity_score > highest_plagiarism_score:
+        #             highest_plagiarism_score = report.llm_analysis.similarity_score
+        #             worst_report = report
             
-            if highest_plagiarism_score > 95 and worst_report:
-                 plagiarism_context = f"""
-                [学术诚信警报]:
-                AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
-                分析理由: {worst_report.llm_analysis.reasoning}
+        #     if highest_plagiarism_score > 95 and worst_report:
+        #          plagiarism_context = f"""
+        #         [学术诚信警报]:
+        #         AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
+        #         分析理由: {worst_report.llm_analysis.reasoning}
                 
-                """
+        #         """
         
         aigc_context = ""
         if aigc_report and aigc_report.ai_probability > 0.8:
@@ -257,16 +257,56 @@ class DeepSeekService:
             
             """
 
-        system_prompt = "你是一位一丝不苟的大学教授AI。你的输出必须是一个单一、有效的JSON对象。"
+        system_prompt = (
+            "你是一位客观、公正的大学教授。你的评分原则是：'奖励优秀，认可完成，指出不足'。"
+            "你需要根据评分细则给出合理的得分，避免分数膨胀（所有人都是95分），也要避免过度严苛。"
+            "你的输出必须是一个单一、有效的JSON对象。"
+        )
+
         user_prompt = f"""
-        请为学生的项目评分。
+        请为学生的项目作业进行评分。
+        
         [任务信息]
         题目: {question}
         评分细则: {json.dumps(rubric, ensure_ascii=False)}
         
+        [参考信息]
         {plagiarism_context}
         {aigc_context}
         {match_context}
+        
+        [评分指导原则 (区分度指南)]
+        请依据以下标准进行客观评分，确保分数能真实反映作业质量差异，分数分布在70-100之间：
+        
+        - **90-100分 (优秀)**: 
+          完成度极高，代码规范，逻辑清晰，并且有明显的亮点（如代码结构优雅、文档详尽、有额外的优化思考）。
+          *不要吝啬给高分，但前提是作业真的好，而不是因为习惯性好评。*
+          
+        - **80-89分 (良好/符合预期)**: 
+          这是大多数认真完成作业的学生的得分区间。
+          功能全部实现，没有重大Bug，文档也写了。虽然代码可能不够惊艳，或者有一些小的瑕疵（如变量命名一般、注释较少），但整体是合格且扎实的。
+          
+        - **70-79分 (中等/勉强达标)**: 
+          作业做完了，程序也能跑，但质量一般。
+          存在明显的“应付”痕迹，例如：代码杂乱无章、硬编码严重、文档寥寥数语或逻辑不通。
+          
+        
+        [评分逻辑]
+        1. **从85分起评**: 假设一份完成了所有基本要求的作业是85分。
+        2. **加分项**: 代码整洁、逻辑严密、有扩展功能 -> 往90+加分。
+        3. **扣分项**: 甚至如果功能都实现了，但代码写得像“意大利面条”、没有注释、文档与代码对不上 -> 往75-80分扣分。
+        4. **拒绝同质化**: 如果发现多份作业看起来都差不多，请根据细节（如变量命名规范、错误处理）进行微调，不要让大家都得一样的分数。
+
+        [内容过滤指令 - 重要]
+        学生提交的内容是多个文件的合并文本，其中可能包含：
+        1. **核心材料**：源代码文件、Markdown/Word文档（这是评分的依据）等等。
+        2. **干扰噪音**：实验生成的raw data（如大量的.txt数据行）、程序日志(.log)、或者是上传的测试数据集等。
+        
+        **请务必在评分时执行以下操作：**
+        - **自动忽略**那些显然是机器生成的、纯数据堆砌的文本（例如长篇的数字列表、无意义的日志）。
+        - **只关注**体现学生逻辑的源代码和体现学生思考的文档/注释。
+        - 不要因为数据文件的存在而扣分，除非数据文件格式错误且题目要求了特定的数据格式。
+
         [学生提交内容]
         {json.dumps(student_answer[:50000])}
         

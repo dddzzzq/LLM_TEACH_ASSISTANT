@@ -17,6 +17,7 @@ class AIGCDetectorService:
         self.device = 0 if torch.cuda.is_available() else -1
         
         # --- 定义两个模型 ---
+        # 请确保这两个路径下的模型 config.json 标签定义一致 (0=Human, 1=ChatGPT)
         self.prose_model_name = r"/root/autodl-tmp/dzq/models/chatgpt-detector-roberta-chinese" # 用于文字报告
         self.code_model_name = r"/root/autodl-tmp/dzq/models/chatgpt-detector-roberta"       # 用于源代码
         
@@ -74,7 +75,8 @@ class AIGCDetectorService:
 
     def _detect_single_part(self, text: str, content_type: str) -> Dict[str, Any]:
         """
-        对单个文本块进行检测的核心逻辑，会根据类型选择不同的模型。
+        对单个文本块进行检测的核心逻辑。
+        修正说明：根据 config.json，ID 1 (ChatGPT) 为 AI，ID 0 (Human) 为人类。
         """
         classifier = self.prose_classifier if content_type == 'prose' else self.code_classifier
 
@@ -87,18 +89,29 @@ class AIGCDetectorService:
         try:
             prediction = classifier(text, truncation=True, max_length=512)[0]
             
-            # 不同模型的标签可能不同，这里做个兼容
-            # 'LABEL_0' 或 'Fake' 通常代表AI
-            is_ai_label = prediction['label'] in ['LABEL_0', 'Fake']
-            label = "AI生成" if is_ai_label else "人类写作"
+            label = prediction['label']
+            score = prediction['score']
+
+            # 根据chatgpt-detector-roberta官方文档，更改得分逻辑，更改前后端交互的数据格式问题
             
-            ai_score = prediction['score'] if is_ai_label else 1 - prediction['score']
-            ai_score *= 100
+            ai_labels = ['ChatGPT', 'LABEL_1'] 
+            
+            is_ai = label in ai_labels
+            
+            if is_ai:
+                final_label = "AI生成"
+                # 如果预测是AI，那么当前的 score 就是 AI 的概率
+                ai_probability = score
+            else:
+                final_label = "人类写作"
+                # 如果预测是人类(LABEL_0)，那么当前的 score 是人类的概率
+                # AI 的概率 = 1 - 人类概率
+                ai_probability = 1 - score
 
             return {
-                "predicted_label": label,
-                "confidence": round(prediction['score'], 4),
-                "ai_probability": round(ai_score, 4)
+                "predicted_label": final_label,
+                "confidence": round(score, 4),
+                "ai_probability": round(ai_probability, 4)
             }
         except Exception as e:
             print(f"AIGC检测过程中出错 ({content_type}): {e}")
@@ -107,7 +120,6 @@ class AIGCDetectorService:
     def detect(self, merged_text: str) -> Dict[str, Any]:
         """
         检测合并后的文本。
-        该方法会先将文本分离为报告和代码，用不同模型分别检测，然后返回风险最高的结果。
         """
         prose_content, code_content = self._separate_content(merged_text)
         
@@ -117,6 +129,7 @@ class AIGCDetectorService:
         if "error" in prose_result: return prose_result
         if "error" in code_result: return code_result
         
+        # 返回AI概率更高的那个结果作为最终判决
         if prose_result['ai_probability'] >= code_result['ai_probability']:
             final_result = prose_result
             final_result['detection_source'] = '文字报告'

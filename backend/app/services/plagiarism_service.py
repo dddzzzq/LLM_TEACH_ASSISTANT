@@ -56,7 +56,7 @@ class PlagiarismService:
     def _separate_content_for_each_student(self, submissions: Dict[str, str]) -> Dict[str, Dict[str, str]]:
         """根据每个学生的内容，分离出文本和代码"""
         separated_data = {}
-        prose_extensions = ['.txt', '.md', '.docx', '.pdf', '.doc']
+        prose_extensions = ['.md', '.docx', '.pdf', '.doc']
         for student_id, merged_content in submissions.items():
             prose_parts, code_parts = [], []
             file_blocks = re.split(r'--- 文件开始: (.*?) ---', merged_content)
