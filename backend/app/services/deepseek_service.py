@@ -221,6 +221,9 @@ class DeepSeekService:
         return analysis_result, usage_info
     
     def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_reports: List[PlagiarismReport] = [], aigc_report: Optional[AIGCReport] = None, code_doc_match_report: Optional[CodeDocMatchReport] = None) -> dict:
+        
+        # 由于作业的特殊性质，先不将抄袭检测结果交给大语言模型，否则会大幅影响评分结果
+        
         plagiarism_context = ""
         # if plagiarism_reports:
         #     highest_plagiarism_score = 0
@@ -329,7 +332,6 @@ class DeepSeekService:
 
         return {"total_score": -1, "overall_feedback": "AI评分服务出错", "score_details": []}
 
-    #  辅助函数
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
         escaped_text1 = json.dumps(text1[:25000], ensure_ascii=False)
         escaped_text2 = json.dumps(text2[:25000], ensure_ascii=False)
