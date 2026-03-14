@@ -416,7 +416,8 @@ const fetchResults = async () => {
   isLoadingResults.value = true;
   try {
     const response = await gradingApi.getResultsForAssignment(props.id);
-    results.value = response.data;
+    // 添加 || []，防止 Go 后端返回 null 导致前端崩溃
+    results.value = response.data || [];
   } catch (e) {
     console.error("无法加载结果:", e);
   } finally {

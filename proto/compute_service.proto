@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package compute;
+// 指定 Go 语言生成代码的存放包路径
+option go_package = "./pb";
+
+service ComputeService {
+  // 1. 提取文本
+  rpc ExtractText(ExtractRequest) returns (ExtractResponse);
+  // 2. 全局作业查重
+  rpc CheckPlagiarism(PlagiarismRequest) returns (PlagiarismResponse);
+  // 3. AIGC 检测
+  rpc DetectAIGC(AIGCRequest) returns (AIGCResponse);
+  // 4. LLM 智能评分 (内含代码文档匹配度分析)
+  rpc GradeHomework(GradeRequest) returns (GradeResponse);
+
+  // 试卷批改服务
+  rpc IdentifyQuestionNumber(IdentifyQuestionRequest) returns (IdentifyQuestionResponse);
+  rpc GradeExamQuestion(GradeExamQuestionRequest) returns (GradeExamQuestionResponse);
+  rpc SummarizeExam(SummarizeExamRequest) returns (SummarizeExamResponse);
+}
+
+// 文本提取
+message ExtractRequest {
+  string filename = 1;
+  bytes file_content = 2;
+}
+message ExtractResponse {
+  string text_content = 1;
+}
+
+// 抄袭检测
+message PlagiarismRequest {
+  // map<学生ID, 合并后的纯文本>
+  map<string, string> student_texts = 1;
+}
+message PlagiarismResponse {
+  // 返回查重报告的 JSON 字符串表示: {"student_1": [report1...], "student_2": [...]}
+  string plagiarism_results_json = 1;
+}
+
+// AIGC
+message AIGCRequest {
+  string text_content = 1;
+}
+message AIGCResponse {
+  string aigc_report_json = 1;
+}
+
+// 作业评分
+message GradeRequest {
+  string student_id = 1;
+  string question = 2;
+  string rubric_json = 3;
+  string student_text = 4;
+  string plagiarism_reports_json = 5;
+  string aigc_report_json = 6;
+}
+message GradeResponse {
+  float total_score = 1;
+  string feedback = 2;
+  string merged_content = 3;
+  string code_doc_match_report_json = 4;
+}
+
+// 试卷批改接口定义
+
+// 1. 识别图片题号
+message IdentifyQuestionRequest {
+  string ocr_text = 1;
+  string question_list_str = 2;
+}
+message IdentifyQuestionResponse {
+  int32 question_number = 1;
+}
+
+// 2. 批改单道题目
+message GradeExamQuestionRequest {
+  string question_text = 1;
+  string standard_answer = 2;
+  string rubric = 3;
+  float max_score = 4;
+  string full_student_text = 5;
+}
+message GradeExamQuestionResponse {
+  float score = 1;
+  string feedback = 2;
+  string student_answer_extracted = 3;
+}
+
+// 3. 试卷总评
+message SummarizeExamRequest {
+  repeated string all_feedback = 1;
+}
+message SummarizeExamResponse {
+  string summary_report = 1;
+}

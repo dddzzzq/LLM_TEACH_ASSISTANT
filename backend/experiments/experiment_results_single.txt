@@ -1,6 +1,0 @@
-#################### FINAL EXPERIMENT RESULTS ####################
-
---- Results for: soco_2014 ---
-        accuracy  f1_macro  recall_macro  precision_plag  recall_plag  f1_plag  precision_orig  recall_orig  f1_orig  time (s)  llm_calls  prompt_tokens  completion_tokens
-TF-IDF      0.82     0.814          0.82             1.0         0.64   0.7805          0.7353          1.0   0.8475   26.3678          0              0                  0
-

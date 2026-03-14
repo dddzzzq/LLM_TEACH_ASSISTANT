@@ -56,7 +56,7 @@
           <p
             class="text-gray-700 whitespace-pre-wrap leading-relaxed p-4 bg-blue-50 rounded-md border border-blue-100"
           >
-            {{ reportData.report.summary_report }}
+            {{ reportData.report.summary }}
           </p>
         </div>
       </div>
@@ -241,7 +241,7 @@
                   <p
                     class="text-gray-700 whitespace-pre-wrap text-sm leading-relaxed font-mono"
                   >
-                    {{ answer.student_answer_text || "未提取到文本内容..." }}
+                    {{ answer.ocr_text || "未提取到文本内容..." }}
                   </p>
                 </div>
               </div>
