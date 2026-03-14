@@ -59,7 +59,7 @@ func ProcessExamSubmission(examIDStr string, studentID string, imagePaths []stri
 		StudentID: studentID,
 	}
 	if err := database.DB.Create(&studentExam).Error; err != nil {
-		log.Printf("[致命错误] 无法创建学生试卷记录: %v", err)
+		log.Printf("[错误] 无法创建学生试卷记录: %v", err)
 		return
 	}
 

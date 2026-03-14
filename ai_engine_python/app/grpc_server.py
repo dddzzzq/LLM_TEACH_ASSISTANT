@@ -32,7 +32,6 @@ else:
     deepseek_service = None
     ocr_service_instance = None
 
-# 🚨 强制重置全局日志配置
 root_logger = logging.getLogger()
 if root_logger.hasHandlers():
     root_logger.handlers.clear()
@@ -44,8 +43,7 @@ root_logger.addHandler(handler)
 root_logger.setLevel(logging.INFO)
 
 class ComputeServicer(pb2_grpc.ComputeServiceServicer):
-    
-    # ------------------ 作业部分 (保持不变) ------------------
+    # 作业批改
     def ExtractText(self, request, context):
         start_time = time.time()
         try:
@@ -128,25 +126,24 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             
             return pb2.GradeResponse(total_score=ai_result.get("total_score", -1.0), feedback=ai_result.get("overall_feedback", "评分失败"), merged_content=request.student_text, code_doc_match_report_json=json.dumps(match_analysis, ensure_ascii=False) if match_analysis else "{}")
         except Exception as e:
-            return pb2.GradeResponse(total_score=-1.0, feedback=f"【系统降级】评分失败: {str(e)}")
+            return pb2.GradeResponse(total_score=-1.0, feedback=f"评分失败: {str(e)}")
 
-    # ------------------ 新增：试卷部分 ------------------
-    
+    # 试卷部分
     def IdentifyQuestionNumber(self, request, context):
         start_time = time.time()
         try:
-            logging.info("🧠 [Desc] 试卷批改节点: 开始识别OCR文本归属题号...")
+            logging.info("试卷批改节点: 开始识别OCR文本归属题号...")
             predicted_q_num = asyncio.run(
                 deepseek_service.identify_question_number(
                     ocr_text=request.ocr_text, 
                     question_list=request.question_list_str
                 )
             )
-            logging.info(f"✅ [题号识别] 完成，识别结果: 第 {predicted_q_num} 题, 耗时: {time.time()-start_time:.2f}s")
+            logging.info(f"[题号识别] 完成，识别结果: 第 {predicted_q_num} 题, 耗时: {time.time()-start_time:.2f}s")
             return pb2.IdentifyQuestionResponse(question_number=predicted_q_num)
         
         except Exception as e:
-            logging.error(f"❌ [IdentifyQuestionNumber] 失败: {e}", exc_info=True)
+            logging.error(f"[IdentifyQuestionNumber] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
             return pb2.IdentifyQuestionResponse(question_number=0)
@@ -154,7 +151,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
     def GradeExamQuestion(self, request, context):
         start_time = time.time()
         try:
-            logging.info(f"📝 [Desc] 试卷批改节点: 开始分析单道试卷题目逻辑...")
+            logging.info(f"试卷批改节点: 开始分析单道试卷题目逻辑...")
             grading_result = asyncio.run(
                 deepseek_service.grade_exam_question(
                     question=request.question_text,
@@ -168,7 +165,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             if not grading_result:
                 raise ValueError("大模型未能返回有效的批改JSON数据")
                 
-            logging.info(f"✅ [单题批改] 完成，得分: {grading_result.get('score', 0)}, 耗时: {time.time()-start_time:.2f}s")
+            logging.info(f"[单题批改] 完成，得分: {grading_result.get('score', 0)}, 耗时: {time.time()-start_time:.2f}s")
             return pb2.GradeExamQuestionResponse(
                 score=float(grading_result.get("score", 0.0)),
                 feedback=grading_result.get("feedback", "无评语"),
@@ -176,23 +173,23 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             )
             
         except Exception as e:
-            logging.error(f"❌ [GradeExamQuestion] 失败: {e}", exc_info=True)
+            logging.error(f"[GradeExamQuestion] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
-            return pb2.GradeExamQuestionResponse(score=0.0, feedback=f"【系统降级】评分失败: {str(e)}", student_answer_extracted="")
+            return pb2.GradeExamQuestionResponse(score=0.0, feedback=f"评分失败: {str(e)}", student_answer_extracted="")
 
     def SummarizeExam(self, request, context):
         start_time = time.time()
         try:
-            logging.info(f"📊 [Desc] 试卷批改节点: 正在生成整卷总评与学习建议...")
+            logging.info(f"试卷批改节点: 正在生成整卷总评与学习建议...")
             summary_report = asyncio.run(
                 deepseek_service.summarize_exam_performance(list(request.all_feedback))
             )
-            logging.info(f"✅ [试卷总评] 完成，耗时: {time.time()-start_time:.2f}s")
+            logging.info(f"[试卷总评] 完成，耗时: {time.time()-start_time:.2f}s")
             return pb2.SummarizeExamResponse(summary_report=summary_report or "生成总结报告失败。")
             
         except Exception as e:
-            logging.error(f"❌ [SummarizeExam] 失败: {e}", exc_info=True)
+            logging.error(f"[SummarizeExam] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
             return pb2.SummarizeExamResponse(summary_report=f"总结失败: {str(e)}")
@@ -209,7 +206,7 @@ def serve():
     
     server.add_insecure_port('0.0.0.0:50051')
     server.start()
-    logging.info("🚀 Python AI 节点启动成功，纯粹作为推理机监听 50051 端口...")
+    logging.info("Python AI 节点启动成功，纯粹作为推理机监听 50051 端口...")
     server.wait_for_termination()
 
 if __name__ == '__main__':
