@@ -563,5 +563,66 @@ class DeepSeekService:
             print(f"调用LLM生成总结报告时出错: {e}")
             return None
 
+    async def pool_scores(self, assignment_id: str, scores_data_json: str) -> Optional[Dict[str, Any]]:
+        """
+        对批量成绩进行池化处理
+        """
+        system_prompt = """你是一个严谨的数据分析和教学评估 AI。
+你的核心任务是对一批学生的原始成绩进行标准化（池化）映射。
+你必须遵守以下绝对红线：
+1. 调整后的最高分必须精确锁定为 100 分。
+2. 调整后的最低分不得低于 70 分。
+3. 学生的成绩需要有区分度，不能全都一个分数。
+4. 调整后的整体分数呈现近似正态分布，均值应控制在 85 分左右。"""
+        
+        try:
+            scores_data = json.loads(scores_data_json)
+        except json.JSONDecodeError as e:
+            print(f"解析成绩数据JSON失败: {e}")
+            return None
+
+        user_prompt = f"""
+【作业ID】: {assignment_id}
+
+【学生成绩数据】:
+{json.dumps(scores_data, ensure_ascii=False, indent=2)}
+
+【任务说明】:
+请根据以上数据，运用统计学中的数据标准化（Min-Max 缩放与 Z-score 调整的结合理念），对分数进行重新分配。具体要求如下：
+
+1. 极值锚定：找出原始成绩中的最高分，将其 `pooled_score` 设置为 100.0；找出原始最低分，将其映射到 70.0 及以上的合理位置。确保所有最终成绩 ∈ [70, 100]。
+2. 正态分布塑形：在 70-100 区间内，使大部分学生的分数聚集在 80-90 分（特别是均值 85 附近），向两端（70-75 和 95-100）递减。如果原始分数呈两极分化或偏态，请强行将其拉伸或压缩贴合正态分布曲线。
+3. 排名严格守恒：调整前排名高的同学，调整后分数绝对不能低于原本排名低的同学（允许同分，但绝不能倒挂）。
+4. 综合评价参考：在调整时，可结合学生的原始简要评价生成 `pool_reason`。
+
+【输出要求】:
+请只输出一个严格合法的 JSON 数组，不要包含任何 markdown 标记（如 ```json），包含每个学生的以下字段：
+- `student_id`: 学生ID
+- `original_score`: 原始分数
+- `pooled_score`: 池化后的新分数（保留2位小数）
+- `pool_reason`: 调整理由，限一句话（中文，如"原始最高分锚定为100分"或"依正态分布及相对排名映射至均值区间"）
+
+示例格式：
+[
+  {{
+    "student_id": "23009200042",
+    "original_score": 60.5,
+    "pooled_score": 78.5,
+    "pool_reason": "依正态分布模型映射，提升低分段表现"
+  }}
+]
+"""
+        try:
+            response_json = await asyncio.to_thread(
+                self._call_api_json,
+                user_prompt,
+                system_prompt,
+                0.1 # 保持较低的 temperature 以确保格式严格和映射逻辑稳定
+            )
+            return response_json
+        except Exception as e:
+            print(f"调用LLM进行成绩池化时出错: {e}")
+            return None
+
 
 deepseek_service = DeepSeekService()

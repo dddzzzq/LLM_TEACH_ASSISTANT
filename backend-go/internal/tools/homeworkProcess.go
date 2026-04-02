@@ -26,6 +26,7 @@ import (
 
 type GradingTask struct {
 	StudentID    string
+	StudentName  string
 	AssignmentID string
 	FilePaths    []string
 }
@@ -61,7 +62,7 @@ func extractAndGroupTasks(assignmentID string, zipPath string) ([]GradingTask, e
 			continue
 		}
 
-		var studentID string
+		var studentID, studentName string
 		parts := strings.Split(filename, "/")
 		if len(parts) > 1 {
 			studentID = parts[0]
@@ -74,6 +75,15 @@ func extractAndGroupTasks(assignmentID string, zipPath string) ([]GradingTask, e
 			continue
 		}
 
+		// 根据 '-' 分割学号和姓名
+		if strings.Contains(studentID, "-") {
+			splitResult := strings.SplitN(studentID, "-", 2)
+			studentID = splitResult[0]
+			studentName = splitResult[1]
+		} else {
+			studentName = "未知"
+		}
+
 		safeFilename := fmt.Sprintf("%s_%s", studentID, filepath.Base(filename))
 		savePath := filepath.Join(extractDir, safeFilename)
 
@@ -84,6 +94,7 @@ func extractAndGroupTasks(assignmentID string, zipPath string) ([]GradingTask, e
 		if _, exists := studentMap[studentID]; !exists {
 			studentMap[studentID] = &GradingTask{
 				StudentID:    studentID,
+				StudentName:  studentName,
 				AssignmentID: assignmentID,
 				FilePaths:    []string{},
 			}
@@ -276,7 +287,7 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 					matchJSON = gradeRes.CodeDocMatchReportJson
 				}
 
-				database.SaveAssignment(assignmentID, t.StudentID, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON)
+				database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON)
 
 				currentProg := atomic.AddInt32(&map2Completed, 1)
 				log.Printf(" <- [Worker %d] 学生 [%s] 批改完毕！进度: %d/%d", workerID, t.StudentID, currentProg, totalTasks)
@@ -291,4 +302,7 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 
 	wgMap2.Wait()
 	log.Printf("\n[调度中心] 作业 %s 批改任务全流程结束！\n总耗时: %v\n======================================================\n", assignmentID, time.Since(startTime))
+
+	// 启动成绩池化处理
+	go AddPoolingToPipeline(assignmentID)
 }

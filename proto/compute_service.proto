@@ -18,6 +18,9 @@ service ComputeService {
   rpc IdentifyQuestionNumber(IdentifyQuestionRequest) returns (IdentifyQuestionResponse);
   rpc GradeExamQuestion(GradeExamQuestionRequest) returns (GradeExamQuestionResponse);
   rpc SummarizeExam(SummarizeExamRequest) returns (SummarizeExamResponse);
+  
+  // 成绩池化服务
+  rpc PoolScores(PoolScoresRequest) returns (PoolScoresResponse);
 }
 
 // 文本提取
@@ -94,4 +97,16 @@ message SummarizeExamRequest {
 }
 message SummarizeExamResponse {
   string summary_report = 1;
+}
+
+// 4. 成绩池化
+message PoolScoresRequest {
+  string assignment_id = 1;
+  string scores_data_json = 2;  // JSON格式的批量成绩数据
+}
+
+message PoolScoresResponse {
+  bool success = 1;
+  string pooled_results_json = 2;  // JSON格式的池化结果
+  string error_message = 3;
 }

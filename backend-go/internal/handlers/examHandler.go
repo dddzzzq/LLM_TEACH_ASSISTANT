@@ -1,15 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
+	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
+	"grading-gateway/internal/mq"
 	"grading-gateway/internal/schemas"
-	"grading-gateway/internal/tools"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -153,29 +157,77 @@ func UploadStudentExam(c *gin.Context) {
 		}
 	}
 
-	// 高并发进行 OCR、拆题与评分
-	go tools.ProcessExamSubmission(examID, studentID, savedPaths)
+	// 生成 UUID 作为 jobID
+	jobID := uuid.New().String()
+	log.Printf("创建异步试卷任务: job=%s, exam=%s, student=%s", jobID, examID, studentID)
 
+	ctx := context.Background()
+
+	// 1. 在 MySQL 中创建 AsyncJob 记录，状态设为 PENDING
+	err = mq.CreateAsyncJob(jobID, models.JobTypeExam, examID, studentID)
+	if err != nil {
+		log.Printf("ERROR: Failed to create async job in database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建异步任务失败"})
+		return
+	}
+
+	// 2. 在 Redis 中缓存初始状态
+	if err := cache.SetJobStatus(ctx, jobID, string(models.JobStatusPending), "任务已创建，等待处理"); err != nil {
+		log.Printf("WARNING: Failed to cache job status in Redis: %v", err)
+		// 不返回错误，继续执行
+	}
+
+	// 3. 调用 mq.PublishExamTask 将任务推送到 Kafka
+	if err := mq.PublishExamTask(jobID, examID, studentID, savedPaths); err != nil {
+		log.Printf("ERROR: Failed to publish exam task to Kafka: %v", err)
+		// 更新任务状态为 FAILED
+		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
+		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "任务提交失败，请重试"})
+		return
+	}
+
+	// 4. 修改 HTTP 响应，返回 http.StatusAccepted (202)，并在 JSON 中包含 job_id
 	c.JSON(http.StatusAccepted, gin.H{
-		"message": fmt.Sprintf("已收到学生 %s 的 %d 张试卷图片，正在后台并行处理中...", studentID, len(savedPaths)),
+		"message": fmt.Sprintf("已收到学生 %s 的 %d 张试卷图片，任务已加入队列，系统将异步处理批改，请稍后通过 job_id 查询状态。", studentID, len(savedPaths)),
+		"job_id":  jobID,
 	})
 }
 
 // 获取一次考试的所有学生成绩概览
 func GetExamResultsSummary(c *gin.Context) {
 	examID := c.Param("id")
-	var res []schemas.ExamResultSummary
 
-	// 联表查询并 Scan 进结构体
-	err := database.DB.Raw(`
-		SELECT 
-			se.student_id, 
-			er.total_score, 
-			er.student_exam_id 
-		FROM exam_reports er 
-		JOIN student_exams se ON se.id = er.student_exam_id 
-		WHERE se.exam_id = ?
-	`, examID).Scan(&res).Error
+	// 获取用户角色和用户名
+	role, roleErr := middleware.GetRoleFromContext(c)
+	username, usernameErr := middleware.GetUsernameFromContext(c)
+
+	var res []schemas.ExamResultSummary
+	var err error
+
+	// 学生只能查看自己的成绩
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		err = database.DB.Raw(`
+			SELECT 
+				se.student_id, 
+				er.total_score, 
+				er.student_exam_id 
+			FROM exam_reports er 
+			JOIN student_exams se ON se.id = er.student_exam_id 
+			WHERE se.exam_id = ? AND se.student_id = ?
+		`, examID, username).Scan(&res).Error
+	} else {
+		// 教师/管理员获取所有人成绩
+		err = database.DB.Raw(`
+			SELECT 
+				se.student_id, 
+				er.total_score, 
+				er.student_exam_id 
+			FROM exam_reports er 
+			JOIN student_exams se ON se.id = er.student_exam_id 
+			WHERE se.exam_id = ?
+		`, examID).Scan(&res).Error
+	}
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取成绩单失败"})
@@ -196,6 +248,16 @@ func GetStudentDetailedReport(c *gin.Context) {
 	if err := database.DB.Preload("Report").Preload("Answers.Question").Preload("Images").First(&studentExam, studentExamID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该学生的答卷信息"})
 		return
+	}
+
+	// 检查权限：学生只能查看自己的报告
+	role, roleErr := middleware.GetRoleFromContext(c)
+	username, usernameErr := middleware.GetUsernameFromContext(c)
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		if studentExam.StudentID != username {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无权查看他人的试卷报告"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

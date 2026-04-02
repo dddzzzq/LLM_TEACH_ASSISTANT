@@ -774,6 +774,119 @@ func (x *SummarizeExamResponse) GetSummaryReport() string {
 	return ""
 }
 
+// 4. 成绩池化
+type PoolScoresRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AssignmentId   string                 `protobuf:"bytes,1,opt,name=assignment_id,json=assignmentId,proto3" json:"assignment_id,omitempty"`
+	ScoresDataJson string                 `protobuf:"bytes,2,opt,name=scores_data_json,json=scoresDataJson,proto3" json:"scores_data_json,omitempty"` // JSON格式的批量成绩数据
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PoolScoresRequest) Reset() {
+	*x = PoolScoresRequest{}
+	mi := &file_compute_service_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PoolScoresRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PoolScoresRequest) ProtoMessage() {}
+
+func (x *PoolScoresRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_compute_service_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PoolScoresRequest.ProtoReflect.Descriptor instead.
+func (*PoolScoresRequest) Descriptor() ([]byte, []int) {
+	return file_compute_service_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *PoolScoresRequest) GetAssignmentId() string {
+	if x != nil {
+		return x.AssignmentId
+	}
+	return ""
+}
+
+func (x *PoolScoresRequest) GetScoresDataJson() string {
+	if x != nil {
+		return x.ScoresDataJson
+	}
+	return ""
+}
+
+type PoolScoresResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Success           bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	PooledResultsJson string                 `protobuf:"bytes,2,opt,name=pooled_results_json,json=pooledResultsJson,proto3" json:"pooled_results_json,omitempty"` // JSON格式的池化结果
+	ErrorMessage      string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *PoolScoresResponse) Reset() {
+	*x = PoolScoresResponse{}
+	mi := &file_compute_service_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PoolScoresResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PoolScoresResponse) ProtoMessage() {}
+
+func (x *PoolScoresResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_compute_service_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PoolScoresResponse.ProtoReflect.Descriptor instead.
+func (*PoolScoresResponse) Descriptor() ([]byte, []int) {
+	return file_compute_service_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PoolScoresResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PoolScoresResponse) GetPooledResultsJson() string {
+	if x != nil {
+		return x.PooledResultsJson
+	}
+	return ""
+}
+
+func (x *PoolScoresResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
 var File_compute_service_proto protoreflect.FileDescriptor
 
 const file_compute_service_proto_rawDesc = "" +
@@ -828,7 +941,14 @@ const file_compute_service_proto_rawDesc = "" +
 	"\x14SummarizeExamRequest\x12!\n" +
 	"\fall_feedback\x18\x01 \x03(\tR\vallFeedback\">\n" +
 	"\x15SummarizeExamResponse\x12%\n" +
-	"\x0esummary_report\x18\x01 \x01(\tR\rsummaryReport2\xa4\x04\n" +
+	"\x0esummary_report\x18\x01 \x01(\tR\rsummaryReport\"b\n" +
+	"\x11PoolScoresRequest\x12#\n" +
+	"\rassignment_id\x18\x01 \x01(\tR\fassignmentId\x12(\n" +
+	"\x10scores_data_json\x18\x02 \x01(\tR\x0escoresDataJson\"\x83\x01\n" +
+	"\x12PoolScoresResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12.\n" +
+	"\x13pooled_results_json\x18\x02 \x01(\tR\x11pooledResultsJson\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xeb\x04\n" +
 	"\x0eComputeService\x12@\n" +
 	"\vExtractText\x12\x17.compute.ExtractRequest\x1a\x18.compute.ExtractResponse\x12J\n" +
 	"\x0fCheckPlagiarism\x12\x1a.compute.PlagiarismRequest\x1a\x1b.compute.PlagiarismResponse\x129\n" +
@@ -837,7 +957,9 @@ const file_compute_service_proto_rawDesc = "" +
 	"\rGradeHomework\x12\x15.compute.GradeRequest\x1a\x16.compute.GradeResponse\x12]\n" +
 	"\x16IdentifyQuestionNumber\x12 .compute.IdentifyQuestionRequest\x1a!.compute.IdentifyQuestionResponse\x12Z\n" +
 	"\x11GradeExamQuestion\x12!.compute.GradeExamQuestionRequest\x1a\".compute.GradeExamQuestionResponse\x12N\n" +
-	"\rSummarizeExam\x12\x1d.compute.SummarizeExamRequest\x1a\x1e.compute.SummarizeExamResponseB\x06Z\x04./pbb\x06proto3"
+	"\rSummarizeExam\x12\x1d.compute.SummarizeExamRequest\x1a\x1e.compute.SummarizeExamResponse\x12E\n" +
+	"\n" +
+	"PoolScores\x12\x1a.compute.PoolScoresRequest\x1a\x1b.compute.PoolScoresResponseB\x06Z\x04./pbb\x06proto3"
 
 var (
 	file_compute_service_proto_rawDescOnce sync.Once
@@ -851,7 +973,7 @@ func file_compute_service_proto_rawDescGZIP() []byte {
 	return file_compute_service_proto_rawDescData
 }
 
-var file_compute_service_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_compute_service_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_compute_service_proto_goTypes = []any{
 	(*ExtractRequest)(nil),            // 0: compute.ExtractRequest
 	(*ExtractResponse)(nil),           // 1: compute.ExtractResponse
@@ -867,10 +989,12 @@ var file_compute_service_proto_goTypes = []any{
 	(*GradeExamQuestionResponse)(nil), // 11: compute.GradeExamQuestionResponse
 	(*SummarizeExamRequest)(nil),      // 12: compute.SummarizeExamRequest
 	(*SummarizeExamResponse)(nil),     // 13: compute.SummarizeExamResponse
-	nil,                               // 14: compute.PlagiarismRequest.StudentTextsEntry
+	(*PoolScoresRequest)(nil),         // 14: compute.PoolScoresRequest
+	(*PoolScoresResponse)(nil),        // 15: compute.PoolScoresResponse
+	nil,                               // 16: compute.PlagiarismRequest.StudentTextsEntry
 }
 var file_compute_service_proto_depIdxs = []int32{
-	14, // 0: compute.PlagiarismRequest.student_texts:type_name -> compute.PlagiarismRequest.StudentTextsEntry
+	16, // 0: compute.PlagiarismRequest.student_texts:type_name -> compute.PlagiarismRequest.StudentTextsEntry
 	0,  // 1: compute.ComputeService.ExtractText:input_type -> compute.ExtractRequest
 	2,  // 2: compute.ComputeService.CheckPlagiarism:input_type -> compute.PlagiarismRequest
 	4,  // 3: compute.ComputeService.DetectAIGC:input_type -> compute.AIGCRequest
@@ -878,15 +1002,17 @@ var file_compute_service_proto_depIdxs = []int32{
 	8,  // 5: compute.ComputeService.IdentifyQuestionNumber:input_type -> compute.IdentifyQuestionRequest
 	10, // 6: compute.ComputeService.GradeExamQuestion:input_type -> compute.GradeExamQuestionRequest
 	12, // 7: compute.ComputeService.SummarizeExam:input_type -> compute.SummarizeExamRequest
-	1,  // 8: compute.ComputeService.ExtractText:output_type -> compute.ExtractResponse
-	3,  // 9: compute.ComputeService.CheckPlagiarism:output_type -> compute.PlagiarismResponse
-	5,  // 10: compute.ComputeService.DetectAIGC:output_type -> compute.AIGCResponse
-	7,  // 11: compute.ComputeService.GradeHomework:output_type -> compute.GradeResponse
-	9,  // 12: compute.ComputeService.IdentifyQuestionNumber:output_type -> compute.IdentifyQuestionResponse
-	11, // 13: compute.ComputeService.GradeExamQuestion:output_type -> compute.GradeExamQuestionResponse
-	13, // 14: compute.ComputeService.SummarizeExam:output_type -> compute.SummarizeExamResponse
-	8,  // [8:15] is the sub-list for method output_type
-	1,  // [1:8] is the sub-list for method input_type
+	14, // 8: compute.ComputeService.PoolScores:input_type -> compute.PoolScoresRequest
+	1,  // 9: compute.ComputeService.ExtractText:output_type -> compute.ExtractResponse
+	3,  // 10: compute.ComputeService.CheckPlagiarism:output_type -> compute.PlagiarismResponse
+	5,  // 11: compute.ComputeService.DetectAIGC:output_type -> compute.AIGCResponse
+	7,  // 12: compute.ComputeService.GradeHomework:output_type -> compute.GradeResponse
+	9,  // 13: compute.ComputeService.IdentifyQuestionNumber:output_type -> compute.IdentifyQuestionResponse
+	11, // 14: compute.ComputeService.GradeExamQuestion:output_type -> compute.GradeExamQuestionResponse
+	13, // 15: compute.ComputeService.SummarizeExam:output_type -> compute.SummarizeExamResponse
+	15, // 16: compute.ComputeService.PoolScores:output_type -> compute.PoolScoresResponse
+	9,  // [9:17] is the sub-list for method output_type
+	1,  // [1:9] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -903,7 +1029,7 @@ func file_compute_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_compute_service_proto_rawDesc), len(file_compute_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

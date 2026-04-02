@@ -75,6 +75,7 @@ func FormatSubmission(sub models.Submission) map[string]interface{} {
 	return map[string]interface{}{
 		"id":                    sub.ID,
 		"student_id":            sub.StudentID,
+		"student_name":          sub.StudentName,
 		"score":                 sub.Score,
 		"feedback":              sub.Feedback,
 		"merged_content":        sub.MergeContent,

@@ -1,0 +1,290 @@
+package agent
+
+import (
+	"sync"
+	"time"
+)
+
+// ConversationMemory 对话记忆管理器
+type ConversationMemory struct {
+	mu           sync.RWMutex
+	messages     []Message
+	maxMessages  int
+	sessionID    string
+	lastActivity time.Time
+}
+
+// Message 表示对话中的一条消息
+type Message struct {
+	Role      string    `json:"role"`      // "user" 或 "assistant"
+	Content   string    `json:"content"`   // 消息内容
+	Timestamp time.Time `json:"timestamp"` // 时间戳
+}
+
+// NewConversationMemory 创建新的对话记忆管理器
+func NewConversationMemory(sessionID string, maxMessages int) *ConversationMemory {
+	if maxMessages <= 0 {
+		maxMessages = 10 // 默认保留10条消息
+	}
+
+	return &ConversationMemory{
+		messages:     make([]Message, 0),
+		maxMessages:  maxMessages,
+		sessionID:    sessionID,
+		lastActivity: time.Now(),
+	}
+}
+
+// AddMessage 添加一条消息到记忆
+func (cm *ConversationMemory) AddMessage(role, content string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	message := Message{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+
+	// 添加新消息
+	cm.messages = append(cm.messages, message)
+	cm.lastActivity = time.Now()
+
+	// 如果超过最大消息数，移除最旧的消息
+	if len(cm.messages) > cm.maxMessages {
+		cm.messages = cm.messages[1:]
+	}
+}
+
+// GetRecentMessages 获取最近的对话消息
+func (cm *ConversationMemory) GetRecentMessages() []Message {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// 返回消息的副本，避免外部修改
+	messages := make([]Message, len(cm.messages))
+	copy(messages, cm.messages)
+	return messages
+}
+
+// GetRecentMessagesWithLimit 获取最近指定数量的消息
+func (cm *ConversationMemory) GetRecentMessagesWithLimit(limit int) []Message {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if limit <= 0 || limit > len(cm.messages) {
+		limit = len(cm.messages)
+	}
+
+	// 返回最近的消息
+	startIdx := len(cm.messages) - limit
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	messages := make([]Message, len(cm.messages[startIdx:]))
+	copy(messages, cm.messages[startIdx:])
+	return messages
+}
+
+// GetFormattedHistory 获取格式化的对话历史，用于LLM输入
+func (cm *ConversationMemory) GetFormattedHistory() string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if len(cm.messages) == 0 {
+		return ""
+	}
+
+	var history string
+	for _, msg := range cm.messages {
+		history += msg.Role + ": " + msg.Content + "\n"
+	}
+	return history
+}
+
+// GetLastUserMessage 获取最后一条用户消息
+func (cm *ConversationMemory) GetLastUserMessage() (Message, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// 从后往前查找用户消息
+	for i := len(cm.messages) - 1; i >= 0; i-- {
+		if cm.messages[i].Role == "user" {
+			return cm.messages[i], true
+		}
+	}
+	return Message{}, false
+}
+
+// GetLastAssistantMessage 获取最后一条助手消息
+func (cm *ConversationMemory) GetLastAssistantMessage() (Message, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// 从后往前查找助手消息
+	for i := len(cm.messages) - 1; i >= 0; i-- {
+		if cm.messages[i].Role == "assistant" {
+			return cm.messages[i], true
+		}
+	}
+	return Message{}, false
+}
+
+// Clear 清空对话记忆
+func (cm *ConversationMemory) Clear() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.messages = make([]Message, 0)
+	cm.lastActivity = time.Now()
+}
+
+// GetMessageCount 获取当前消息数量
+func (cm *ConversationMemory) GetMessageCount() int {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return len(cm.messages)
+}
+
+// GetSessionID 获取会话ID
+func (cm *ConversationMemory) GetSessionID() string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return cm.sessionID
+}
+
+// GetLastActivity 获取最后活动时间
+func (cm *ConversationMemory) GetLastActivity() time.Time {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return cm.lastActivity
+}
+
+// IsExpired 检查会话是否过期（超过指定时间无活动）
+func (cm *ConversationMemory) IsExpired(timeout time.Duration) bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return time.Since(cm.lastActivity) > timeout
+}
+
+// MemoryManager 全局记忆管理器
+type MemoryManager struct {
+	mu        sync.RWMutex
+	memories  map[string]*ConversationMemory
+	maxMemory int
+}
+
+// NewMemoryManager 创建新的全局记忆管理器
+func NewMemoryManager(maxMemory int) *MemoryManager {
+	if maxMemory <= 0 {
+		maxMemory = 100 // 默认最多管理100个会话
+	}
+
+	return &MemoryManager{
+		memories:  make(map[string]*ConversationMemory),
+		maxMemory: maxMemory,
+	}
+}
+
+// GetOrCreateMemory 获取或创建指定会话的记忆
+func (mm *MemoryManager) GetOrCreateMemory(sessionID string, maxMessages int) *ConversationMemory {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	// 如果已存在，直接返回
+	if memory, exists := mm.memories[sessionID]; exists {
+		return memory
+	}
+
+	// 如果超过最大会话数，清理最旧的会话
+	if len(mm.memories) >= mm.maxMemory {
+		mm.cleanupOldest()
+	}
+
+	// 创建新记忆
+	memory := NewConversationMemory(sessionID, maxMessages)
+	mm.memories[sessionID] = memory
+	return memory
+}
+
+// GetMemory 获取指定会话的记忆
+func (mm *MemoryManager) GetMemory(sessionID string) (*ConversationMemory, bool) {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	memory, exists := mm.memories[sessionID]
+	return memory, exists
+}
+
+// DeleteMemory 删除指定会话的记忆
+func (mm *MemoryManager) DeleteMemory(sessionID string) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	delete(mm.memories, sessionID)
+}
+
+// CleanupExpired 清理过期的会话
+func (mm *MemoryManager) CleanupExpired(timeout time.Duration) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	for sessionID, memory := range mm.memories {
+		if memory.IsExpired(timeout) {
+			delete(mm.memories, sessionID)
+		}
+	}
+}
+
+// cleanupOldest 清理最旧的会话
+func (mm *MemoryManager) cleanupOldest() {
+	if len(mm.memories) == 0 {
+		return
+	}
+
+	// 找到最旧的会话
+	var oldestSessionID string
+	var oldestTime time.Time
+	first := true
+
+	for sessionID, memory := range mm.memories {
+		activityTime := memory.GetLastActivity()
+		if first || activityTime.Before(oldestTime) {
+			oldestSessionID = sessionID
+			oldestTime = activityTime
+			first = false
+		}
+	}
+
+	// 删除最旧的会话
+	if oldestSessionID != "" {
+		delete(mm.memories, oldestSessionID)
+	}
+}
+
+// GetSessionCount 获取当前会话数量
+func (mm *MemoryManager) GetSessionCount() int {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	return len(mm.memories)
+}
+
+// 全局记忆管理器实例
+var (
+	globalMemoryManager *MemoryManager
+	once                sync.Once
+)
+
+// GetGlobalMemoryManager 获取全局记忆管理器实例（单例模式）
+func GetGlobalMemoryManager() *MemoryManager {
+	once.Do(func() {
+		globalMemoryManager = NewMemoryManager(100) // 最多管理100个会话
+	})
+	return globalMemoryManager
+}

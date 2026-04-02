@@ -1,5 +1,11 @@
 <template>
-  <div class="flex h-screen bg-gray-100">
+  <!-- 登录页面不使用侧边栏布局 -->
+  <div v-if="isLoginPage" class="h-screen">
+    <router-view />
+  </div>
+  
+  <!-- 其他页面使用带侧边栏的布局 -->
+  <div v-else class="flex h-screen bg-gray-100">
     <!-- 侧边栏 -->
     <Sidebar />
 
@@ -14,6 +20,14 @@
 </template>
 
 <script setup>
-import { RouterView } from "vue-router";
-import Sidebar from "./components/Sidebar.vue"; // 导入新的侧边栏组件
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
+import Sidebar from "./components/Sidebar.vue";
+
+const route = useRoute();
+
+// 计算属性：判断当前是否为登录页面
+const isLoginPage = computed(() => {
+  return route.path === '/login' || route.name === 'login';
+});
 </script>

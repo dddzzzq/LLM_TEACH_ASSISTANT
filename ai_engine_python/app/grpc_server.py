@@ -194,6 +194,44 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             context.set_details(str(e))
             return pb2.SummarizeExamResponse(summary_report=f"总结失败: {str(e)}")
 
+    def PoolScores(self, request, context):
+        start_time = time.time()
+        try:
+            logging.info(f"成绩池化节点: 开始对作业 {request.assignment_id} 进行成绩池化处理...")
+            
+            # 调用DeepSeek服务进行成绩池化
+            pooled_results = asyncio.run(
+                deepseek_service.pool_scores(
+                    assignment_id=request.assignment_id,
+                    scores_data_json=request.scores_data_json
+                )
+            )
+            
+            if not pooled_results:
+                logging.error(f"[PoolScores] 大模型未能返回有效的池化结果")
+                return pb2.PoolScoresResponse(
+                    success=False,
+                    pooled_results_json="{}",
+                    error_message="AI成绩池化处理失败"
+                )
+            
+            logging.info(f"[成绩池化] 完成，处理了 {len(pooled_results) if isinstance(pooled_results, list) else '未知'} 条记录，耗时: {time.time()-start_time:.2f}s")
+            return pb2.PoolScoresResponse(
+                success=True,
+                pooled_results_json=json.dumps(pooled_results, ensure_ascii=False),
+                error_message=""
+            )
+            
+        except Exception as e:
+            logging.error(f"[PoolScores] 失败: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return pb2.PoolScoresResponse(
+                success=False,
+                pooled_results_json="{}",
+                error_message=f"成绩池化处理失败: {str(e)}"
+            )
+
 
 def serve():
     logging.info("正在初始化 AI 模型节点...")

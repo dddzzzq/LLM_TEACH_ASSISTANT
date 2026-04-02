@@ -1,15 +1,8 @@
-import axios from 'axios';
+// 2. 引入你配置好的 authApi (请根据实际目录结构调整相对路径，例如 '../api/authApi')
+import authApi from './authApi';
 
-// 设置后端的 API 基础 URL
-const API_URL = 'http://127.0.0.1:8000';   // 8000端口
-// const API_URL = 'http://450992b4.r7.cpolar.cn';
-
-const apiClient = axios.create({
-  baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+// 3. 获取带有 Token 拦截器的 axios 实例
+const apiClient = authApi.getClient();
 
 export default {
   // --- 现有作业 (Assignments) API ---
@@ -146,6 +139,16 @@ export default {
    */
   deleteStudentExamResult(examId, studentExamId) {
     return apiClient.delete(`/exams/${examId}/results/${studentExamId}`);
+  },
+
+  // --- 异步任务状态查询 API ---
+  
+  /**
+   * 查询异步任务状态
+   * @param {string} jobId - 任务ID
+   */
+  getJobStatus(jobId) {
+    return apiClient.get(`/jobs/${jobId}`);
   },
 
 };

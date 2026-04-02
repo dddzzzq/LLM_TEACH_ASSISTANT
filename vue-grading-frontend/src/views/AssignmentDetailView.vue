@@ -97,7 +97,7 @@
                 <th
                   class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
                 >
-                  学生ID
+                  学号 & 姓名
                 </th>
                 <th
                   class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
@@ -136,7 +136,7 @@
               <tr v-for="result in sortedResults" :key="result.id">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                   <div class="flex items-center">
-                    <span>{{ result.student_id }}</span>
+                    <span>{{ result.student_id }}{{ result.student_name ? ' - ' + result.student_name : '' }}</span>
                     <svg
                       v-if="result.is_human_reviewed"
                       xmlns="http://www.w3.org/2000/svg"
@@ -316,6 +316,7 @@ interface PlagiarismReport {
 interface SubmissionResult {
   id: number;
   student_id: string;
+  student_name?: string;
   score: number;
   feedback: string;
   plagiarism_reports: PlagiarismReport[];

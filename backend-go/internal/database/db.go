@@ -27,6 +27,9 @@ func InitDB(dsn string) {
 
 	// AutoMigrate: 自动同步 Go 结构体到 MySQL 的表结构。不会删除已有数据，只会新增字段。
 	err = DB.AutoMigrate(
+		&models.User{},
+		&models.ChatSession{},
+		&models.ChatMessage{},
 		&models.Assignment{},
 		&models.Submission{},
 		&models.Exam{},
@@ -35,6 +38,7 @@ func InitDB(dsn string) {
 		&models.StudentExamImage{},
 		&models.StudentExamAnswer{},
 		&models.ExamReport{},
+		&models.AsyncJob{},
 	)
 	if err != nil {
 		log.Fatalf("自动迁移表结构失败: %v", err)
@@ -42,7 +46,7 @@ func InitDB(dsn string) {
 	fmt.Println("表结构映射完成！")
 }
 
-func SaveAssignment(assignmentID, studentID string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string) {
+func SaveAssignment(assignmentID, studentID, studentName string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string) {
 	aID, _ := strconv.ParseUint(assignmentID, 10, 32)
 
 	// 再次清洗确保所有存入 DB 的字符都是绝对纯净的 UTF-8
@@ -51,6 +55,7 @@ func SaveAssignment(assignmentID, studentID string, score float64, feedback, mer
 
 	submission := models.Submission{
 		StudentID:          studentID,
+		StudentName:        studentName,
 		AssignmentID:       uint(aID),
 		Score:              score,
 		Feedback:           safeFeedback,

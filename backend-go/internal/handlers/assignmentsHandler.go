@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,12 +11,16 @@ import (
 	"os"
 	"path/filepath"
 
+	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
+	"grading-gateway/internal/mq"
 	"grading-gateway/internal/schemas"
 	"grading-gateway/internal/tools"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
@@ -93,11 +98,26 @@ func GetAssignments(c *gin.Context) {
 // 获取单个作业详情handler
 func GetAssignment(c *gin.Context) {
 	id := c.Param("id")
+	// 获取用户角色和用户名
+	role, roleErr := middleware.GetRoleFromContext(c)
+	username, usernameErr := middleware.GetUsernameFromContext(c)
+
 	// 根据id获取作业
 	var assignment models.Assignment
-	if err := database.DB.Preload("Submissions", func(db *gorm.DB) *gorm.DB {
-		return db.Order("score DESC")
-	}).First(&assignment, id).Error; err != nil {
+	query := database.DB
+	// 如果是学生，只预加载自己的提交
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		query = query.Preload("Submissions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("student_id = ?", username).Order("score DESC")
+		})
+	} else {
+		// 教师/管理员获取所有提交
+		query = query.Preload("Submissions", func(db *gorm.DB) *gorm.DB {
+			return db.Order("score DESC")
+		})
+	}
+
+	if err := query.First(&assignment, id).Error; err != nil {
 		log.Printf("获取单个作业出错：%v", err)
 		c.JSON(http.StatusNotFound, gin.H{"message": "获取单个作业详情出错", "detail": "作业未找到"})
 		return
@@ -128,9 +148,19 @@ func GetAssignment(c *gin.Context) {
 func GetAssignmentSubmissions(c *gin.Context) {
 	assignmentID := c.Param("id")
 
-	var submissions = make([]models.Submission, 0)
+	// 获取用户角色和用户名
+	role, roleErr := middleware.GetRoleFromContext(c)
+	username, usernameErr := middleware.GetUsernameFromContext(c)
 
-	if err := database.DB.Where("assignment_id = ?", assignmentID).Order("score DESC").Find(&submissions).Error; err != nil {
+	var submissions = make([]models.Submission, 0)
+	query := database.DB.Where("assignment_id = ?", assignmentID)
+
+	// 如果是学生，只能查看自己的提交
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		query = query.Where("student_id = ?", username)
+	}
+
+	if err := query.Order("score DESC").Find(&submissions).Error; err != nil {
 		log.Printf("获取所有提交出错: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "获取所有提交出错", "error": err.Error()})
 		return
@@ -190,11 +220,40 @@ func UploadAssignment(c *gin.Context) {
 		return
 	}
 
-	// 启动子进程运行批改全过程
-	go tools.ProcessPipeline(assignmentID, savePath)
+	// 生成 UUID 作为 jobID
+	jobID := uuid.New().String()
+	log.Printf("创建异步作业任务: job=%s, assignment=%s", jobID, assignmentID)
 
+	ctx := context.Background()
+
+	// 1. 在 MySQL 中创建 AsyncJob 记录，状态设为 PENDING
+	err = mq.CreateAsyncJob(jobID, models.JobTypeHomework, assignmentID, "")
+	if err != nil {
+		log.Printf("ERROR: Failed to create async job in database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "创建异步任务失败"})
+		return
+	}
+
+	// 2. 在 Redis 中缓存初始状态
+	if err := cache.SetJobStatus(ctx, jobID, string(models.JobStatusPending), "任务已创建，等待处理"); err != nil {
+		log.Printf("WARNING: Failed to cache job status in Redis: %v", err)
+		// 不返回错误，继续执行
+	}
+
+	// 3. 调用 mq.PublishHomeworkTask 将任务推送到 Kafka
+	if err := mq.PublishHomeworkTask(jobID, assignmentID, savePath); err != nil {
+		log.Printf("ERROR: Failed to publish homework task to Kafka: %v", err)
+		// 更新任务状态为 FAILED
+		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
+		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "任务提交失败，请重试"})
+		return
+	}
+
+	// 4. 修改 HTTP 响应，返回 http.StatusAccepted (202)，并在 JSON 中包含 job_id
 	c.JSON(http.StatusAccepted, gin.H{
-		"message":   "文件已成功接收！系统正在后台进行高并发批改，请稍后刷新页面查看结果。",
+		"message":   "文件已成功接收！任务已加入队列，系统将异步处理批改，请稍后通过 job_id 查询状态。",
+		"job_id":    jobID,
 		"file_path": savePath,
 	})
 }
@@ -274,7 +333,7 @@ func ExportAssignmentExcel(c *gin.Context) {
 			humanScore = fmt.Sprintf("%.2f", sub.HumanScore)
 		}
 
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), sub.StudentID)
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), sub.StudentID+"-"+sub.StudentName)
 		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), sub.Score)
 		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), sub.Feedback)
 		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), isReviewed)
@@ -343,7 +402,7 @@ func ExportAssignmentExcel(c *gin.Context) {
 					}
 				}
 
-				f.SetCellValue(plagSheetName, fmt.Sprintf("A%d", plagRow), sub.StudentID)
+				f.SetCellValue(plagSheetName, fmt.Sprintf("A%d", plagRow), sub.StudentID+"-"+sub.StudentName)
 				f.SetCellValue(plagSheetName, fmt.Sprintf("B%d", plagRow), studentB)
 				f.SetCellValue(plagSheetName, fmt.Sprintf("C%d", plagRow), contentType)
 				f.SetCellValue(plagSheetName, fmt.Sprintf("D%d", plagRow), initialScore)
