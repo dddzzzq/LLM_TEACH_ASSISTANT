@@ -73,6 +73,8 @@ func ExtractContent(filename string, content []byte, depth int) string {
 			log.Printf("图片 %s OCR 失败: %v", filename, err)
 			return fmt.Sprintf("【图片OCR失败: %s】", filename)
 		}
+log.Printf("[OCR 成功] 图片: %s, 提取长度: %d 字符", filename, len(res.TextContent))
+log.Printf("[OCR 成功] 图片: %s, 提取长度: %d 字符", filename, len(res.TextContent))
 		return fmt.Sprintf("--- [图片文件内容 (OCR): %s] ---\n%s\n", filename, res.TextContent)
 	}
 

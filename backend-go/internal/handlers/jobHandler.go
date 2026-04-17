@@ -2,14 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 
 	"grading-gateway/internal/cache"
-	"grading-gateway/internal/database"
-	"grading-gateway/internal/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // GetJobStatus 获取异步任务状态
@@ -34,53 +34,54 @@ func GetJobStatus(c *gin.Context) {
 
 	ctx := context.Background()
 
-	// 1. 优先从 Redis 中获取任务状态
-	redisStatus, err := cache.GetJobStatus(ctx, jobID)
+	fromRedis, fromDB, err := cache.GetJobStatusWithFallback(ctx, jobID)
 	if err != nil {
-		// Redis 查询出错，记录日志但不返回错误，继续尝试 MySQL
-		log.Printf("WARNING: Failed to get job status from Redis for %s: %v", jobID, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("ERROR: AsyncJob %s not found in MySQL: %v", jobID, err)
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "任务不存在",
+				"job_id":  jobID,
+				"message": "未找到指定的任务记录",
+			})
+			return
+		}
+		log.Printf("ERROR: GetJobStatusWithFallback %s: %v", jobID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "查询任务状态失败",
+			"job_id":  jobID,
+			"message": err.Error(),
+		})
+		return
 	}
 
-	// 如果 Redis 中有数据，直接返回
-	if redisStatus != nil && len(redisStatus) > 0 {
-		status := redisStatus["status"]
-		message := redisStatus["message"]
-		updated := redisStatus["updated"]
-
+	if len(fromRedis) > 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"job_id":  jobID,
-			"status":  status,
-			"message": message,
-			"updated": updated,
+			"status":  fromRedis["status"],
+			"message": fromRedis["message"],
+			"updated": fromRedis["updated"],
 			"source":  "redis",
 		})
 		return
 	}
 
-	// 2. Redis 中查不到，作为兜底去 MySQL 的 AsyncJob 表中查询
-	var asyncJob models.AsyncJob
-	result := database.DB.Where("id = ?", jobID).First(&asyncJob)
-	if result.Error != nil {
-		// 记录找不到的错误
-		log.Printf("ERROR: AsyncJob %s not found in MySQL: %v", jobID, result.Error)
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "任务不存在",
-			"job_id":  jobID,
-			"message": "未找到指定的任务记录",
+	if fromDB != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"job_id":       fromDB.ID,
+			"status":       string(fromDB.Status),
+			"message":      fromDB.Message,
+			"job_type":     string(fromDB.JobType),
+			"reference_id": fromDB.ReferenceID,
+			"student_id":   fromDB.StudentID,
+			"created_at":   fromDB.CreatedAt,
+			"updated_at":   fromDB.UpdatedAt,
+			"source":       "mysql",
 		})
 		return
 	}
 
-	// 3. 返回 MySQL 中的数据
-	c.JSON(http.StatusOK, gin.H{
-		"job_id":       asyncJob.ID,
-		"status":       string(asyncJob.Status),
-		"message":      asyncJob.Message,
-		"job_type":     string(asyncJob.JobType),
-		"reference_id": asyncJob.ReferenceID,
-		"student_id":   asyncJob.StudentID,
-		"created_at":   asyncJob.CreatedAt,
-		"updated_at":   asyncJob.UpdatedAt,
-		"source":       "mysql",
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"error":  "unexpected empty job status",
+		"job_id": jobID,
 	})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -23,6 +24,9 @@ func main() {
 	database.InitRedis(nil)
 	defer database.CloseRedis()
 
+	// 2.1 初始化（/迁移后）种子技能定义
+	agent.EnsureDefaultSkillsSeeded(context.Background())
+
 	// 3. 初始化 Kafka
 	kafkaBrokers := []string{"localhost:9092"}
 	if err := mq.InitKafka(kafkaBrokers); err != nil {
@@ -30,11 +34,17 @@ func main() {
 		log.Println("警告: Kafka 初始化失败，异步任务功能将不可用")
 	} else {
 		defer mq.Close()
-		// 启动 Kafka 消费者
+		// 启动 Kafka 消费者 - 批改任务
 		topics := []string{mq.TopicGradingHomework, mq.TopicGradingExam}
 		go func() {
 			if err := mq.StartKafkaConsumer(topics); err != nil {
 				log.Printf("ERROR: Failed to start Kafka consumer: %v", err)
+			}
+		}()
+		// 启动 RPA 消费者 - 教务系统作业抓取任务
+		go func() {
+			if err := mq.StartRPAConsumer(); err != nil {
+				log.Printf("ERROR: Failed to start RPA consumer: %v", err)
 			}
 		}()
 	}
@@ -103,6 +113,15 @@ func main() {
 
 		// 异步任务状态查询路由
 		protectedGroup.GET("/jobs/:job_id", handlers.GetJobStatus)
+
+		// Skills 管理（教师/管理员）
+		adminGroup := protectedGroup.Group("/admin")
+		adminGroup.Use(middleware.RBACMiddleware("teacher", "admin"))
+		{
+			adminGroup.GET("/skills", handlers.ListSkillsAdmin)
+			adminGroup.PUT("/skills/:name", handlers.UpdateSkillAdmin)
+			adminGroup.POST("/skills/cache/refresh", handlers.RefreshSkillsCacheAdmin)
+		}
 	}
 
 	// 11. 原有业务路由（保持原有结构）

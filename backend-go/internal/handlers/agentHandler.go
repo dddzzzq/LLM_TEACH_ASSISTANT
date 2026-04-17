@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -97,9 +98,10 @@ func AgentChat(c *gin.Context) {
 	// 注册技能
 	registry.Register(&agent.QueryStudentScoreSkill{})
 	registry.Register(&agent.TriggerPipelineSkill{})
+	registry.Register(&agent.FetchAndGradeHomeworkSkill{})
 
 	// 根据用户角色动态生成系统提示
-	systemPrompt := generateSystemPrompt(role, username, roleErr, usernameErr)
+	systemPrompt := generateSystemPromptWithFetchSkill(role, username, roleErr, usernameErr)
 
 	// 获取对话历史（从 Redis）
 	history, err := memoryManager.GetFormattedHistory(userID, sessionID)
@@ -115,7 +117,11 @@ func AgentChat(c *gin.Context) {
 	}
 
 	// 导出所有工具
-	tools := registry.ExportAllTools()
+	tools, toolsErr := agent.BuildToolsForRole(context.Background(), role, registry)
+	if toolsErr != nil {
+		log.Printf("AgentChat: 加载技能工具定义失败: %v", toolsErr)
+		tools = registry.ExportAllTools() // fallback：保持可用性
+	}
 
 	// 第一次调用 LLM（使用包含历史的消息）
 	llmResponse, err := agent.CallDeepSeekWithTools(systemPrompt, userMessageWithHistory, tools)
@@ -273,18 +279,20 @@ func determineAction(response string) string {
 	return "none"
 }
 
-// generateSystemPrompt 根据用户角色生成不同的系统提示
-func generateSystemPrompt(role string, username string, roleErr error, usernameErr error) string {
+// generateSystemPromptWithFetchSkill 根据用户角色生成不同的系统提示（包含教务系统抓取功能）
+func generateSystemPromptWithFetchSkill(role string, username string, roleErr error, usernameErr error) string {
 	if roleErr != nil || usernameErr != nil {
 		// 如果无法获取角色信息，使用默认提示
 		return `你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
 你可以使用以下工具来帮助教师：
 1. query_student_score: 查询学生的历史作业和试卷得分、评语
 2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
+3. fetch_and_grade_homework: 从教务系统下载并批改作业
 
 请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
 如果用户询问学生成绩，请使用 query_student_score 工具。
 如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
+如果用户要求从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称），请使用 fetch_and_grade_homework 工具。
 
 注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`
 	}
@@ -296,30 +304,35 @@ func generateSystemPrompt(role string, username string, roleErr error, usernameE
 你是一位智能教学助手，专门帮助学生查看自己的作业和试卷批改情况。
 你可以使用以下工具来帮助学生：
 1. query_student_score: 查询学生的历史作业和试卷得分、评语
+2. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
 
 注意：你只能查询学号为 %s 的学生信息。如果用户尝试查询其他人的成绩，你必须拒绝并说明只能查看自己的信息。`, username, username)
 	case "teacher", "admin":
-		return `你现在的对话对象是教师/管理员。你可以协助分析全班学情、统计成绩分布、或查询特定学生的成绩详情。
+		return fmt.Sprintf(`你现在的对话对象是教师/管理员（用户名: %s）。你可以协助分析全班学情、统计成绩分布、或查询特定学生的成绩详情。
 
 你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
 你可以使用以下工具来帮助教师：
 1. query_student_score: 查询学生的历史作业和试卷得分、评语
 2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
+3. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
 
 请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
 如果用户询问学生成绩，请使用 query_student_score 工具。
 如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
+如果用户要求从教务系统下载并批改作业，请使用 fetch_and_grade_homework 工具。
 
-注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`
+注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`, username)
 	default:
 		return `你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
 你可以使用以下工具来帮助教师：
 1. query_student_score: 查询学生的历史作业和试卷得分、评语
 2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
+3. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
 
 请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
 如果用户询问学生成绩，请使用 query_student_score 工具。
 如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
+如果用户要求从教务系统下载并批改作业，请使用 fetch_and_grade_homework 工具。
 
 注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`
 	}

@@ -74,6 +74,11 @@ class ComputeServiceStub(object):
                 request_serializer=compute__service__pb2.PoolScoresRequest.SerializeToString,
                 response_deserializer=compute__service__pb2.PoolScoresResponse.FromString,
                 _registered_method=True)
+        self.FetchPortalHomework = channel.unary_unary(
+                '/compute.ComputeService/FetchPortalHomework',
+                request_serializer=compute__service__pb2.FetchRequest.SerializeToString,
+                response_deserializer=compute__service__pb2.FetchResponse.FromString,
+                _registered_method=True)
 
 
 class ComputeServiceServicer(object):
@@ -133,6 +138,13 @@ class ComputeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def FetchPortalHomework(self, request, context):
+        """教务系统作业抓取服务
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ComputeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -175,6 +187,11 @@ def add_ComputeServiceServicer_to_server(servicer, server):
                     servicer.PoolScores,
                     request_deserializer=compute__service__pb2.PoolScoresRequest.FromString,
                     response_serializer=compute__service__pb2.PoolScoresResponse.SerializeToString,
+            ),
+            'FetchPortalHomework': grpc.unary_unary_rpc_method_handler(
+                    servicer.FetchPortalHomework,
+                    request_deserializer=compute__service__pb2.FetchRequest.FromString,
+                    response_serializer=compute__service__pb2.FetchResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -393,6 +410,33 @@ class ComputeService(object):
             '/compute.ComputeService/PoolScores',
             compute__service__pb2.PoolScoresRequest.SerializeToString,
             compute__service__pb2.PoolScoresResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def FetchPortalHomework(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/compute.ComputeService/FetchPortalHomework',
+            compute__service__pb2.FetchRequest.SerializeToString,
+            compute__service__pb2.FetchResponse.FromString,
             options,
             channel_credentials,
             insecure,

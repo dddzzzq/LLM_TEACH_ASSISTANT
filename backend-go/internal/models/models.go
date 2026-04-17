@@ -47,11 +47,11 @@ type ChatSession struct {
 
 // ChatMessage 聊天消息表
 type ChatMessage struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`                           // 主键
-	SessionID string    `json:"session_id" gorm:"type:char(36);not null;index"` // 关联会话ID
-	Role      string    `json:"role" gorm:"type:varchar(20);not null"`          // 角色: user/assistant
-	Content   string    `json:"content" gorm:"type:longtext;not null"`          // 消息内容
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`               // 创建时间
+	ID        uint      `json:"id" gorm:"primaryKey"`                                                                              // 主键
+	SessionID string    `json:"session_id" gorm:"type:char(36);not null;index;index:idx_chat_messages_session_created,priority:1"` // 关联会话ID
+	Role      string    `json:"role" gorm:"type:varchar(20);not null"`                                                             // 角色: user/assistant
+	Content   string    `json:"content" gorm:"type:longtext;not null"`                                                             // 消息内容
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index:idx_chat_messages_session_created,priority:2"`               // 创建时间
 
 	// 关联关系
 	Session ChatSession `json:"session,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE;"` // 关联会话
@@ -64,7 +64,9 @@ type ChatMessage struct {
 // Assignment 作业表
 type Assignment struct {
 	ID          uint         `gorm:"primaryKey"`                                           // 主键
-	TaskName    string       `gorm:"size:255;index"`                                       // 任务名称
+	CourseName  string       `gorm:"size:255;index;not null"`                              // 课程名称
+	ClassName   string       `gorm:"size:255;index;not null"`                              // 班级名称
+	TaskName    string       `gorm:"size:255;index"`                                       // 作业名称
 	Question    string       `gorm:"type:longtext"`                                        // 任务描述 (升级为 longtext)
 	Rubric      string       `gorm:"column:rubric;type:longtext"`                          // 任务评分标准 (升级为 longtext)
 	Submissions []Submission `gorm:"foreignKey:AssignmentID;constraint:OnDelete:CASCADE;"` // 学生提交，外键
@@ -72,18 +74,18 @@ type Assignment struct {
 
 // Submission 学生提交记录表
 type Submission struct {
-	ID                 uint    `gorm:"primaryKey"`    // 主键
-	StudentID          string  `gorm:"size:64;index"` // 学生学号
-	StudentName        string  `gorm:"size:64"`       // 学生姓名
-	Score              float64 // 得分
-	Feedback           string  `gorm:"type:longtext"`                              // ai反馈评价 (升级为 longtext)
-	MergeContent       string  `gorm:"type:longtext"`                              // 学生提交合并内容 (升级为 longtext)
-	PlagiarismReport   string  `gorm:"column:plagiarism_reports;type:longtext"`    // 抄袭报告，存为json格式 (升级为 longtext)
-	AIGCReport         string  `gorm:"column:aigc_reports;type:longtext"`          // aigc检测报告，存为json格式 (升级为 longtext)
-	CodeDocMatchReport string  `gorm:"column:code_doc_match_report;type:longtext"` // 代码文本相似度检测，存为json格式 (升级为 longtext)
-	AssignmentID       uint    `gorm:"index"`                                      // 根据其分组
-	IsHumanReviewed    bool    `gorm:"type:boolean;default:false;not null"`        // 教师是否复查
-	HumanFeedback      string  `gorm:"type:longtext"`                              // 教师复查评语 (升级为 longtext)
+	ID                 uint    `gorm:"primaryKey"`                                                                                                  // 主键
+	StudentID          string  `gorm:"size:64;index;index:idx_submissions_assignment_student,priority:2"`                                           // 学生学号
+	StudentName        string  `gorm:"size:64"`                                                                                                     // 学生姓名
+	Score              float64 `gorm:"index:idx_submissions_assignment_score,priority:2"`                                                           // 得分
+	Feedback           string  `gorm:"type:longtext"`                                                                                               // ai反馈评价 (升级为 longtext)
+	MergeContent       string  `gorm:"type:longtext"`                                                                                               // 学生提交合并内容 (升级为 longtext)
+	PlagiarismReport   string  `gorm:"column:plagiarism_reports;type:longtext"`                                                                     // 抄袭报告，存为json格式 (升级为 longtext)
+	AIGCReport         string  `gorm:"column:aigc_reports;type:longtext"`                                                                           // aigc检测报告，存为json格式 (升级为 longtext)
+	CodeDocMatchReport string  `gorm:"column:code_doc_match_report;type:longtext"`                                                                  // 代码文本相似度检测，存为json格式 (升级为 longtext)
+	AssignmentID       uint    `gorm:"index;index:idx_submissions_assignment_score,priority:1;index:idx_submissions_assignment_student,priority:1"` // 根据其分组
+	IsHumanReviewed    bool    `gorm:"type:boolean;default:false;not null"`                                                                         // 教师是否复查
+	HumanFeedback      string  `gorm:"type:longtext"`                                                                                               // 教师复查评语 (升级为 longtext)
 	HumanScore         float64 // 教师评分
 }
 
@@ -187,4 +189,22 @@ type AsyncJob struct {
 	Message     string         `json:"message" gorm:"type:text"`                             // 错误信息等
 	CreatedAt   time.Time      `json:"created_at" gorm:"autoCreateTime"`                     // 创建时间
 	UpdatedAt   time.Time      `json:"updated_at" gorm:"autoUpdateTime"`                     // 更新时间
+}
+
+// =========================
+//    Agent Skills 配置模块
+// =========================
+
+// SkillDefinition 表示一个可供 LLM 调用的工具（skill）的定义配置。
+// 注意：技能的执行逻辑仍然由 Go 内置实现提供（impl_key 映射到代码实现），这里仅存放工具定义、开关与权限。
+type SkillDefinition struct {
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	Name         string    `json:"name" gorm:"type:varchar(128);uniqueIndex;not null"` // tool/function name
+	ImplKey      string    `json:"impl_key" gorm:"type:varchar(128);not null"`         // 内置实现标识（用于映射到代码执行器）
+	Description  string    `json:"description" gorm:"type:text;not null"`
+	SchemaJSON   string    `json:"schema_json" gorm:"type:longtext;not null"` // JSON Schema 字符串
+	Enabled      bool      `json:"enabled" gorm:"type:boolean;default:true;not null;index"`
+	AllowedRoles string    `json:"allowed_roles" gorm:"type:text;not null"` // JSON array string, e.g. ["student","teacher"]
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }

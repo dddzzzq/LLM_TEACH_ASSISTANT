@@ -27,6 +27,7 @@ const (
 	ComputeService_GradeExamQuestion_FullMethodName      = "/compute.ComputeService/GradeExamQuestion"
 	ComputeService_SummarizeExam_FullMethodName          = "/compute.ComputeService/SummarizeExam"
 	ComputeService_PoolScores_FullMethodName             = "/compute.ComputeService/PoolScores"
+	ComputeService_FetchPortalHomework_FullMethodName    = "/compute.ComputeService/FetchPortalHomework"
 )
 
 // ComputeServiceClient is the client API for ComputeService service.
@@ -47,6 +48,8 @@ type ComputeServiceClient interface {
 	SummarizeExam(ctx context.Context, in *SummarizeExamRequest, opts ...grpc.CallOption) (*SummarizeExamResponse, error)
 	// 成绩池化服务
 	PoolScores(ctx context.Context, in *PoolScoresRequest, opts ...grpc.CallOption) (*PoolScoresResponse, error)
+	// 教务系统作业抓取服务
+	FetchPortalHomework(ctx context.Context, in *FetchRequest, opts ...grpc.CallOption) (*FetchResponse, error)
 }
 
 type computeServiceClient struct {
@@ -137,6 +140,16 @@ func (c *computeServiceClient) PoolScores(ctx context.Context, in *PoolScoresReq
 	return out, nil
 }
 
+func (c *computeServiceClient) FetchPortalHomework(ctx context.Context, in *FetchRequest, opts ...grpc.CallOption) (*FetchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FetchResponse)
+	err := c.cc.Invoke(ctx, ComputeService_FetchPortalHomework_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ComputeServiceServer is the server API for ComputeService service.
 // All implementations must embed UnimplementedComputeServiceServer
 // for forward compatibility.
@@ -155,6 +168,8 @@ type ComputeServiceServer interface {
 	SummarizeExam(context.Context, *SummarizeExamRequest) (*SummarizeExamResponse, error)
 	// 成绩池化服务
 	PoolScores(context.Context, *PoolScoresRequest) (*PoolScoresResponse, error)
+	// 教务系统作业抓取服务
+	FetchPortalHomework(context.Context, *FetchRequest) (*FetchResponse, error)
 	mustEmbedUnimplementedComputeServiceServer()
 }
 
@@ -188,6 +203,9 @@ func (UnimplementedComputeServiceServer) SummarizeExam(context.Context, *Summari
 }
 func (UnimplementedComputeServiceServer) PoolScores(context.Context, *PoolScoresRequest) (*PoolScoresResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PoolScores not implemented")
+}
+func (UnimplementedComputeServiceServer) FetchPortalHomework(context.Context, *FetchRequest) (*FetchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchPortalHomework not implemented")
 }
 func (UnimplementedComputeServiceServer) mustEmbedUnimplementedComputeServiceServer() {}
 func (UnimplementedComputeServiceServer) testEmbeddedByValue()                        {}
@@ -354,6 +372,24 @@ func _ComputeService_PoolScores_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ComputeService_FetchPortalHomework_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ComputeServiceServer).FetchPortalHomework(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ComputeService_FetchPortalHomework_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ComputeServiceServer).FetchPortalHomework(ctx, req.(*FetchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ComputeService_ServiceDesc is the grpc.ServiceDesc for ComputeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -392,6 +428,10 @@ var ComputeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PoolScores",
 			Handler:    _ComputeService_PoolScores_Handler,
+		},
+		{
+			MethodName: "FetchPortalHomework",
+			Handler:    _ComputeService_FetchPortalHomework_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

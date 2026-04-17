@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
@@ -39,9 +41,11 @@ func CreateAssignment(c *gin.Context) {
 	// json化rubric
 	rubricBytes, _ := json.Marshal(req.Rubric)
 	var assignment = models.Assignment{
-		TaskName: req.TaskName,
-		Question: req.Question,
-		Rubric:   string(rubricBytes),
+		CourseName: req.CourseName,
+		ClassName:  req.ClassName,
+		TaskName:   req.TaskName,
+		Question:   req.Question,
+		Rubric:     string(rubricBytes),
 	}
 
 	// 入库失败
@@ -82,10 +86,12 @@ func GetAssignments(c *gin.Context) {
 		}
 
 		res = append(res, schemas.AssignmentResponse{
-			ID:       ass.ID,
-			TaskName: ass.TaskName,
-			Question: ass.Question,
-			Rubric:   rubricMap,
+			ID:         ass.ID,
+			CourseName: ass.CourseName,
+			ClassName:  ass.ClassName,
+			TaskName:   ass.TaskName,
+			Question:   ass.Question,
+			Rubric:     rubricMap,
 		})
 	}
 
@@ -97,39 +103,88 @@ func GetAssignments(c *gin.Context) {
 
 // 获取单个作业详情handler
 func GetAssignment(c *gin.Context) {
-	id := c.Param("id")
+	idStr := c.Param("id")
+	assignmentID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "无效的作业ID"})
+		return
+	}
+
 	// 获取用户角色和用户名
 	role, roleErr := middleware.GetRoleFromContext(c)
 	username, usernameErr := middleware.GetUsernameFromContext(c)
 
-	// 根据id获取作业
-	var assignment models.Assignment
-	query := database.DB
-	// 如果是学生，只预加载自己的提交
-	if roleErr == nil && usernameErr == nil && role == "student" {
-		query = query.Preload("Submissions", func(db *gorm.DB) *gorm.DB {
-			return db.Where("student_id = ?", username).Order("score DESC")
-		})
-	} else {
-		// 教师/管理员获取所有提交
-		query = query.Preload("Submissions", func(db *gorm.DB) *gorm.DB {
-			return db.Order("score DESC")
-		})
-	}
-
-	if err := query.First(&assignment, id).Error; err != nil {
+	// 1. 【动静分离 - 静态部分】：从 Redis 缓存中获取作业基础信息（带防穿透、防击穿保护）
+	assignmentBase, err := cache.GetAssignmentWithCache(c.Request.Context(), uint(assignmentID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("获取单个作业未找到：%v", err)
+			c.JSON(http.StatusNotFound, gin.H{"message": "获取单个作业详情出错", "detail": "作业未找到"})
+			return
+		}
 		log.Printf("获取单个作业出错：%v", err)
-		c.JSON(http.StatusNotFound, gin.H{"message": "获取单个作业详情出错", "detail": "作业未找到"})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "系统繁忙，获取作业详情失败"})
 		return
 	}
 
-	// 返回序列化JSON
+	// 2. 【动静分离 - 动态部分】：根据角色权限，单独去 MySQL 查询属于该用户的 Submissions
+	var submissions []models.Submission
+	subQuery := database.DB.Where("assignment_id = ?", assignmentID)
+
+	// 如果是学生，只查询自己的提交
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		subQuery = subQuery.Where("student_id = ?", username).Order("score DESC")
+	} else {
+		// 教师/管理员获取所有提交
+		subQuery = subQuery.Order("score DESC")
+	}
+
+	if err := subQuery.Find(&submissions).Error; err != nil {
+		log.Printf("获取作业提交记录出错：%v", err)
+	}
+
+	// 3. 组装数据并返回 JSON
 	var rubricMap map[string]interface{}
-	json.Unmarshal([]byte(assignment.Rubric), &rubricMap)
+	if assignmentBase.Rubric != "" {
+		json.Unmarshal([]byte(assignmentBase.Rubric), &rubricMap)
+	} else {
+		rubricMap = make(map[string]interface{})
+	}
 
 	var formattedSubmissions []map[string]interface{}
-	for _, sub := range assignment.Submissions {
-		formattedSubmissions = append(formattedSubmissions, tools.FormatSubmission(sub))
+	for _, sub := range submissions {
+		// 这里刻意不返回 merged_content，以减小单次作业详情响应体积
+		var plag []map[string]interface{}
+		if sub.PlagiarismReport != "" && sub.PlagiarismReport != "[]" {
+			_ = json.Unmarshal([]byte(sub.PlagiarismReport), &plag)
+		} else {
+			plag = make([]map[string]interface{}, 0)
+		}
+
+		var aigc map[string]interface{}
+		if sub.AIGCReport != "" && sub.AIGCReport != "{}" {
+			_ = json.Unmarshal([]byte(sub.AIGCReport), &aigc)
+		}
+
+		var match map[string]interface{}
+		if sub.CodeDocMatchReport != "" && sub.CodeDocMatchReport != "{}" {
+			_ = json.Unmarshal([]byte(sub.CodeDocMatchReport), &match)
+		}
+
+		formattedSubmissions = append(formattedSubmissions, map[string]interface{}{
+			"id":                    sub.ID,
+			"student_id":            sub.StudentID,
+			"student_name":          sub.StudentName,
+			"score":                 sub.Score,
+			"feedback":              sub.Feedback,
+			"plagiarism_reports":    plag,
+			"aigc_report":           aigc,
+			"code_doc_match_report": match,
+			"assignment_id":         sub.AssignmentID,
+			"is_human_reviewed":     sub.IsHumanReviewed,
+			"human_feedback":        sub.HumanFeedback,
+			"human_score":           sub.HumanScore,
+		})
 	}
 
 	if formattedSubmissions == nil {
@@ -137,9 +192,11 @@ func GetAssignment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":          assignment.ID,
-		"task_name":   assignment.TaskName,
-		"question":    assignment.Question,
+		"id":          assignmentBase.ID,
+		"course_name": assignmentBase.CourseName,
+		"class_name":  assignmentBase.ClassName,
+		"task_name":   assignmentBase.TaskName,
+		"question":    assignmentBase.Question,
 		"rubric":      rubricMap,
 		"submissions": formattedSubmissions,
 	})
@@ -182,11 +239,33 @@ func GetAssignmentSubmissions(c *gin.Context) {
 // 删除作业handler
 func DeleteAssignment(c *gin.Context) {
 	id := c.Param("id")
-	if err := database.DB.Delete(&models.Assignment{}, id).Error; err != nil {
+
+	// 获取一致性服务
+	consistencySvc := database.GetConsistencyService()
+	ctx := context.Background()
+
+	//
+	assignmentKey := fmt.Sprintf("assignment:%s", id)
+
+	// 使用一致性服务删除缓存和数据
+	err := consistencySvc.DeleteThenInvalidate(ctx, "assignment", assignmentKey, func() error {
+		// 这是实际的MySQL删除操作
+		return database.DB.Delete(&models.Assignment{}, id).Error
+	})
+
+	if err != nil {
 		log.Printf("删除作业失败： %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "删除作业失败"})
 		return
 	}
+
+	// 清理作业相关的提交缓存
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*assignment:%s*", id))
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*submission:*:%s*", id))
+	// 【新增】：主动清理我们刚刚引入的 DB 旁路缓存
+	assignmentID, _ := strconv.ParseUint(id, 10, 32)
+	cache.InvalidateAssignmentCache(ctx, uint(assignmentID))
+
 	c.Status(http.StatusNoContent)
 }
 
@@ -241,11 +320,12 @@ func UploadAssignment(c *gin.Context) {
 	}
 
 	// 3. 调用 mq.PublishHomeworkTask 将任务推送到 Kafka
-	if err := mq.PublishHomeworkTask(jobID, assignmentID, savePath); err != nil {
+	assignmentIDUint, _ := strconv.ParseUint(assignmentID, 10, 32)
+	if err := mq.PublishHomeworkTask(jobID, uint(assignmentIDUint), savePath); err != nil {
 		log.Printf("ERROR: Failed to publish homework task to Kafka: %v", err)
-		// 更新任务状态为 FAILED
-		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
+		// 更新任务状态为 FAILED（先数据库后缓存）
 		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
+		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "任务提交失败，请重试"})
 		return
 	}

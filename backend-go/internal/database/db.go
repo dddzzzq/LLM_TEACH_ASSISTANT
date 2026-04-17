@@ -30,6 +30,7 @@ func InitDB(dsn string) {
 		&models.User{},
 		&models.ChatSession{},
 		&models.ChatMessage{},
+		&models.SkillDefinition{},
 		&models.Assignment{},
 		&models.Submission{},
 		&models.Exam{},

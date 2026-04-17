@@ -21,6 +21,9 @@ service ComputeService {
   
   // 成绩池化服务
   rpc PoolScores(PoolScoresRequest) returns (PoolScoresResponse);
+  
+  // 教务系统作业抓取服务
+  rpc FetchPortalHomework(FetchRequest) returns (FetchResponse);
 }
 
 // 文本提取
@@ -109,4 +112,18 @@ message PoolScoresResponse {
   bool success = 1;
   string pooled_results_json = 2;  // JSON格式的池化结果
   string error_message = 3;
+}
+
+// 5. 教务系统作业抓取
+message FetchRequest {
+  string username = 1;
+  string password = 2;
+  string course_name = 3;
+  string assignment_name = 4;
+}
+
+message FetchResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string file_paths = 3;  // 下载好的ZIP文件绝对路径
 }

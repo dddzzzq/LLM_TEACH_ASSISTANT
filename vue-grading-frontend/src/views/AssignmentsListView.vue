@@ -80,7 +80,7 @@
         </svg>
       </div>
       <h3 class="text-lg font-medium text-gray-900">暂无作业任务</h3>
-      <p class="mt-1 text-gray-500">点击右上角的“新建作业”按钮创建一个新的作业任务。</p>
+      <p class="mt-1 text-gray-500">点击右上角的"新建作业"按钮创建一个新的作业任务。</p>
     </div>
 
     <div v-else class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -91,14 +91,28 @@
       >
         <div class="p-6 flex-grow">
           <div class="flex justify-between items-start mb-4">
-            <h3
-              class="text-xl font-bold text-gray-800 line-clamp-2"
-              :title="assignment.task_name"
-            >
-              {{ assignment.task_name }}
-            </h3>
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-2">
+                <span
+                  class="px-2 py-1 text-xs font-semibold text-green-600 bg-green-50 rounded-full"
+                >
+                  {{ assignment.course_name }}
+                </span>
+                <span
+                  class="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-full"
+                >
+                  {{ assignment.class_name }}
+                </span>
+              </div>
+              <h3
+                class="text-xl font-bold text-gray-800 line-clamp-2"
+                :title="assignment.task_name"
+              >
+                {{ assignment.task_name }}
+              </h3>
+            </div>
             <span
-              class="px-2 py-1 text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-full"
+              class="px-2 py-1 text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-full ml-2"
               >ID: {{ assignment.id }}</span
             >
           </div>
@@ -161,6 +175,8 @@ import Loader from "../components/Loader.vue";
 
 interface Assignment {
   id: number;
+  course_name: string;
+  class_name: string;
   task_name: string;
   question: string;
 }

@@ -10,6 +10,14 @@
 
     <div v-else-if="assignment" class="space-y-8">
       <div class="p-6 bg-white rounded-lg shadow-lg">
+        <div class="flex items-center gap-3 mb-4">
+          <span class="px-3 py-1 text-sm font-semibold text-green-600 bg-green-50 rounded-full">
+            {{ assignment.course_name }}
+          </span>
+          <span class="px-3 py-1 text-sm font-semibold text-blue-600 bg-blue-50 rounded-full">
+            {{ assignment.class_name }}
+          </span>
+        </div>
         <h1 class="text-3xl font-bold text-gray-800">{{ assignment.task_name }}</h1>
         <p class="mt-4 text-gray-600 whitespace-pre-wrap">{{ assignment.question }}</p>
         <div class="mt-4">
@@ -327,6 +335,8 @@ interface SubmissionResult {
   human_score?: number;
 }
 interface Assignment {
+  course_name: string;
+  class_name: string;
   task_name: string;
   question: string;
   rubric: object;

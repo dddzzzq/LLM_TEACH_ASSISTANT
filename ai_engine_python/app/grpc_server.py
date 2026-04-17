@@ -19,6 +19,7 @@ import compute_service_pb2 as pb2
 import compute_service_pb2_grpc as pb2_grpc
 
 from app.schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport
+from app.tools.rpa_tools import fetch_homework_sync
 
 # 拦截子进程无意义的导入，只有主进程才加载大模型
 if multiprocessing.current_process().name == 'MainProcess':
@@ -230,6 +231,54 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 success=False,
                 pooled_results_json="{}",
                 error_message=f"成绩池化处理失败: {str(e)}"
+            )
+
+    def FetchPortalHomework(self, request, context):
+        """教务系统作业抓取接口"""
+        start_time = time.time()
+        try:
+            logging.info(f"[FetchPortalHomework] 开始执行教务系统作业抓取任务...")
+            logging.info(f"  - 用户名: {request.username}")
+            logging.info(f"  - 课程名称: {request.course_name}")
+            logging.info(f"  - 作业名称: {request.assignment_name}")
+            
+            # 调用RPA工具执行作业下载
+            result = fetch_homework_sync(
+                username=request.username,
+                password=request.password,
+                course_name=request.course_name,
+                assignment_name=request.assignment_name
+            )
+            
+            # 判断返回结果类型
+            if isinstance(result, list):
+                # 成功返回文件路径列表
+                logging.info(f"[FetchPortalHomework] RPA执行成功，获取到 {len(result)} 个文件")
+                for idx, file_path in enumerate(result, 1):
+                    logging.info(f"  - 文件 {idx}: {file_path}")
+                
+                return pb2.FetchResponse(
+                    success=True,
+                    message=f"成功下载 {len(result)} 个作业附件",
+                    file_paths=result
+                )
+            else:
+                # 失败返回错误信息字符串
+                logging.error(f"[FetchPortalHomework] RPA执行失败: {result}")
+                return pb2.FetchResponse(
+                    success=False,
+                    message=str(result),
+                    file_paths=[]
+                )
+        
+        except Exception as e:
+            logging.error(f"[FetchPortalHomework] 接口异常: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return pb2.FetchResponse(
+                success=False,
+                message=f"教务系统作业抓取失败: {str(e)}",
+                file_paths=[]
             )
 
 

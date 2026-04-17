@@ -13,6 +13,7 @@ import ExamDetailView from '../views/ExamDetailView.vue'
 import StudentReportView from '../views/StudentReportView.vue'
 import AIAssistantView from '../views/AIAssistantView.vue'
 import LoginView from '../views/LoginView.vue'
+import SkillsAdminView from '../views/SkillsAdminView.vue'
 
 // 路由守卫：检查用户是否已认证
 const requireAuth = (to, from, next) => {
@@ -170,7 +171,7 @@ const router = createRouter({
     
     // 学生报告路由
     {
-      path: '/exams/:examId/student/:studentExamId',
+      path: '/exams/:id/student/:studentExamId',
       name: 'student-report',
       component: StudentReportView,
       props: true,
@@ -183,6 +184,14 @@ const router = createRouter({
       name: 'ai-assistant',
       component: AIAssistantView,
       beforeEnter: requireAuth
+    },
+
+    // Skills 管理（教师/管理员）
+    {
+      path: '/skills-admin',
+      name: 'skills-admin',
+      component: SkillsAdminView,
+      beforeEnter: checkRolePermission(['teacher', 'admin'])
     },
     
     // 404页面

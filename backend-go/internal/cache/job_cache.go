@@ -3,13 +3,16 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/models"
 
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 const (
@@ -86,24 +89,36 @@ func GetJobStatus(ctx context.Context, jobID string) (map[string]string, error) 
 	return result, nil
 }
 
-// GetJobStatusWithFallback 优先从 Redis 获取，如果 Redis 中查不到，则作为兜底从 MySQL 的 AsyncJob 表中查询
-func GetJobStatusWithFallback(ctx context.Context, jobID string) (map[string]string, error) {
-	// 首先尝试 Redis
-	redisStatus, err := GetJobStatus(ctx, jobID)
-	if err != nil {
-		log.Printf("WARNING: Failed to get job status from redis for %s: %v", jobID, err)
-		// 继续尝试 MySQL
+// GetJobStatusWithFallback 优先从 Redis Hash 读取；未命中或 Redis 报错时回退到 MySQL AsyncJob。
+// 命中 MySQL 后会异步调用 SetJobStatus 回写 Redis（与 Cache Aside 一致）。
+// 返回值：Redis 有数据时 fromRedis 非空、fromDB 为 nil；回退 DB 成功时 fromRedis 为空、fromDB 非空；不存在时为 ErrRecordNotFound。
+func GetJobStatusWithFallback(ctx context.Context, jobID string) (fromRedis map[string]string, fromDB *models.AsyncJob, err error) {
+	redisStatus, rerr := GetJobStatus(ctx, jobID)
+	if rerr != nil {
+		log.Printf("WARNING: Failed to get job status from Redis for %s: %v", jobID, rerr)
+	} else if len(redisStatus) > 0 {
+		return redisStatus, nil, nil
 	}
 
-	if redisStatus != nil && len(redisStatus) > 0 {
-		return redisStatus, nil
+	var asyncJob models.AsyncJob
+	res := database.DB.Where("id = ?", jobID).First(&asyncJob)
+	if res.Error != nil {
+		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+			return nil, nil, gorm.ErrRecordNotFound
+		}
+		return nil, nil, res.Error
 	}
 
-	// Redis 中没有，尝试 MySQL
-	// 注意：这里需要导入 models 包和 database.DB
-	// 为了保持代码简洁，我们只返回 Redis 的结果，MySQL 回退将在 handler 中实现
-	// 返回 nil 表示需要回退到 MySQL
-	return nil, nil
+	go func() {
+		updateCtx := context.Background()
+		if err := SetJobStatus(updateCtx, jobID, string(asyncJob.Status), asyncJob.Message); err != nil {
+			log.Printf("WARNING: Failed to update Redis cache for job %s from MySQL fallback: %v", jobID, err)
+		} else {
+			log.Printf("DEBUG: Updated Redis cache for job %s from MySQL fallback", jobID)
+		}
+	}()
+
+	return nil, &asyncJob, nil
 }
 
 // DeleteJobStatus 删除任务状态缓存

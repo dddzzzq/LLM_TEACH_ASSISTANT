@@ -165,8 +165,8 @@ class PlagiarismService:
         返回一个包含所有分析结果的结构化字典。
         """
         separated_data = self._separate_content_for_each_student(submissions)
-        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.9995)
-        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.9995)
+        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.90)
+        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.90)
         # suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.95)
         # suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.98)
         return {

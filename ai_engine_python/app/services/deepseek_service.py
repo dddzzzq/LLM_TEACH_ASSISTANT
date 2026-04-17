@@ -167,12 +167,12 @@ class DeepSeekService:
         【项目代码】
         (可能包含第三方库、框架生成代码，请自动忽略这些非核心部分)
         ```
-        {json.dumps(code_content[:30000], ensure_ascii=False)}
+        {json.dumps(code_content[:settings.MAX_CODE_CONTENT_LENGTH], ensure_ascii=False)}
         ```
 
         【项目文档】
         ```text
-        {json.dumps(doc_content[:25000], ensure_ascii=False)}
+        {json.dumps(doc_content[:settings.MAX_DOC_CONTENT_LENGTH], ensure_ascii=False)}
         ```
 
         请基于【作业具体要求】，对【项目代码】和【项目文档】进行综合评估。
@@ -320,7 +320,7 @@ class DeepSeekService:
         - 不要因为数据文件的存在而扣分，除非数据文件格式错误且题目要求了特定的数据格式。
 
         [学生提交内容]
-        {json.dumps(student_answer[:50000])}
+        {json.dumps(student_answer[:settings.MAX_STUDENT_ANSWER_LENGTH])}
         
         请严格按照以下JSON格式提供你的最终评估:
         {{
@@ -342,8 +342,8 @@ class DeepSeekService:
         return {"total_score": -1, "overall_feedback": "AI评分服务出错", "score_details": []}
 
     def _get_text_plagiarism_prompt(self, text1: str, text2: str) -> str:
-        escaped_text1 = json.dumps(text1[:25000], ensure_ascii=False)
-        escaped_text2 = json.dumps(text2[:25000], ensure_ascii=False)
+        escaped_text1 = json.dumps(text1[:settings.MAX_PLAGIARISM_TEXT_LENGTH], ensure_ascii=False)
+        escaped_text2 = json.dumps(text2[:settings.MAX_PLAGIARISM_TEXT_LENGTH], ensure_ascii=False)
         return f"""
         你是一位经验丰富的大学教授。请对比以下两份**实验报告**，扮演一个客观的第三方顾问角色。
         你的任务是检测两份报告的抄袭情况，但是并不严格不容忍抄袭问题，在教学场景下，允许适当的文本复用，但是要求有自己的思考，最后提供一份详细的辅助决策中文报告，包含：
@@ -370,8 +370,8 @@ class DeepSeekService:
         """
 
     def _get_code_plagiarism_prompt(self, code1: str, code2: str) -> str:
-        escaped_code1 = json.dumps(code1[:25000], ensure_ascii=False)
-        escaped_code2 = json.dumps(code2[:25000], ensure_ascii=False)
+        escaped_code1 = json.dumps(code1[:settings.MAX_PLAGIARISM_TEXT_LENGTH], ensure_ascii=False)
+        escaped_code2 = json.dumps(code2[:settings.MAX_PLAGIARISM_TEXT_LENGTH], ensure_ascii=False)
         return f"""
         你是一位经验丰富的大学教授。请对比以下两份**源代码**，扮演一个客观的第三方代码审查顾问角色。
         你的任务是检测两份代码的抄袭情况，但是并不严格不容忍抄袭问题，在教学场景下，允许相当一部分的代码复用，但是要求有自己的思考，最后提供一份详细的辅助决策中文报告，包含：

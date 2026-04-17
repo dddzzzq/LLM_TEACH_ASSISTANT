@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"grading-gateway/internal/database"
 	"grading-gateway/internal/grpcclient"
-	"grading-gateway/internal/models"
 	"grading-gateway/pb"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +20,9 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"grading-gateway/internal/cache"
+	"strconv"
 )
 
 type GradingTask struct {
@@ -131,11 +132,14 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 	log.Printf("[调度中心] 启动全新批改流线, 作业ID: %s\n", assignmentID)
 	startTime := time.Now()
 
-	var assignment models.Assignment
-	if err := database.DB.First(&assignment, assignmentID).Error; err != nil {
-		log.Printf("[错误] 找不到作业ID %s\n", assignmentID)
+	// 1. 获取作业信息及评分标准 (走缓存)
+	parsedID, _ := strconv.Atoi(assignmentID)
+	assignmentPtr, err := cache.GetAssignmentWithCache(context.Background(), uint(parsedID))
+	if err != nil || assignmentPtr == nil {
+		log.Printf("[错误] 找不到作业ID %s (或缓存读取失败)\n", assignmentID)
 		return
 	}
+	assignment := *assignmentPtr
 
 	tasks, err := extractAndGroupTasks(assignmentID, zipPath)
 	if err != nil || len(tasks) == 0 {
@@ -201,7 +205,7 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 			studentTextsMap.Store(t.StudentID, finalText)
 
 			currentProg := atomic.AddInt32(&map1Completed, 1)
-			log.Printf("[Map 1 进度] 文件纯Go解析完成: %d/%d | 当前 Goroutine 数: %d", currentProg, totalTasks, runtime.NumGoroutine())
+			log.Printf("[Map 1 进度] 学生 %s 解析完成，内容长度: %d 字符 | 进度: %d/%d", t.StudentID, len(finalText), currentProg, totalTasks)
 		}(task)
 	}
 
@@ -217,10 +221,11 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 
 	log.Printf("[调度中心] 发起全班查重，数据包大小: %d 份...", len(plagMap))
 	// 查重涉及批量大模型调用，耗时极长，不用超时处理
-	// ctxPlag, cancelPlag := context.WithTimeout(context.Background(), 600*time.Second)
-	ctxPlag := context.Background()
+	ctxPlag, cancelPlag := context.WithTimeout(context.Background(), 60*time.Minute)
+	// defer cancelPlag()
+	// ctxPlag := context.Background()
 	plagRes, errPlag := grpcclient.Client.CheckPlagiarism(ctxPlag, &pb.PlagiarismRequest{StudentTexts: plagMap})
-	// cancelPlag()
+	cancelPlag()
 
 	var globalPlagiarismResult map[string]interface{}
 	if errPlag != nil {
@@ -252,10 +257,11 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 				}
 
 				// A. AIGC
-				// ctxAIGC, cancelAIGC := context.WithTimeout(context.Background(), 30*time.Second)
-				ctxAIGC := context.Background()
+				ctxAIGC, cancelAIGC := context.WithTimeout(context.Background(), 30*time.Second)
+				// ctxAIGC := context.Background()
+
 				aigcRes, errAIGC := grpcclient.Client.DetectAIGC(ctxAIGC, &pb.AIGCRequest{TextContent: studentText})
-				// cancelAIGC()
+				cancelAIGC()
 
 				aigcJSON := "{}"
 				if errAIGC == nil {
@@ -263,8 +269,8 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 				}
 
 				// B. 评分
-				// ctxGrade, cancelGrade := context.WithTimeout(context.Background(), 300*time.Second)
-				ctxGrade := context.Background()
+				ctxGrade, cancelGrade := context.WithTimeout(context.Background(), 60*time.Minute)
+				// ctxGrade := context.Background()
 				gradeRes, errGrade := grpcclient.Client.GradeHomework(ctxGrade, &pb.GradeRequest{
 					StudentId:             t.StudentID,
 					Question:              assignment.Question,
@@ -273,7 +279,7 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 					PlagiarismReportsJson: studentPlagJSON,
 					AigcReportJson:        aigcJSON,
 				})
-				// cancelGrade()
+				cancelGrade()
 
 				finalScore := float64(-1.0)
 				finalFeedback := "【系统容错记录】AI 评分请求超时或失败"

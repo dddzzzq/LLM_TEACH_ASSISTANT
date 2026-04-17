@@ -9,24 +9,10 @@ import (
 )
 
 const (
+	TopicRPAFetch        = "topic_rpa_fetch"
 	TopicGradingHomework = "topic_grading_homework"
 	TopicGradingExam     = "topic_grading_exam"
 )
-
-// HomeworkTaskMessage 作业批改任务消息结构
-type HomeworkTaskMessage struct {
-	JobID        string `json:"job_id"`
-	AssignmentID string `json:"assignment_id"`
-	ZipPath      string `json:"zip_path"`
-}
-
-// ExamTaskMessage 试卷批改任务消息结构
-type ExamTaskMessage struct {
-	JobID      string   `json:"job_id"`
-	ExamID     string   `json:"exam_id"`
-	StudentID  string   `json:"student_id"`
-	ImagePaths []string `json:"image_paths"`
-}
 
 // publishMessage 通用消息发布函数
 func publishMessage(topic string, message interface{}) error {
@@ -47,12 +33,12 @@ func publishMessage(topic string, message interface{}) error {
 		return fmt.Errorf("failed to send message to Kafka topic %s: %w", topic, err)
 	}
 
-	log.Printf("Message sent to topic %s partition %d offset %d: %s", topic, partition, offset, string(messageJSON))
+	log.Printf("Message sent to topic %s partition %d offset %d (Payload Size: %d bytes)", topic, partition, offset, len(messageJSON))
 	return nil
 }
 
 // PublishHomeworkTask 将作业批改任务推送到 Topic: topic_grading_homework
-func PublishHomeworkTask(jobID, assignmentID, zipPath string) error {
+func PublishHomeworkTask(jobID string, assignmentID uint, zipPath string) error {
 	message := HomeworkTaskMessage{
 		JobID:        jobID,
 		AssignmentID: assignmentID,
@@ -64,7 +50,19 @@ func PublishHomeworkTask(jobID, assignmentID, zipPath string) error {
 		return err
 	}
 
-	log.Printf("Homework task published successfully: job=%s, assignment=%s", jobID, assignmentID)
+	log.Printf("Homework task published successfully: job=%s, assignment=%d", jobID, assignmentID)
+	return nil
+}
+
+// PublishRPAFetchTask 将RPA抓取任务推送到 Topic: topic_rpa_fetch
+func PublishRPAFetchTask(message RPAFetchMessage) error {
+	if err := publishMessage(TopicRPAFetch, message); err != nil {
+		log.Printf("ERROR: Failed to publish RPA fetch task for job %s: %v", message.JobID, err)
+		return err
+	}
+
+	log.Printf("RPA fetch task published successfully: job=%s, course=%s, assignment=%s",
+		message.JobID, message.CourseName, message.AssignmentName)
 	return nil
 }
 

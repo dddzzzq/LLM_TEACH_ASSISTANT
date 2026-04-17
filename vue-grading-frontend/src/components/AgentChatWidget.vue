@@ -111,13 +111,45 @@
       </div>
     </div>
 
+    <!-- 快捷指令区域 -->
+    <div v-if="isAuthenticated" class="quick-commands bg-gray-50 border-t border-gray-200 px-4 py-3">
+      <div class="text-xs text-gray-500 mb-2">💡 快捷指令：</div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          @click="useQuickCommand('fetch_homework')"
+          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-full hover:from-purple-600 hover:to-indigo-600 transition-all shadow-sm"
+          :disabled="loading"
+        >
+          <span class="mr-1">📥</span>
+          从教务系统下载作业
+        </button>
+        <button
+          @click="useQuickCommand('query_score')"
+          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-full hover:from-green-600 hover:to-teal-600 transition-all shadow-sm"
+          :disabled="loading"
+        >
+          <span class="mr-1">📊</span>
+          查询学生成绩
+        </button>
+        <button
+          @click="useQuickCommand('trigger_pipeline')"
+          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full hover:from-orange-600 hover:to-red-600 transition-all shadow-sm"
+          :disabled="loading"
+        >
+          <span class="mr-1">🚀</span>
+          触发批改流水线
+        </button>
+      </div>
+    </div>
+
     <!-- 输入区域 -->
     <div v-if="isAuthenticated" class="input-area p-4 bg-white border-t border-gray-200 rounded-b-lg">
       <form @submit.prevent="sendMessage" class="flex space-x-2">
         <input
+          ref="inputRef"
           v-model="inputMessage"
           type="text"
-          placeholder="输入您的问题，例如：查询学生 23009200042 的成绩"
+          placeholder="输入您的问题，或点击上方快捷指令"
           class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           :disabled="loading"
         />
@@ -156,6 +188,23 @@ const messagesContainer = ref(null)
 const currentSessionId = ref('')
 const sessions = ref([])
 const showSessionDropdown = ref(false)
+const inputRef = ref(null)
+
+// 快捷指令配置
+const quickCommands = {
+  fetch_homework: {
+    template: '请帮我从教务系统下载作业，需要提供以下信息：\n- 用户名：\n- 密码：\n- 课程名称：\n- 作业名称：',
+    placeholder: '请输入教务系统用户名、密码、课程名称和作业名称'
+  },
+  query_score: {
+    template: '请帮我查询学生 ',
+    placeholder: '请输入学号，例如：23009200042'
+  },
+  trigger_pipeline: {
+    template: '请帮我触发批改流水线，作业ID为 ',
+    placeholder: '请输入作业ID和文件路径'
+  }
+}
 
 // 计算属性
 const isAuthenticated = computed(() => authApi.isAuthenticated())
@@ -429,6 +478,22 @@ const copySessionId = () => {
 const redirectToLogin = () => {
   // 这里可以根据实际路由配置调整
   window.location.href = '/login'
+}
+
+// 使用快捷指令
+const useQuickCommand = (commandType) => {
+  const command = quickCommands[commandType]
+  if (command) {
+    inputMessage.value = command.template
+    // 聚焦到输入框
+    nextTick(() => {
+      if (inputRef.value) {
+        inputRef.value.focus()
+        // 将光标移到文本末尾
+        inputRef.value.setSelectionRange(command.template.length, command.template.length)
+      }
+    })
+  }
 }
 
 // 滚动到底部

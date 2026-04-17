@@ -17,6 +17,8 @@ import (
 	"grading-gateway/pb"
 
 	"gorm.io/gorm"
+
+	"grading-gateway/internal/cache"
 )
 
 // ProcessExamSubmission 是负责处理单份学生试卷所有图片的高并发方法
@@ -28,11 +30,13 @@ func ProcessExamSubmission(examIDStr string, studentID string, imagePaths []stri
 	examID, _ := strconv.ParseUint(examIDStr, 10, 32)
 
 	// 1. 获取试卷及其所有题目
-	var exam models.Exam
-	if err := database.DB.Preload("Questions").First(&exam, examID).Error; err != nil {
-		log.Printf("[错误] 找不到试卷ID %s\n", examIDStr)
+	// 1. 获取试卷及其所有题目 (走缓存)
+	examPtr, err := cache.GetExamWithCache(context.Background(), uint(examID))
+	if err != nil || examPtr == nil {
+		log.Printf("[错误] 找不到试卷ID %s (或读取缓存失败)\n", examIDStr)
 		return
 	}
+	exam := *examPtr
 
 	if len(exam.Questions) == 0 {
 		log.Printf("[错误] 试卷没有任何题目，无法批改\n")
@@ -105,7 +109,7 @@ func ProcessExamSubmission(examIDStr string, studentID string, imagePaths []stri
 			// 3.2 如果文本长度可观，呼叫大模型判定该图属于哪道题 (可选步骤，目前已不需存入DB，但可用于日志追溯)
 			var qID *uint
 			if len(ocrText) > 5 {
-				idCtx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+				idCtx, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel2()
 				idRes, idErr := grpcclient.Client.IdentifyQuestionNumber(idCtx, &pb.IdentifyQuestionRequest{
 					OcrText:         ocrText,
@@ -221,7 +225,7 @@ func ProcessExamSubmission(examIDStr string, studentID string, imagePaths []stri
 	log.Printf("[试卷调度] 所有题目并发批改完成！开始生成总评...")
 
 	// 5. Final Reduce阶段：生成整卷总评
-	sumCtx, cancelSum := context.WithTimeout(context.Background(), 60*time.Second)
+	sumCtx, cancelSum := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancelSum()
 
 	summaryRes, err := grpcclient.Client.SummarizeExam(sumCtx, &pb.SummarizeExamRequest{

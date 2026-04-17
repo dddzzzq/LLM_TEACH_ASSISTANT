@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -55,24 +58,81 @@ func GetExams(c *gin.Context) {
 
 // 获取单个试卷（含所有题目）
 func GetExam(c *gin.Context) {
-	id := c.Param("id")
-	var exam models.Exam
-	if err := database.DB.Preload("Questions").First(&exam, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "未找到试卷"})
+	idStr := c.Param("id")
+	examID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的试卷ID"})
 		return
 	}
-	c.JSON(http.StatusOK, exam)
+
+	// 获取用户角色和用户名
+	role, roleErr := middleware.GetRoleFromContext(c)
+	username, usernameErr := middleware.GetUsernameFromContext(c)
+
+	// 1. 【动静分离 - 静态部分】：从 Redis 缓存中获取试卷基础信息（带防穿透、防击穿保护）
+	examBase, err := cache.GetExamWithCache(c.Request.Context(), uint(examID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "未找到试卷"})
+			return
+		}
+		log.Printf("获取单个试卷出错：%v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "系统繁忙，获取试卷详情失败"})
+		return
+	}
+
+	// 2. 【动静分离 - 动态部分】：根据角色权限，单独去 MySQL 查询属于该用户的 StudentExams
+	var studentExams []models.StudentExam
+	subQuery := database.DB.Where("exam_id = ?", examID).Preload("Report").Preload("Answers.Question").Preload("Images")
+
+	// 如果是学生，只查询自己的提交
+	if roleErr == nil && usernameErr == nil && role == "student" {
+		subQuery = subQuery.Where("student_id = ?", username)
+	}
+	// 教师/管理员获取所有提交（不需要额外条件）
+
+	if err := subQuery.Find(&studentExams).Error; err != nil {
+		log.Printf("获取试卷学生记录出错：%v", err)
+		// 不返回错误，继续返回基础试卷信息
+	}
+
+	// 3. 组装数据并返回 JSON
+	// 注意：为了保持API兼容性，我们不返回student_exams字段
+	// 前端应该通过专门的API获取学生考试记录
+	// examBase.StudentExams = studentExams // 不要修改缓存对象
+	c.JSON(http.StatusOK, examBase)
 }
 
 // 删除试卷
 func DeleteExam(c *gin.Context) {
 	id := c.Param("id")
 
-	// 使用 Select(clause.Associations) 明确指示 GORM 触发级联删除
-	if err := database.DB.Select(clause.Associations).Delete(&models.Exam{}, id).Error; err != nil {
+	// 获取一致性服务
+	consistencySvc := database.GetConsistencyService()
+	ctx := c.Request.Context()
+
+	// 先删除Redis中的相关缓存，再删除MySQL
+	examKey := fmt.Sprintf("exam:%s", id)
+
+	// 使用一致性服务删除缓存和数据
+	err := consistencySvc.DeleteThenInvalidate(ctx, "exam", examKey, func() error {
+		// 这是实际的MySQL删除操作，使用Select(clause.Associations)触发级联删除
+		return database.DB.Select(clause.Associations).Delete(&models.Exam{}, id).Error
+	})
+
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
 		return
 	}
+
+	// 清理试卷相关的缓存
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*exam:%s*", id))
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*exam:questions:%s*", id))
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*student:exam:*:%s*", id))
+
+	// 失效试卷缓存
+	examID, _ := strconv.ParseUint(id, 10, 32)
+	cache.InvalidateExamCache(ctx, uint(examID))
 
 	c.Status(http.StatusNoContent)
 }
@@ -117,6 +177,10 @@ func AddExamQuestion(c *gin.Context) {
 		return
 	}
 	tx.Commit()
+
+	// 失效试卷缓存，因为试卷内容已更新
+	ctx := c.Request.Context()
+	cache.InvalidateExamCache(ctx, exam.ID)
 
 	c.JSON(http.StatusCreated, question)
 }
@@ -180,9 +244,9 @@ func UploadStudentExam(c *gin.Context) {
 	// 3. 调用 mq.PublishExamTask 将任务推送到 Kafka
 	if err := mq.PublishExamTask(jobID, examID, studentID, savedPaths); err != nil {
 		log.Printf("ERROR: Failed to publish exam task to Kafka: %v", err)
-		// 更新任务状态为 FAILED
-		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
+		// 更新任务状态为 FAILED（先数据库后缓存）
 		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
+		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "任务提交失败，请重试"})
 		return
 	}
@@ -272,9 +336,36 @@ func GetStudentDetailedReport(c *gin.Context) {
 // 删除单个学生的成绩
 func DeleteStudentExamResult(c *gin.Context) {
 	studentExamID := c.Param("student_exam_id")
-	if err := database.DB.Delete(&models.StudentExam{}, studentExamID).Error; err != nil {
+
+	// 先查询学生考试信息，获取exam_id用于清理缓存
+	var studentExam models.StudentExam
+	if err := database.DB.First(&studentExam, studentExamID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到该学生的考试记录"})
+		return
+	}
+
+	// 获取一致性服务
+	consistencySvc := database.GetConsistencyService()
+	ctx := c.Request.Context()
+
+	// 先删除Redis中的相关缓存，再删除MySQL
+	studentExamKey := fmt.Sprintf("student:exam:%s", studentExamID)
+
+	// 使用一致性服务删除缓存和数据
+	err := consistencySvc.DeleteThenInvalidate(ctx, "student_exam", studentExamKey, func() error {
+		// 这是实际的MySQL删除操作
+		return database.DB.Delete(&models.StudentExam{}, studentExamID).Error
+	})
+
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除记录失败"})
 		return
 	}
+
+	// 清理相关的报告和答案缓存
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*student:exam:*:%d*", studentExam.ExamID))
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*exam:report:*:%s*", studentExamID))
+	consistencySvc.InvalidateByPattern(ctx, fmt.Sprintf("*exam:answer:*:%s*", studentExamID))
+
 	c.Status(http.StatusNoContent)
 }

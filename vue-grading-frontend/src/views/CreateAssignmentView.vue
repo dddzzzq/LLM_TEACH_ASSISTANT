@@ -4,7 +4,31 @@
 
     <form @submit.prevent="createAssignment" class="p-8 space-y-6 bg-white rounded-lg shadow-xl">
       <div>
-        <label for="task_name" class="block text-sm font-medium text-gray-700">任务名称</label>
+        <label for="course_name" class="block text-sm font-medium text-gray-700">课程名称</label>
+        <input
+          id="course_name"
+          v-model="courseName"
+          type="text"
+          required
+          class="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          placeholder="例如：软件工程"
+        >
+      </div>
+
+      <div>
+        <label for="class_name" class="block text-sm font-medium text-gray-700">班级名称</label>
+        <input
+          id="class_name"
+          v-model="className"
+          type="text"
+          required
+          class="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          placeholder="例如：2CS20510502"
+        >
+      </div>
+
+      <div>
+        <label for="task_name" class="block text-sm font-medium text-gray-700">作业名称</label>
         <input
           id="task_name"
           v-model="taskName"
@@ -62,6 +86,8 @@ import gradingApi from '../services/gradingApi';
 const router = useRouter();
 
 // 数据形式
+const courseName = ref('');
+const className = ref('');
 const taskName = ref('');
 const question = ref('');
 const rubric = ref(
@@ -86,12 +112,14 @@ const createAssignment = async () => {
   try {
     const rubricData = JSON.parse(rubric.value);
     await gradingApi.createAssignment({
+      course_name: courseName.value,
+      class_name: className.value,
       task_name: taskName.value,
       question: question.value,
       rubric: rubricData,
     });
     
-    router.push({ name: 'assignments-list' });
+    router.push({ name: 'assignments' });
   } catch (e: unknown) {
     if (e instanceof SyntaxError) {
       error.value = '评分标准不是一个有效的JSON格式。';

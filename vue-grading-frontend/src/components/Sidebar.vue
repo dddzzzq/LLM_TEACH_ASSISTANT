@@ -94,6 +94,10 @@ const ChatBubbleLeftRightIcon = {
   template: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.422-2.87-3.14-2.902a48.78 48.78 0 00-8.66 0C3.422 3.767 2 5.016 2 6.637v4.333c0 1.621 1.422 2.87 3.14 2.902.835.022 1.67.045 2.505.072v-.592c0-.906.672-1.654 1.562-1.654h3.386c.89 0 1.562.748 1.562 1.654v.592c.835-.027 1.67-.05 2.505-.072 1.718-.032 3.14-1.281 3.14-2.902V8.511z" /></svg>`,
 };
 
+const WrenchScrewdriverIcon = {
+  template: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 2.25a.75.75 0 01.75.75v1.068a6.72 6.72 0 012.037.842l.756-.756a.75.75 0 011.06 0l1.768 1.768a.75.75 0 010 1.06l-.756.756c.37.646.65 1.36.842 2.037H21a.75.75 0 01.75.75v2.5A.75.75 0 0121 13.75h-1.068a6.72 6.72 0 01-.842 2.037l.756.756a.75.75 0 010 1.06l-1.768 1.768a.75.75 0 01-1.06 0l-.756-.756a6.72 6.72 0 01-2.037.842V21a.75.75 0 01-.75.75h-2.5A.75.75 0 019.25 21v-1.068a6.72 6.72 0 01-2.037-.842l-.756.756a.75.75 0 01-1.06 0L3.63 17.834a.75.75 0 010-1.06l.756-.756a6.72 6.72 0 01-.842-2.037H2.5a.75.75 0 01-.75-.75v-2.5A.75.75 0 012.5 9.75h1.068c.192-.677.472-1.391.842-2.037l-.756-.756a.75.75 0 010-1.06l1.768-1.768a.75.75 0 011.06 0l.756.756a6.72 6.72 0 012.037-.842V3a.75.75 0 01.75-.75h2.5zM10.5 12a2.25 2.25 0 104.5 0 2.25 2.25 0 00-4.5 0z" /></svg>`,
+}
+
 // 完整菜单项
 const allMenuItems = [
   { name: "主页", path: "/home", icon: HomeIcon },
@@ -101,6 +105,7 @@ const allMenuItems = [
   { name: "作业自动评分", path: "/assignments", icon: CheckBadgeIcon },
   { name: "主观题自动评分", path: "/exams", icon: PencilSquareIcon },
   { name: "AI教学助手", path: "/ai-assistant", icon: ChatBubbleLeftRightIcon },
+  { name: "Skills 管理", path: "/skills-admin", icon: WrenchScrewdriverIcon },
 ]
 
 // 根据角色过滤菜单项
@@ -112,7 +117,10 @@ const filteredMenuItems = computed(() => {
     return allMenuItems.filter(item => item.path === '/ai-assistant')
   }
   
-  // 教师和管理员看到完整菜单
+  // 教师/管理员可见；其中 Skills 管理建议仅管理员可见
+  if (userRole === 'teacher') {
+    return allMenuItems.filter(item => item.path !== '/skills-admin')
+  }
   return allMenuItems
 })
 
