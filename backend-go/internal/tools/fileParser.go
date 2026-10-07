@@ -27,7 +27,7 @@ var allowedExtensions = map[string]bool{
 	".js": true, ".ts": true, ".vue": true, ".html": true,
 	".go": true, ".rs": true, ".sql": true, ".sh": true,
 	".zip": true, ".rar": true, ".7z": true,
-	".txt": true, ".md": true, ".docx": true, ".pdf": true,
+	".txt": true, ".md": true, ".doc": true, ".docx": true, ".pdf": true,
 	".png": true, ".jpg": true, ".jpeg": true,
 }
 
@@ -52,6 +52,9 @@ func ExtractContent(filename string, content []byte, depth int) string {
 	// 2. 解析常见文档格式
 	if ext == ".docx" || bytes.HasPrefix(content, []byte("PK\x03\x04")) {
 		return parseDocx(content, filename)
+	}
+	if ext == ".doc" {
+		return parseDoc(content, filename)
 	}
 	if ext == ".pdf" || bytes.HasPrefix(content, []byte("%PDF")) {
 		return parsePDF(content, filename)

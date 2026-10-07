@@ -1,2 +1,95 @@
+# Secrets and local authentication
 .env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+storage_state*.json
+storage-state*.json
+.auth/
+playwright/.auth/
+
+# Dependencies and Python caches
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Build output and test reports
+dist/
+build/
+coverage/
+.vite/
+playwright-report/
+test-results/
+/backend-go/grading-gateway
+/backend-go/test_build
+*.test
+*.out
+
+# Uploaded homework, exam data and runtime files
+uploads/
+downloads/
+homework/
+logs/
+*.log
+*.pid
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.rdb
+appendonly.aof*
+
+# Model weights and caches
+models_cache/
+.cache/
+.paddlex/
+.playwright/
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.gguf
+
+# Local archives and temporary backups
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.bak
+*.tmp
+*.swp
+*~
+
+# OS and personal editor settings
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Existing project-specific exclusion
 Makefile
+
+# Local browser control secret
+.rpa-control-token
+
+# Codex local tests and diagnostic scripts
+/codex-local/

@@ -293,7 +293,7 @@ const examName = ref("");
 const examTotalScore = ref(0);
 const isLoading = ref(true);
 const error = ref(null);
-const API_BASE_URL = "http://127.0.0.1:8000";  // 8000端口网址
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 const sortedAnswers = computed(() => {
   if (!reportData.value || !reportData.value.answers) return [];
