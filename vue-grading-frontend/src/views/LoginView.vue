@@ -1,21 +1,26 @@
 <template>
-  <div class="login-view min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-    <div class="sm:mx-auto sm:w-full sm:max-w-md">
-      <div class="flex justify-center">
-        <div class="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center">
-          <span class="text-white text-2xl font-bold">AI</span>
-        </div>
+  <div class="login-view">
+    <section class="login-story" aria-labelledby="login-story-title">
+      <div class="login-brand"><span><AppIcon name="book" /></span><div>智能教学助理<small>教学有方，批改有助</small></div></div>
+      <div class="login-story-copy">
+        <div class="story-emblem" aria-hidden="true"><AppIcon name="book" /><span class="emblem-spark"><AppIcon name="sparkles" /></span></div>
+        <h1 id="login-story-title">把时间留给<br />更有价值的教学。</h1>
+        <p>从一份作业到一次考试，<br />为每一次认真教学，提供恰到好处的帮助。</p>
+        <ul class="login-capabilities">
+          <li><AppIcon name="check" /><span>作业查重与智能评分</span></li>
+          <li><AppIcon name="pen" /><span>答卷识别与逐题反馈</span></li>
+          <li><AppIcon name="chat" /><span>教务作业下载与成绩查询</span></li>
+        </ul>
       </div>
-      <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
-        智能作业批改系统
-      </h2>
-      <p class="mt-2 text-center text-sm text-gray-600">
-        基于 JWT + Redis 的安全认证系统
-      </p>
-    </div>
-
-    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-      <div class="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
+      <p class="login-story-footer">大语言模型辅助教学 · 教师把关每一份评价</p>
+    </section>
+    <div class="login-main">
+      <div class="login-heading">
+        <span class="login-heading-icon"><AppIcon name="book" /></span>
+        <h2>{{ showRegister ? '创建您的账户' : '欢迎回来' }}</h2>
+        <p>{{ showRegister ? '填写账户信息，开启教学工作台。' : '登录智能作业批改系统，开始今天的工作。' }}</p>
+      </div>
+      <div class="login-card">
         <!-- 登录表单 -->
         <div v-if="!showRegister">
           <form class="space-y-6" @submit.prevent="handleLogin">
@@ -224,7 +229,7 @@
         </div>
       </div>
 
-      <div class="mt-6 text-center text-sm text-gray-600">
+      <div class="test-accounts">
         <p>测试账户：</p>
         <p class="mt-1 text-xs">
           学生：student / student123<br>
@@ -240,6 +245,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import authApi from '../services/authApi'
+import AppIcon from '../components/AppIcon.vue'
 
 const router = useRouter()
 
@@ -378,19 +384,50 @@ const fillTestAccount = (role) => {
 </script>
 
 <style scoped>
-.login-view {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.bg-white {
-  background-color: rgba(255, 255, 255, 0.95);
-}
-
-input, select {
-  transition: all 0.2s;
-}
-
-input:focus, select:focus {
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+.login-view { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; min-height: 100dvh; background: #fff; }
+.login-story { position: relative; display: flex; flex-direction: column; padding: 42px 54px 30px; background: #153f3e; color: #fff; overflow: hidden; }
+.login-story::after { content: ''; position: absolute; width: 550px; height: 550px; right: -310px; bottom: -280px; border: 1px solid #2e5957; border-radius: 50%; box-shadow: 0 0 0 70px rgb(255 255 255 / .015), 0 0 0 140px rgb(255 255 255 / .015); pointer-events: none; }
+.login-brand { display: flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 600; }
+.login-brand > span { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #547673; border-radius: 11px; }
+.login-brand svg { width: 24px; height: 24px; }
+.login-brand small { display: block; color: #b8cfcb; font-size: 10px; font-weight: 400; margin-top: 5px; }
+.login-story-copy { position: relative; z-index: 1; margin: auto 0; padding: 55px 0; }
+.story-emblem { position: relative; display: grid; place-items: center; width: 82px; height: 82px; border: 1px solid #547673; border-radius: 22px; background: #204a48; margin-bottom: 32px; }
+.story-emblem > svg { width: 44px; height: 44px; color: #d4e7df; }
+.emblem-spark { position: absolute; right: -12px; top: -10px; display: grid; place-items: center; width: 34px; height: 34px; background: #d8e9da; border: 4px solid #153f3e; border-radius: 11px; color: #197b70; }
+.emblem-spark svg { width: 17px; height: 17px; }
+.login-story h1 { font-size: clamp(32px, 3.2vw, 48px); letter-spacing: -1.5px; font-weight: 600; line-height: 1.5; }
+.login-story-copy > p { color: #c0d4cf; font-size: 13px; line-height: 1.9; margin-top: 23px; }
+.login-capabilities { display: flex; flex-direction: column; gap: 18px; margin-top: 40px; }
+.login-capabilities li { display: flex; align-items: center; gap: 11px; font-size: 12px; color: #d4e5e0; }
+.login-capabilities svg { width: 18px; height: 18px; color: #95c5b8; }
+.login-story-footer { position: relative; z-index: 1; color: #b8cfcb; font-size: 10px; }
+.login-main { display: flex; flex-direction: column; justify-content: center; width: 100%; max-width: 490px; padding: 54px; margin: 0 auto; }
+.login-heading h2 { color: #142d40; font-size: 29px; font-weight: 700; letter-spacing: -.7px; }
+.login-heading > p { color: #66788a; font-size: 12px; line-height: 1.8; margin-top: 11px; }
+.login-heading-icon { display: none; }
+.login-card { margin-top: 32px; }
+.login-card input:not([type="checkbox"]), .login-card select { min-height: 46px; padding: 11px 13px; font-size: 13px; box-shadow: none; }
+.login-card label { font-size: 12px; }
+.login-card button { min-height: 43px; box-shadow: none; font-size: 12px; }
+.login-card input[type="checkbox"] { width: 14px; height: 14px; }
+.test-accounts { border-top: 1px solid #e0e7ee; margin-top: 27px; padding-top: 18px; color: #66788a; font-size: 11px; line-height: 1.8; }
+.test-accounts p + p { font-size: 10px; line-height: 1.9; }
+@media (min-width: 1600px) { .login-story { padding-left: max(54px, calc((100vw - 1400px) / 2)); } }
+@media (max-width: 1000px) { .login-story { padding: 32px; } .login-main { padding: 38px; } .login-story h1 { font-size: 34px; } }
+@media (max-width: 760px) {
+  .login-view { grid-template-columns: 1fr; }
+  .login-story { padding: 22px 24px 27px; }
+  .login-brand { font-size: 15px; }
+  .login-brand > span { width: 35px; height: 35px; }
+  .login-story-copy { margin: 0; padding: 24px 0 0; }
+  .story-emblem, .login-capabilities, .login-story-footer { display: none; }
+  .login-story h1 { font-size: 27px; letter-spacing: -.6px; line-height: 1.45; }
+  .login-story h1 br { display: none; }
+  .login-story-copy > p { font-size: 11px; margin-top: 12px; }
+  .login-story-copy > p br { display: none; }
+  .login-main { max-width: 470px; padding: 30px 26px; }
+  .login-heading h2 { font-size: 25px; }
+  .login-card { margin-top: 25px; }
 }
 </style>

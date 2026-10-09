@@ -1,8 +1,8 @@
 <template>
-  <div class="max-w-3xl mx-auto">
-    <h1 class="mb-6 text-3xl font-bold text-gray-800">新建作业任务</h1>
+  <div class="form-page">
+    <div class="page-heading"><div><h1 class="page-title">新建作业任务</h1><p class="page-description">完善课程信息与评分标准，为智能批改做好准备。</p></div></div>
 
-    <form @submit.prevent="createAssignment" class="p-8 space-y-6 bg-white rounded-lg shadow-xl">
+    <form @submit.prevent="createAssignment" class="form-surface space-y-6 bg-white rounded-xl">
       <div>
         <label for="course_name" class="block text-sm font-medium text-gray-700">课程名称</label>
         <input

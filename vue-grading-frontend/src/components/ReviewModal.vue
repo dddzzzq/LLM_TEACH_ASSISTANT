@@ -1,9 +1,9 @@
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900 bg-opacity-40 backdrop-blur-sm"
     @click.self="close"
   >
-    <div class="relative w-full max-w-2xl p-6 mx-4 bg-white rounded-lg shadow-xl">
+    <div class="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 mx-4 bg-white rounded-lg shadow-xl">
       <h2 class="text-2xl font-bold text-gray-800 mb-4">教师复查与评分修改</h2>
       <p class="text-sm text-gray-600 mb-6">
         您正在为学生

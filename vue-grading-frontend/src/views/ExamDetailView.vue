@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 md:p-8">
+  <div class="detail-page">
     <div v-if="isLoadingExam" class="py-10 text-center">
       <Loader />
     </div>
@@ -9,10 +9,10 @@
     </div>
 
     <div v-else-if="exam" class="space-y-8">
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <div class="flex justify-between items-start">
           <div>
-            <h1 class="text-3xl font-bold text-gray-800">{{ exam.name }}</h1>
+            <h1 class="page-title">{{ exam.name }}</h1>
             <p class="mt-2 text-gray-600">
               共 {{ exam.question_count }} 道题目，
               <span class="font-semibold text-indigo-600"
@@ -42,7 +42,7 @@
         </details>
       </div>
 
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <h2 class="mb-4 text-2xl font-bold text-gray-800">提交学生试卷评分</h2>
         <form @submit.prevent="submitStudentExam">
           <div class="space-y-4">
@@ -98,7 +98,7 @@
         </div>
       </div>
 
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
           <button

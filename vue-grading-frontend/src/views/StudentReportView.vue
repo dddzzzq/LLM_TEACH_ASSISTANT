@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 md:p-8 max-w-5xl mx-auto">
+  <div class="detail-page max-w-5xl mx-auto">
     <div v-if="isLoading" class="py-10 text-center">
       <Loader />
     </div>
@@ -30,8 +30,8 @@
       </router-link>
 
       <!-- 总结报告 (移到顶部) -->
-      <div class="p-6 bg-white rounded-lg shadow-xl">
-        <h1 class="text-3xl font-bold text-gray-800">
+      <div class="p-5 md:p-7 surface">
+        <h1 class="page-title">
           学生 {{ reportData.student_id }} 的试卷报告
         </h1>
         <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -84,7 +84,7 @@
       </div>
 
       <!-- 题目详情 (每道题下列出关联的图片) -->
-      <div class="p-6 bg-white rounded-lg shadow-xl">
+      <div class="p-5 md:p-7 surface">
         <h2 class="text-2xl font-bold text-gray-800 mb-6">每题详情</h2>
         <div class="space-y-8">
           <div

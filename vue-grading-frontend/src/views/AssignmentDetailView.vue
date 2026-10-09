@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 md:p-8">
+  <div class="detail-page">
     <div v-if="isLoadingAssignment" class="py-10 text-center">
       <Loader />
     </div>
@@ -9,7 +9,7 @@
     </div>
 
     <div v-else-if="assignment" class="space-y-8">
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <div class="flex items-center gap-3 mb-4">
           <span class="px-3 py-1 text-sm font-semibold text-green-600 bg-green-50 rounded-full">
             {{ assignment.course_name }}
@@ -18,7 +18,7 @@
             {{ assignment.class_name }}
           </span>
         </div>
-        <h1 class="text-3xl font-bold text-gray-800">{{ assignment.task_name }}</h1>
+        <h1 class="page-title">{{ assignment.task_name }}</h1>
         <p class="mt-4 text-gray-600 whitespace-pre-wrap">{{ assignment.question }}</p>
         <div class="mt-4">
           <h3 class="font-semibold text-gray-700">评分标准:</h3>
@@ -29,7 +29,7 @@
         </div>
       </div>
 
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <h2 class="mb-4 text-2xl font-bold text-gray-800">提交学生作业</h2>
         <form @submit.prevent="submitBatchFile">
           <label for="file-upload" class="block text-sm font-medium text-gray-700">
@@ -66,7 +66,7 @@
         </div>
       </div>
 
-      <div class="p-6 bg-white rounded-lg shadow-lg">
+      <div class="p-5 md:p-7 surface">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
           <div class="flex items-center gap-4">

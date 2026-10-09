@@ -1,10 +1,10 @@
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-3xl font-bold text-gray-800">所有作业任务</h1>
+    <div class="page-heading">
+      <div><h1 class="page-title">所有作业任务</h1><p class="page-description">集中管理课程作业，查看查重分析与智能评分结果。</p></div>
       <router-link
         to="/assignments/new"
-        class="px-4 py-2 font-semibold text-white bg-indigo-600 rounded-lg shadow-md transition-colors hover:bg-indigo-700 flex items-center"
+        class="primary-button"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -59,7 +59,7 @@
 
     <div
       v-else-if="assignments.length === 0"
-      class="py-20 text-center bg-white rounded-lg shadow-sm border border-gray-100"
+      class="empty-state"
     >
       <div
         class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4"
@@ -83,11 +83,11 @@
       <p class="mt-1 text-gray-500">点击右上角的"新建作业"按钮创建一个新的作业任务。</p>
     </div>
 
-    <div v-else class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    <div v-else class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
       <div
         v-for="(assignment, index) in assignments"
         :key="assignment.id"
-        class="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 border border-gray-100 overflow-hidden flex flex-col"
+        class="surface assignment-card overflow-hidden flex flex-col"
       >
         <div class="p-6 flex-grow">
           <div class="flex justify-between items-start mb-4">
@@ -105,7 +105,7 @@
                 </span>
               </div>
               <h3
-                class="text-xl font-bold text-gray-800 line-clamp-2"
+                class="text-lg font-semibold text-gray-800 line-clamp-2"
                 :title="assignment.task_name"
               >
                 {{ assignment.task_name }}
@@ -116,7 +116,7 @@
               >ID: {{ assignment.id }}</span
             >
           </div>
-          <p class="text-gray-600 text-sm line-clamp-3 mb-4 h-12">
+          <p class="text-gray-500 text-sm leading-relaxed line-clamp-3 mb-4 min-h-12">
             {{ assignment.question || "无题目描述" }}
           </p>
         </div>
@@ -216,3 +216,9 @@ const deleteAssignment = async (id: number, index: number) => {
 
 onMounted(fetchAssignments);
 </script>
+<style scoped>
+.assignment-card { transition: border-color 150ms; }
+.assignment-card:hover { border-color: #83c4b9; }
+.assignment-card .flex.items-center.gap-2 { flex-wrap: wrap; }
+.assignment-card h3 { overflow-wrap: anywhere; }
+</style>

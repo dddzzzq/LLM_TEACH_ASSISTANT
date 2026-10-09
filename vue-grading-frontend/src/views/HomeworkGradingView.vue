@@ -1,11 +1,11 @@
 <template>
-  <div>
-    <header class="text-center mb-8">
-      <h1 class="text-3xl md:text-4xl font-bold text-gray-800">智能作业批改</h1>
-      <p class="text-gray-500 mt-2">上传学生作业压缩包，AI将进行综合评估</p>
+  <div class="form-page">
+    <header class="mb-7">
+      <h1 class="page-title">智能作业批改</h1>
+      <p class="page-description">上传学生作业压缩包，AI将进行综合评估</p>
     </header>
 
-    <main class="max-w-3xl mx-auto bg-white rounded-lg shadow-xl p-6 md:p-8">
+    <main class="form-surface bg-white rounded-xl">
       <form @submit.prevent="submitGradingTask">
         <div class="space-y-6">
           <!-- 任务名称 -->

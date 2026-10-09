@@ -1,17 +1,13 @@
 <template>
   <div class="ai-assistant-view">
-    <header class="text-center mb-8">
-      <h1 class="text-3xl md:text-4xl font-bold text-gray-800">AI 教学助手</h1>
-      <p class="text-gray-500 mt-2">作业下载与批改、学生成绩查询</p>
+    <header class="page-heading">
+      <div><h1 class="page-title">AI 教学助手</h1><p class="page-description">作业下载与批改、学生成绩查询，让教学事务在对话中完成。</p></div>
+      <button v-if="canFetch" ref="consoleTrigger" type="button" class="console-trigger"
+        aria-controls="homework-console" :aria-expanded="consoleOpen" @click="openConsole()">
+        <AppIcon name="download" /> 打开作业控制台
+      </button>
     </header>
-
-    <main class="max-w-5xl mx-auto">
-      <div v-if="canFetch" class="flex justify-end mb-3">
-        <button ref="consoleTrigger" type="button" class="px-4 py-2 text-sm text-indigo-700 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50"
-          aria-controls="homework-console" :aria-expanded="consoleOpen" @click="openConsole()">
-          打开作业控制台
-        </button>
-      </div>
+    <main class="assistant-chat-layout">
       <AgentChatWidget @fetch-task="openConsole" />
     </main>
 
@@ -39,6 +35,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 import AgentChatWidget from '../components/AgentChatWidget.vue'
+import AppIcon from '../components/AppIcon.vue'
 import RpaTaskPanel from '../components/RpaTaskPanel.vue'
 import authApi from '../services/authApi'
 
@@ -83,8 +80,13 @@ function consoleKeydown(event) {
 
 <style scoped>
 .ai-assistant-view {
-  min-height: calc(100vh - 8rem);
+  max-width: 1080px;
+  margin: 0 auto;
 }
+.assistant-chat-layout { min-width: 0; }
+.console-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 15px; font-size: 12px; border: 1px solid #c8d3de; border-radius: 8px; color: #344b5f; background: #fff; white-space: nowrap; }
+.console-trigger:hover { background: #edf7f5; border-color: #83c4b9; }
+.console-trigger svg { width: 16px; height: 16px; }
 .console-panel {
   max-width: 56rem;
 }

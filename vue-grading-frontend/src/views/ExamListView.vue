@@ -1,10 +1,10 @@
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-3xl font-bold text-gray-800">试卷列表</h1>
+    <div class="page-heading">
+      <div><h1 class="page-title">试卷列表</h1><p class="page-description">管理试卷与评分标准，查看学生答卷和逐题反馈。</p></div>
       <router-link
         to="/exams/new"
-        class="px-4 py-2 font-semibold text-white bg-indigo-600 rounded-lg shadow-md transition-colors hover:bg-indigo-700"
+        class="primary-button"
       >
         + 新建试卷
       </router-link>
@@ -18,23 +18,21 @@
       {{ error }}
     </div>
 
-    <div v-else-if="exams.length === 0" class="py-10 text-center text-gray-500">
-      暂无试卷，请点击右上角“新建试卷”开始。
-    </div>
+    <div v-else-if="exams.length === 0" class="empty-state"><h3>暂无试卷</h3><p>点击右上角“新建试卷”，设置题目与评分标准。</p></div>
 
-    <div v-else class="overflow-hidden bg-white rounded-lg shadow-xl">
+    <div v-else class="surface overflow-hidden">
       <ul class="divide-y divide-gray-200">
         <li
           v-for="(exam, index) in exams"
           :key="exam.id"
-          class="p-4 transition-colors hover:bg-gray-50 flex items-center justify-between"
+          class="p-5 md:p-6 transition-colors hover:bg-gray-50 flex items-center justify-between gap-3"
         >
           <router-link
             :to="`/exams/${exam.id}`"
-            class="flex-grow flex items-center justify-between"
+            class="flex-grow min-w-0 flex items-center justify-between gap-3"
           >
             <div>
-              <p class="text-lg font-semibold text-indigo-700">{{ exam.name }}</p>
+              <p class="text-base font-semibold text-gray-800 break-words">{{ exam.name }}</p>
               <p class="mt-1 text-sm text-gray-600">
                 题目数量: {{ exam.question_count }}
                 <span class="mx-2 text-gray-300">|</span>

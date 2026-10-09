@@ -1,8 +1,8 @@
 <template>
-  <div class="max-w-4xl mx-auto">
+  <div class="form-page">
     <!-- 步骤一：创建试卷 -->
-    <div v-if="step === 1" class="p-8 bg-white rounded-lg shadow-xl">
-      <h1 class="mb-6 text-3xl font-bold text-gray-800">步骤 1: 新建试卷</h1>
+    <div v-if="step === 1" class="form-surface bg-white rounded-xl">
+      <h1 class="mb-6 page-title">步骤 1: 新建试卷</h1>
       <form @submit.prevent="handleCreateExam">
         <div>
           <label for="exam_name" class="block text-sm font-medium text-gray-700"
@@ -33,12 +33,12 @@
 
     <!-- 步骤二：添加题目 -->
     <div v-if="step === 2" class="space-y-8">
-      <h1 class="text-3xl font-bold text-gray-800">
+      <h1 class="page-title">
         步骤 2: 为 "{{ examName }}" 添加题目
       </h1>
 
       <!-- 题目列表 -->
-      <div v-if="questions.length > 0" class="p-8 bg-white rounded-lg shadow-xl">
+      <div v-if="questions.length > 0" class="form-surface bg-white rounded-xl">
         <h2 class="text-xl font-semibold text-gray-700 mb-4">
           已添加题目 ({{ questions.length }} 道)
         </h2>
@@ -59,7 +59,7 @@
       <!-- 添加题目表单 -->
       <form
         @submit.prevent="handleAddQuestion"
-        class="p-8 space-y-6 bg-white rounded-lg shadow-xl"
+        class="form-surface space-y-6 bg-white rounded-xl"
       >
         <h2 class="text-xl font-semibold text-gray-700">添加新题目</h2>
 

@@ -1,12 +1,11 @@
 <template>
   <div class="agent-chat-widget">
     <!-- 聊天标题 -->
-    <div class="chat-header bg-indigo-600 text-white p-4 rounded-t-lg flex justify-between items-center">
-      <div>
-        <h2 class="text-xl font-bold">AI 教学助手</h2>
-        <p class="text-sm opacity-80">智能问答、成绩查询与批改助手</p>
-      </div>
-      <div v-if="currentSessionId" class="text-xs bg-indigo-500 px-3 py-1 rounded-full">
+    <div class="chat-header">
+      <div class="chat-identity"><div class="chat-symbol"><AppIcon name="sparkles" /></div><div>
+        <h2>教学对话</h2><p>智能问答、成绩查询与批改助手</p>
+      </div></div>
+      <div v-if="currentSessionId" class="session-tag">
         会话: {{ currentSessionId.substring(0, 8) }}...
       </div>
     </div>
@@ -19,14 +18,14 @@
           class="px-3 py-1 text-xs bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
           :disabled="loading"
         >
-          🆕 新会话
+          <AppIcon name="plus" /> 新会话
         </button>
         <button
           @click="loadSessions"
           class="px-3 py-1 text-xs bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
           :disabled="loading"
         >
-          📋 历史会话
+          <AppIcon name="history" /> 历史会话
         </button>
       </div>
       <div class="text-xs text-gray-600">
@@ -81,6 +80,7 @@
         :key="index"
         :class="['message-item flex mb-4', msg.role === 'user' ? 'justify-end' : 'justify-start']"
       >
+        <div v-if="msg.role !== 'user'" class="message-avatar"><AppIcon name="sparkles" /></div>
         <div
           :class="['message-content max-w-3/4 rounded-lg p-3', msg.role === 'user' ? 'bg-indigo-500 text-white' : 'bg-white text-gray-800 border border-gray-200']"
         >
@@ -121,22 +121,22 @@
 
     <!-- 快捷指令区域 -->
     <div v-if="isAuthenticated" class="quick-commands bg-gray-50 border-t border-gray-200 px-4 py-3">
-      <div class="text-xs text-gray-500 mb-2">💡 快捷指令：</div>
+      <div class="text-xs text-gray-500 mb-2">快捷指令</div>
       <div class="flex flex-wrap gap-2">
         <button
           @click="useQuickCommand('fetch_homework')"
-          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-full hover:from-purple-600 hover:to-indigo-600 transition-all shadow-sm"
+          class="quick-cmd-btn flex items-center"
           :disabled="loading"
         >
-          <span class="mr-1">📥</span>
+          <AppIcon name="download" />
           从教务系统下载作业并批改
         </button>
         <button
           @click="useQuickCommand('query_score')"
-          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-full hover:from-green-600 hover:to-teal-600 transition-all shadow-sm"
+          class="quick-cmd-btn flex items-center"
           :disabled="loading"
         >
-          <span class="mr-1">📊</span>
+          <AppIcon name="chart" />
           查询学生成绩
         </button>
       </div>
@@ -179,6 +179,7 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import authApi from '../services/authApi'
+import AppIcon from './AppIcon.vue'
 const emit = defineEmits(['fetch-task'])
 
 // 消息数据
@@ -532,54 +533,61 @@ watch(isAuthenticated, (newVal) => {
 </script>
 
 <style scoped>
-.agent-chat-widget {
-  border-radius: 0.5rem;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  overflow: hidden;
-}
-
-.messages-container {
-  min-height: 384px; /* h-96 */
-}
-
-.message-content {
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-
-.session-dropdown {
-  z-index: 10;
-  position: relative;
-}
-
-/* 打字指示器动画 */
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.delay-150 {
-  animation-delay: 150ms;
-}
-
-.delay-300 {
-  animation-delay: 300ms;
+.agent-chat-widget { border: 1px solid #e0e7ee; border-radius: 16px; background: #fff; overflow: hidden; box-shadow: 0 4px 20px rgb(20 45 64 / .035); }
+.chat-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 21px 25px; background: #fff; color: #20384c; }
+.chat-identity { display: flex; align-items: center; gap: 12px; }
+.chat-symbol { display: grid; place-items: center; width: 40px; height: 40px; background: #edf7f5; border-radius: 12px; color: #197b70; flex-shrink: 0; }
+.chat-symbol svg { width: 23px; height: 23px; }
+.chat-header h2 { font-size: 15px; font-weight: 600; }
+.chat-header p { color: #66788a; font-size: 11px; margin-top: 5px; }
+.session-tag { font-size: 10px; padding: 5px 9px; border: 1px solid #e0e7ee; border-radius: 5px; color: #66788a; white-space: nowrap; }
+.toolbar { padding: 11px 25px; background: #fff; border-top: 1px solid #eff3f7; gap: 12px; flex-wrap: wrap; }
+.toolbar button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 10px; border-color: #e0e7ee; font-size: 11px; border-radius: 6px; }
+.toolbar button svg { width: 14px; height: 14px; color: #66788a; }
+.toolbar > div:last-child { font-size: 10px; }
+.messages-container { height: clamp(300px, 43vh, 520px); min-height: 300px; padding: 26px; background: #f7f9fb; }
+.message-item { gap: 10px; align-items: flex-start; margin-bottom: 22px; }
+.message-avatar { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border: 1px solid #e0e7ee; border-radius: 9px; color: #197b70; background: #fff; }
+.message-avatar svg { width: 17px; height: 17px; }
+.message-content { min-width: 0; max-width: 85%; padding: 15px 18px; border-radius: 0 12px 12px; font-size: 13px; line-height: 1.8; word-wrap: break-word; overflow-wrap: anywhere; }
+.message-content.bg-indigo-500 { background: #197b70; border-radius: 12px 0 12px 12px; }
+.message-content.bg-indigo-500 a, .message-content.bg-indigo-500 button { color: #d9eeea; }
+.message-time { font-size: 9px; margin-top: 8px; }
+.quick-commands { padding: 15px 25px; background: #fff; }
+.quick-commands > div:first-child { font-size: 10px; margin-bottom: 10px; }
+.quick-cmd-btn { gap: 7px; border: 1px solid #d9e7e4; background: #f6faf9; color: #14655d; padding: 8px 11px; border-radius: 7px; font-size: 11px; box-shadow: none; }
+.quick-cmd-btn:hover { background: #edf7f5; border-color: #83c4b9; }
+.quick-cmd-btn:disabled { opacity: .5; }
+.quick-cmd-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.input-area { padding: 19px 25px; border-top-color: #eff3f7; }
+.input-area input { min-width: 0; min-height: 46px; font-size: 12px; background: #f7f9fb; }
+.input-area button[type="submit"] { padding: 10px 21px; font-size: 12px; }
+.input-area > div:last-child { margin-top: 12px; font-size: 9px; }
+.session-dropdown { z-index: 10; position: relative; border-radius: 8px; }
+.welcome-message p { font-size: 13px; line-height: 1.9; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+.animate-pulse { animation: pulse 2s cubic-bezier(.4, 0, .6, 1) infinite; }
+.delay-150 { animation-delay: 150ms; }
+.delay-300 { animation-delay: 300ms; }
+@media (max-width: 760px) {
+  .chat-header, .toolbar, .quick-commands, .input-area { padding-left: 16px; padding-right: 16px; }
+  .chat-header { flex-wrap: wrap; padding-top: 17px; padding-bottom: 17px; }
+  .chat-header p { font-size: 10px; }
+  .session-tag { margin-left: 52px; }
+  .messages-container { padding: 20px 14px; height: 360px; }
+  .message-item { gap: 7px; }
+  .message-content { max-width: calc(100% - 37px); padding: 12px; font-size: 12px; }
+  .message-content.bg-indigo-500 { max-width: 90%; }
+  .input-area button[type="submit"] { padding: 10px 15px; }
 }
 </style>
 
 <style>
 /* Markdown 样式重置和美化 */
 .markdown-content {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  line-height: 1.6;
+  min-width: 0;
+  font-family: inherit;
+  line-height: 1.8;
 }
 
 .markdown-content p {
@@ -589,7 +597,7 @@ watch(isAuthenticated, (newVal) => {
 .markdown-content strong,
 .markdown-content b {
   font-weight: 600;
-  color: #1f2937;
+  color: #20384c;
 }
 
 .markdown-content em,
@@ -606,12 +614,12 @@ watch(isAuthenticated, (newVal) => {
   font-weight: 600;
   margin-top: 1.5rem;
   margin-bottom: 1rem;
-  color: #111827;
+  color: #142d40;
 }
 
 .markdown-content h1 {
   font-size: 1.875rem;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid #e0e7ee;
   padding-bottom: 0.5rem;
 }
 
@@ -642,12 +650,12 @@ watch(isAuthenticated, (newVal) => {
 }
 
 .markdown-content blockquote {
-  border-left: 4px solid #e5e7eb;
+  border-left: 4px solid #e0e7ee;
   padding-left: 1rem;
   margin-left: 0;
   margin-right: 0;
   margin-bottom: 1rem;
-  color: #6b7280;
+  color: #66788a;
   font-style: italic;
 }
 
@@ -660,7 +668,7 @@ watch(isAuthenticated, (newVal) => {
 }
 
 .markdown-content pre {
-  background-color: #1f2937;
+  background-color: #20384c;
   color: #f3f4f6;
   padding: 1rem;
   border-radius: 0.5rem;
@@ -675,6 +683,8 @@ watch(isAuthenticated, (newVal) => {
 }
 
 .markdown-content table {
+  display: block;
+  overflow-x: auto;
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1rem;
@@ -683,7 +693,7 @@ watch(isAuthenticated, (newVal) => {
 
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e0e7ee;
   padding: 0.75rem;
   text-align: left;
 }
@@ -698,20 +708,22 @@ watch(isAuthenticated, (newVal) => {
   background-color: #f9fafb;
 }
 
+.markdown-content p:last-child { margin-bottom: 0; }
+
 .markdown-content a {
-  color: #4f46e5;
+  color: #197b70;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .markdown-content a:hover {
-  color: #3730a3;
+  color: #14655d;
 }
 
 .markdown-content hr {
   border: 0;
   height: 1px;
-  background-color: #e5e7eb;
+  background-color: #e0e7ee;
   margin: 1.5rem 0;
 }
 </style>

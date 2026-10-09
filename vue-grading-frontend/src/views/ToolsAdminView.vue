@@ -1,8 +1,8 @@
 <template>
-  <div class="bg-white rounded-lg shadow p-6">
+  <div class="surface tools-page">
     <div class="flex items-start justify-between gap-4 mb-6">
       <div>
-        <h2 class="text-2xl font-bold text-gray-800">工具管理</h2>
+        <h2 class="page-title">工具管理</h2>
         <p class="text-sm text-gray-500 mt-1">
           配置 Agent 可调用工具的启用状态、允许角色和描述；参数定义供查阅。
         </p>
@@ -35,7 +35,7 @@
       <div
         v-for="tool in tools"
         :key="tool.name"
-        class="border rounded-lg p-4"
+        class="border tool-card"
       >
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
