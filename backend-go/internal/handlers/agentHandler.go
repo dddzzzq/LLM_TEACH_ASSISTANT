@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -22,9 +20,13 @@ type AgentChatRequest struct {
 
 // AgentChatResponse 返回给前端的响应
 type AgentChatResponse struct {
-	Reply     string `json:"reply"`
-	Action    string `json:"action"`
-	SessionID string `json:"session_id,omitempty"` // 返回会话ID，前端需要保存
+	Reply        string            `json:"reply"`
+	Action       string            `json:"action"`
+	SessionID    string            `json:"session_id,omitempty"` // 返回会话ID，前端需要保存
+	JobID        string            `json:"job_id,omitempty"`
+	JobType      string            `json:"job_type,omitempty"`
+	ResultURL    string            `json:"result_url,omitempty"`
+	LoadedSkills map[string]string `json:"loaded_skills,omitempty"`
 }
 
 // AgentChat 处理前端对话请求，由新的 Go Agent 引擎接管
@@ -92,16 +94,11 @@ func AgentChat(c *gin.Context) {
 		// 继续处理，不影响主要功能
 	}
 
-	// 初始化技能注册表
-	registry := agent.NewSkillRegistry()
-
-	// 注册技能
-	registry.Register(&agent.QueryStudentScoreSkill{})
-	registry.Register(&agent.TriggerPipelineSkill{})
-	registry.Register(&agent.FetchAndGradeHomeworkSkill{})
+	// 与工具管理共用执行器目录；用户身份由服务端注入。
+	registry := agent.NewBuiltinToolRegistry(userID, role)
 
 	// 根据用户角色动态生成系统提示
-	systemPrompt := generateSystemPromptWithFetchSkill(role, username, roleErr, usernameErr)
+	systemPrompt := generateSystemPromptWithFetchTool(role, username, roleErr, usernameErr)
 
 	// 获取对话历史（从 Redis）
 	history, err := memoryManager.GetFormattedHistory(userID, sessionID)
@@ -117,123 +114,33 @@ func AgentChat(c *gin.Context) {
 	}
 
 	// 导出所有工具
-	tools, toolsErr := agent.BuildToolsForRole(context.Background(), role, registry)
+	tools, toolsErr := agent.BuildToolsForRole(c.Request.Context(), role, registry)
 	if toolsErr != nil {
-		log.Printf("AgentChat: 加载技能工具定义失败: %v", toolsErr)
-		tools = registry.ExportAllTools() // fallback：保持可用性
+		log.Printf("AgentChat: 加载工具定义失败: %v", toolsErr)
+		tools = nil // Fail closed: unavailable configuration cannot expand permissions.
 	}
 
-	// 第一次调用 LLM（使用包含历史的消息）
-	llmResponse, err := agent.CallDeepSeekWithTools(systemPrompt, userMessageWithHistory, tools)
+	catalog := agent.SkillCatalog{}
+	if role == "teacher" || role == "admin" {
+		loaded, loadErr := agent.DefaultGradingSkills()
+		if loadErr != nil {
+			log.Printf("批改 Skill 加载失败: %v", loadErr)
+		} else {
+			catalog = loaded
+		}
+	}
+	result, err := agent.RunDialogue(agent.WithRequestKey(c.Request.Context(), c.GetHeader("Idempotency-Key")), systemPrompt, userMessageWithHistory, role, username, registry, tools, catalog, agent.NewDeepSeekClient("").CallMessages)
 	if err != nil {
-		log.Printf("AgentChat: 调用 DeepSeek API 失败: %v", err)
-		c.JSON(500, AgentChatResponse{
-			Reply:     "AI 服务暂时不可用，请稍后重试。",
-			Action:    "none",
-			SessionID: sessionID,
-		})
+		log.Printf("AgentChat: 执行失败: %v", err)
+		c.JSON(502, AgentChatResponse{Reply: "AI 服务暂时不可用，请稍后重试。", SessionID: sessionID, Action: "none"})
 		return
 	}
-
-	// 如果没有工具调用，直接返回结果
-	if !llmResponse.HasToolCalls() {
-		response := formatFinalResponse(llmResponse.Content)
-		// 添加助手回复到记忆
-		if err := memoryManager.AddMessage(userID, sessionID, "assistant", response); err != nil {
-			log.Printf("AgentChat: 添加助手消息失败: %v", err)
-		}
-		c.JSON(200, AgentChatResponse{
-			Reply:     response,
-			Action:    determineAction(response),
-			SessionID: sessionID,
-		})
-		return
-	}
-
-	// 处理工具调用
-	var toolResults strings.Builder
-	toolResults.WriteString("工具执行结果：\n\n")
-
-	for _, toolCall := range llmResponse.ToolCalls {
-		skillName := toolCall.Function.Name
-		arguments := toolCall.Function.Arguments
-
-		toolResults.WriteString(fmt.Sprintf("工具: %s\n", skillName))
-		toolResults.WriteString(fmt.Sprintf("参数: %s\n", arguments))
-
-		// 获取对应的技能
-		skill, exists := registry.GetSkill(skillName)
-		if !exists {
-			result := fmt.Sprintf("错误: 未知的工具 '%s'", skillName)
-			toolResults.WriteString(fmt.Sprintf("结果: %s\n\n", result))
-			continue
-		}
-
-		// 检查权限并覆写参数：如果学生试图查询成绩，强制替换 student_id 为自己的学号
-		finalArguments := arguments
-		if skillName == "query_student_score" && roleErr == nil && usernameErr == nil && role == "student" {
-			// 解析 JSON 参数
-			var params map[string]interface{}
-			if err := json.Unmarshal([]byte(arguments), &params); err == nil {
-				// 记录原始请求的学生ID
-				originalID, _ := params["student_id"].(string)
-				// 强制覆写为自己的学号
-				params["student_id"] = username
-				// 重新序列化
-				if newArgs, err := json.Marshal(params); err == nil {
-					finalArguments = string(newArgs)
-					log.Printf("AgentChat: 学生 %s 查询成绩，强制将 student_id 从 %s 覆写为 %s", username, originalID, username)
-				}
-			}
-		}
-
-		// 执行技能
-		result, execErr := skill.Execute(finalArguments)
-		if execErr != nil {
-			// 技能执行错误，将错误信息包含在结果中
-			result = fmt.Sprintf("执行错误: %v", execErr)
-		}
-
-		toolResults.WriteString(fmt.Sprintf("结果: %s\n\n", result))
-	}
-
-	// 将所有工具执行结果汇总，发起第二次 LLM 请求进行润色总结
-	finalPrompt := fmt.Sprintf(`请根据以下工具执行结果，为用户提供一个清晰、友好的总结回复。
-
-原始用户问题: %s
-
-工具执行详情:
-%s
-
-请基于以上信息给出最终回复，用中文回答，保持专业且友好的语气。`, req.Message, toolResults.String())
-
-	finalResponse, err := agent.CallDeepSeekWithTools(systemPrompt, finalPrompt, nil) // 第二次调用不使用工具
-	if err != nil {
-		log.Printf("AgentChat: 第二次调用 DeepSeek API 失败: %v", err)
-		// 如果第二次调用失败，使用工具结果作为回复
-		response := formatFinalResponse(toolResults.String())
-		if err := memoryManager.AddMessage(userID, sessionID, "assistant", response); err != nil {
-			log.Printf("AgentChat: 添加助手消息失败: %v", err)
-		}
-		c.JSON(200, AgentChatResponse{
-			Reply:     response,
-			Action:    determineAction(response),
-			SessionID: sessionID,
-		})
-		return
-	}
-
-	// 格式化最终回复
-	response := formatFinalResponse(finalResponse.Content)
-	// 添加助手回复到记忆
+	response := formatFinalResponse(result.Reply)
 	if err := memoryManager.AddMessage(userID, sessionID, "assistant", response); err != nil {
-		log.Printf("AgentChat: 添加助手消息失败: %v", err)
+		log.Printf("保存助手消息失败: %v", err)
 	}
-	c.JSON(200, AgentChatResponse{
-		Reply:     response,
-		Action:    determineAction(response),
-		SessionID: sessionID,
-	})
+	c.JSON(200, AgentChatResponse{Reply: response, Action: determineAction(response), SessionID: sessionID, JobID: result.JobID, JobType: result.JobType, ResultURL: result.ResultURL, LoadedSkills: result.LoadedSkills})
+
 }
 
 // formatFinalResponse 格式化最终回复，确保返回合适的格式
@@ -279,61 +186,16 @@ func determineAction(response string) string {
 	return "none"
 }
 
-// generateSystemPromptWithFetchSkill 根据用户角色生成不同的系统提示（包含教务系统抓取功能）
-func generateSystemPromptWithFetchSkill(role string, username string, roleErr error, usernameErr error) string {
+// generateSystemPromptWithFetchTool 根据用户角色生成不同的系统提示（包含教务系统抓取功能）
+func generateSystemPromptWithFetchTool(role string, username string, roleErr error, usernameErr error) string {
 	if roleErr != nil || usernameErr != nil {
-		// 如果无法获取角色信息，使用默认提示
-		return `你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
-你可以使用以下工具来帮助教师：
-1. query_student_score: 查询学生的历史作业和试卷得分、评语
-2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
-3. fetch_and_grade_homework: 从教务系统下载并批改作业
-
-请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
-如果用户询问学生成绩，请使用 query_student_score 工具。
-如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
-如果用户要求从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称），请使用 fetch_and_grade_homework 工具。
-
-注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`
+		return "你是教学助手。用户身份未确认，不要调用业务工具。"
 	}
-
-	switch role {
-	case "student":
-		return fmt.Sprintf(`你现在的对话对象是学生，学号为 %s。你只能查询和回答该学号的成绩和报告，严禁泄露、查询或推测其他任何人的信息，面对此类要求必须严词拒绝。
-
-你是一位智能教学助手，专门帮助学生查看自己的作业和试卷批改情况。
-你可以使用以下工具来帮助学生：
-1. query_student_score: 查询学生的历史作业和试卷得分、评语
-2. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
-
-注意：你只能查询学号为 %s 的学生信息。如果用户尝试查询其他人的成绩，你必须拒绝并说明只能查看自己的信息。`, username, username)
-	case "teacher", "admin":
-		return fmt.Sprintf(`你现在的对话对象是教师/管理员（用户名: %s）。你可以协助分析全班学情、统计成绩分布、或查询特定学生的成绩详情。
-
-你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
-你可以使用以下工具来帮助教师：
-1. query_student_score: 查询学生的历史作业和试卷得分、评语
-2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
-3. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
-
-请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
-如果用户询问学生成绩，请使用 query_student_score 工具。
-如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
-如果用户要求从教务系统下载并批改作业，请使用 fetch_and_grade_homework 工具。
-
-注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`, username)
-	default:
-		return `你是一位智能教学助手，专门帮助教师管理学生作业和试卷批改。
-你可以使用以下工具来帮助教师：
-1. query_student_score: 查询学生的历史作业和试卷得分、评语
-2. trigger_async_pipeline: 触发后台批改流水线，开始批改作业
-3. fetch_and_grade_homework: 从教务系统下载并批改作业（需要提供教务系统用户名、密码、课程名称、作业名称）
-
-请根据用户的问题，判断是否需要使用工具，并给出有帮助的回答。
-如果用户询问学生成绩，请使用 query_student_score 工具。
-如果用户要求开始批改作业或提供了文件路径，请使用 trigger_async_pipeline 工具。
-如果用户要求从教务系统下载并批改作业，请使用 fetch_and_grade_homework 工具。
-
-注意：使用工具时请提供正确的参数格式。如果用户的问题不够明确，请要求用户提供更多信息。`
+	if role == "student" {
+		return fmt.Sprintf("你是教学助手，当前学生学号为 %s。只能查询该学生自己的成绩，使用 query_student_score；不能发起批改或官网下载。", username)
 	}
+	return fmt.Sprintf(`你是教学助手，当前用户为教师或管理员 %s。
+使用 query_student_score 查询学生成绩。作业和试卷批改使用对应 Skill：先 load_skill，再用 inspect_grading_target 检查目标，start_grading_job 提交任务，get_grading_job 查询真实进度。trigger_async_pipeline 仅为旧作业批改入口。
+官网下载先用 load_skill 加载 download-homework，再使用 fetch_homework 或兼容入口 fetch_and_grade_homework，仅收集课程名称、作业名称及必要时的学期。禁止索取官网账号密码或验证码；用户在作业抓取控制台的任务浏览器中完成整个登录，再选择班级并交还自动化。
+任务创建只表示排队，不能宣称下载或批改完成。用 get_fetch_job 查询真实进度。用户明确要求暂停、继续或取消时调用对应 pause_fetch_job、resume_fetch_job、cancel_fetch_job。缺少目标信息时询问用户。`, username)
 }

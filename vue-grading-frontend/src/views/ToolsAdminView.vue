@@ -2,9 +2,9 @@
   <div class="bg-white rounded-lg shadow p-6">
     <div class="flex items-start justify-between gap-4 mb-6">
       <div>
-        <h2 class="text-2xl font-bold text-gray-800">Skills 管理</h2>
+        <h2 class="text-2xl font-bold text-gray-800">工具管理</h2>
         <p class="text-sm text-gray-500 mt-1">
-          配置 LLM 可调用的工具：启用状态、允许角色、描述与 JSON Schema。
+          配置 Agent 可调用工具的启用状态、允许角色和描述；参数定义供查阅。
         </p>
       </div>
       <div class="flex gap-2">
@@ -33,26 +33,26 @@
 
     <div v-else class="space-y-4">
       <div
-        v-for="skill in skills"
-        :key="skill.name"
+        v-for="tool in tools"
+        :key="tool.name"
         class="border rounded-lg p-4"
       >
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="flex items-center gap-2">
-              <div class="font-semibold text-gray-800 truncate">{{ skill.name }}</div>
+              <div class="font-semibold text-gray-800 truncate">{{ tool.name }}</div>
               <span
                 class="text-xs px-2 py-0.5 rounded-full"
-                :class="skill.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'"
+                :class="tool.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'"
               >
-                {{ skill.enabled ? 'ENABLED' : 'DISABLED' }}
+                {{ tool.enabled ? 'ENABLED' : 'DISABLED' }}
               </span>
             </div>
-            <div class="text-xs text-gray-500 mt-1">impl_key: {{ skill.impl_key }}</div>
+            <div v-if="!tool.registered" class="text-xs text-amber-700 mt-1">工具暂不可用：执行器未注册</div>
           </div>
 
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" v-model="skill.enabled" />
+            <input type="checkbox" v-model="tool.enabled" :disabled="!tool.registered" />
             启用
           </label>
         </div>
@@ -62,15 +62,15 @@
             <div class="text-sm font-medium text-gray-700 mb-2">允许角色</div>
             <div class="flex gap-3 text-sm">
               <label class="flex items-center gap-2">
-                <input type="checkbox" :value="'student'" v-model="skill.allowed_roles" />
+                <input type="checkbox" :value="'student'" v-model="tool.allowed_roles" />
                 student
               </label>
               <label class="flex items-center gap-2">
-                <input type="checkbox" :value="'teacher'" v-model="skill.allowed_roles" />
+                <input type="checkbox" :value="'teacher'" v-model="tool.allowed_roles" />
                 teacher
               </label>
               <label class="flex items-center gap-2">
-                <input type="checkbox" :value="'admin'" v-model="skill.allowed_roles" />
+                <input type="checkbox" :value="'admin'" v-model="tool.allowed_roles" />
                 admin
               </label>
             </div>
@@ -79,39 +79,40 @@
           <div>
             <div class="text-sm font-medium text-gray-700 mb-2">描述（description）</div>
             <textarea
-              v-model="skill.description"
+              v-model="tool.description"
               class="w-full border rounded px-3 py-2 text-sm h-24"
             />
           </div>
         </div>
 
         <div class="mt-4">
-          <div class="text-sm font-medium text-gray-700 mb-2">Schema（JSON Schema）</div>
+          <div class="text-sm font-medium text-gray-700 mb-2">参数定义（只读）</div>
           <textarea
-            v-model="skill.schema_json"
+            :value="tool.schema_json"
+            readonly
             class="w-full border rounded px-3 py-2 text-sm font-mono h-40"
           />
           <div class="text-xs text-gray-500 mt-1">
-            注意：这里只校验“是否为合法 JSON”，不做严格 JSON Schema 校验。
+            参数定义与执行器保持一致，不支持在此页面修改。
           </div>
         </div>
 
         <div class="mt-4 flex items-center justify-between">
           <div class="text-xs text-gray-400">
-            updated_at: {{ skill.updated_at }}
+            updated_at: {{ tool.updated_at }}
           </div>
           <button
-            @click="save(skill)"
+            @click="save(tool)"
             class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded"
-            :disabled="savingName === skill.name"
+            :disabled="savingName === tool.name || !tool.registered"
           >
-            {{ savingName === skill.name ? '保存中...' : '保存' }}
+            {{ savingName === tool.name ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
 
-      <div v-if="skills.length === 0" class="text-sm text-gray-500">
-        未查询到任何 skills。
+      <div v-if="tools.length === 0" class="text-sm text-gray-500">
+        暂无工具配置。
       </div>
     </div>
   </div>
@@ -119,9 +120,9 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import skillsApi from '../services/skillsApi'
+import toolsApi from '../services/toolsApi'
 
-const skills = ref([])
+const tools = ref([])
 const loading = ref(false)
 const error = ref('')
 const savingName = ref('')
@@ -139,12 +140,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await skillsApi.listSkills()
+    const res = await toolsApi.listTools()
     const rows = Array.isArray(res.data) ? res.data : []
-    skills.value = rows.map((s) => ({
+    tools.value = rows.map((s) => ({
       id: s.id,
       name: s.name,
-      impl_key: s.impl_key,
+      registered: s.registered !== false,
       enabled: !!s.enabled,
       description: s.description || '',
       schema_json: s.schema_json || '',
@@ -158,16 +159,16 @@ async function load() {
   }
 }
 
-async function save(skill) {
-  savingName.value = skill.name
+async function save(tool) {
+  savingName.value = tool.name
   error.value = ''
   try {
-    await skillsApi.updateSkill(skill.name, {
-      enabled: skill.enabled,
-      description: skill.description,
-      schema_json: skill.schema_json,
-      allowed_roles: skill.allowed_roles
+    const res = await toolsApi.updateTool(tool.name, {
+      enabled: tool.enabled,
+      description: tool.description,
+      allowed_roles: tool.allowed_roles
     })
+    tool.updated_at = res.data.updated_at
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || '保存失败'
   } finally {
@@ -178,7 +179,7 @@ async function save(skill) {
 async function refreshCache() {
   error.value = ''
   try {
-    await skillsApi.refreshSkillsCache()
+    await toolsApi.refreshToolsCache()
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || '刷新缓存失败'
   }

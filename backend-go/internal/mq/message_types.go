@@ -7,11 +7,7 @@ package mq
 // RPAFetchMessage RPA抓取任务消息结构
 // 用于Agent投递抓取任务到 topic_rpa_fetch 队列
 type RPAFetchMessage struct {
-	JobID          string `json:"job_id"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	CourseName     string `json:"course_name"`
-	AssignmentName string `json:"assignment_name"`
+	JobID string `json:"job_id"`
 }
 
 // ============================

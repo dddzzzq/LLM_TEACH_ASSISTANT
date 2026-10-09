@@ -1,18 +1,7 @@
-import authApi from './authApi'
-
-const apiClient = authApi.getClient()
-
+// Deprecated import: this API manages Tools, not Markdown Skills.
+import toolsApi from './toolsApi'
 export default {
-  listSkills() {
-    return apiClient.get('/api/admin/skills')
-  },
-
-  updateSkill(name, payload) {
-    return apiClient.put(`/api/admin/skills/${encodeURIComponent(name)}`, payload)
-  },
-
-  refreshSkillsCache() {
-    return apiClient.post('/api/admin/skills/cache/refresh')
-  }
+  listSkills: toolsApi.listTools,
+  updateSkill: toolsApi.updateTool,
+  refreshSkillsCache: toolsApi.refreshToolsCache
 }
-

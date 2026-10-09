@@ -10,6 +10,7 @@ import (
 	"grading-gateway/pb"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -127,7 +128,7 @@ func extractSingleFile(file *zip.File, destPath string) error {
 }
 
 // processPipeline Go 核心调度中心
-func ProcessPipeline(assignmentID string, zipPath string) {
+func ProcessPipeline(assignmentID string, zipPath string) error {
 	log.Printf("\n======================================================\n")
 	log.Printf("[调度中心] 启动全新批改流线, 作业ID: %s\n", assignmentID)
 	startTime := time.Now()
@@ -137,14 +138,14 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 	assignmentPtr, err := cache.GetAssignmentWithCache(context.Background(), uint(parsedID))
 	if err != nil || assignmentPtr == nil {
 		log.Printf("[错误] 找不到作业ID %s (或缓存读取失败)\n", assignmentID)
-		return
+		return fmt.Errorf("找不到作业ID %s", assignmentID)
 	}
 	assignment := *assignmentPtr
 
 	tasks, err := extractAndGroupTasks(assignmentID, zipPath)
 	if err != nil || len(tasks) == 0 {
 		log.Printf("[错误] 解压失败或包内无文件\n")
-		return
+		return fmt.Errorf("解压失败或包内无学生文件")
 	}
 	totalTasks := int32(len(tasks))
 	log.Printf("[调度中心] 物理拆包完成，共分发 %d 个学生的独立作业堆。\n", totalTasks)
@@ -240,6 +241,7 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 	jobs := make(chan GradingTask, len(tasks))
 	var wgMap2 sync.WaitGroup
 	var map2Completed int32 = 0
+	var failedGrades int32
 
 	for w := 1; w <= numWorkers; w++ {
 		wgMap2.Add(1)
@@ -286,14 +288,18 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 				mergedContent := studentText
 				matchJSON := "{}"
 
-				if errGrade == nil && gradeRes != nil {
+				if errGrade == nil && gradeRes != nil && gradeRes.TotalScore >= 0 && !math.IsNaN(float64(gradeRes.TotalScore)) && !math.IsInf(float64(gradeRes.TotalScore), 0) {
 					finalScore = float64(gradeRes.TotalScore)
 					finalFeedback = gradeRes.Feedback
 					mergedContent = gradeRes.MergedContent
 					matchJSON = gradeRes.CodeDocMatchReportJson
+				} else {
+					atomic.AddInt32(&failedGrades, 1)
 				}
 
-				database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON)
+				if err := database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON); err != nil && finalScore >= 0 {
+					atomic.AddInt32(&failedGrades, 1)
+				}
 
 				currentProg := atomic.AddInt32(&map2Completed, 1)
 				log.Printf(" <- [Worker %d] 学生 [%s] 批改完毕！进度: %d/%d", workerID, t.StudentID, currentProg, totalTasks)
@@ -307,8 +313,12 @@ func ProcessPipeline(assignmentID string, zipPath string) {
 	close(jobs)
 
 	wgMap2.Wait()
+	if failedGrades > 0 {
+		return fmt.Errorf("%d/%d 份学生作业评分失败，请查看已保存的结果", failedGrades, totalTasks)
+	}
 	log.Printf("\n[调度中心] 作业 %s 批改任务全流程结束！\n总耗时: %v\n======================================================\n", assignmentID, time.Since(startTime))
 
 	// 启动成绩池化处理
 	go AddPoolingToPipeline(assignmentID)
+	return nil
 }

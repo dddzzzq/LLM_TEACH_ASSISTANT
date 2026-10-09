@@ -105,7 +105,7 @@ const allMenuItems = [
   { name: "作业自动评分", path: "/assignments", icon: CheckBadgeIcon },
   { name: "主观题自动评分", path: "/exams", icon: PencilSquareIcon },
   { name: "AI教学助手", path: "/ai-assistant", icon: ChatBubbleLeftRightIcon },
-  { name: "Skills 管理", path: "/skills-admin", icon: WrenchScrewdriverIcon },
+  { name: "工具管理", path: "/tools-admin", icon: WrenchScrewdriverIcon },
 ]
 
 // 根据角色过滤菜单项
@@ -117,9 +117,9 @@ const filteredMenuItems = computed(() => {
     return allMenuItems.filter(item => item.path === '/ai-assistant')
   }
   
-  // 教师/管理员可见；其中 Skills 管理建议仅管理员可见
+  // 教师/管理员可见；其中 工具管理建议仅管理员可见
   if (userRole === 'teacher') {
-    return allMenuItems.filter(item => item.path !== '/skills-admin')
+    return allMenuItems.filter(item => item.path !== '/tools-admin')
   }
   return allMenuItems
 })

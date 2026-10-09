@@ -9,21 +9,21 @@ import (
 	"grading-gateway/internal/models"
 )
 
-// QueryStudentScoreSkill 查询学生成绩的技能
-type QueryStudentScoreSkill struct{}
+// QueryStudentScoreTool 查询学生成绩的工具
+type QueryStudentScoreTool struct{}
 
-// Name 返回技能名称
-func (s *QueryStudentScoreSkill) Name() string {
+// Name 返回工具名称
+func (s *QueryStudentScoreTool) Name() string {
 	return "query_student_score"
 }
 
-// Description 返回技能描述
-func (s *QueryStudentScoreSkill) Description() string {
+// Description 返回工具描述
+func (s *QueryStudentScoreTool) Description() string {
 	return "当需要查询某个学生的历史作业和试卷得分、评语时调用此工具。"
 }
 
 // Schema 返回 JSON Schema 字符串
-func (s *QueryStudentScoreSkill) Schema() string {
+func (s *QueryStudentScoreTool) Schema() string {
 	return `{
 		"type": "object",
 		"properties": {
@@ -38,7 +38,7 @@ func (s *QueryStudentScoreSkill) Schema() string {
 }
 
 // Execute 执行查询学生成绩的操作
-func (s *QueryStudentScoreSkill) Execute(args string) (string, error) {
+func (s *QueryStudentScoreTool) Execute(args string) (string, error) {
 	// 解析参数
 	var params map[string]interface{}
 	if err := json.Unmarshal([]byte(args), &params); err != nil {

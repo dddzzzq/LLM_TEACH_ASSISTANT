@@ -71,7 +71,7 @@
 
       <!-- 欢迎消息 -->
       <div v-else-if="messages.length === 0" class="welcome-message text-center py-8">
-        <p class="text-gray-500">👋 你好{{ currentUser?.name ? ` ${currentUser.name}` : '' }}！我是您的 AI 教学助手，可以帮您查询学生成绩或触发批改流水线。</p>
+        <p class="text-gray-500">👋 你好{{ currentUser?.name ? ` ${currentUser.name}` : '' }}！我可以帮您从教务系统下载作业并批改，也可以查询学生成绩。</p>
         <p class="text-sm text-gray-400 mt-2">当前会话 ID: {{ currentSessionId.substring(0, 12) }}...</p>
       </div>
 
@@ -92,6 +92,14 @@
           <!-- Agent 消息：支持 Markdown 渲染 -->
           <div v-else class="agent-message markdown-content" v-html="renderMarkdown(msg.content)"></div>
           
+          <div v-if="msg.jobId && ['HOMEWORK', 'EXAM'].includes(msg.jobType)" class="mt-2 border-t pt-2 text-xs text-gray-600">
+            <p>批改任务：{{ msg.jobId }}</p>
+            <router-link v-if="msg.resultUrl" :to="msg.resultUrl" class="text-indigo-600 underline">查看批改详情</router-link>
+          </div>
+          <button v-if="msg.jobId && (!msg.jobType || msg.jobType === 'rpa_fetch_homework')" type="button"
+            class="mt-2 text-sm text-indigo-600 underline" @click="emit('fetch-task', msg.jobId)">
+            打开作业控制台
+          </button>
           <!-- 消息时间 -->
           <div
             :class="['message-time text-xs mt-1', msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400']"
@@ -121,7 +129,7 @@
           :disabled="loading"
         >
           <span class="mr-1">📥</span>
-          从教务系统下载作业
+          从教务系统下载作业并批改
         </button>
         <button
           @click="useQuickCommand('query_score')"
@@ -130,14 +138,6 @@
         >
           <span class="mr-1">📊</span>
           查询学生成绩
-        </button>
-        <button
-          @click="useQuickCommand('trigger_pipeline')"
-          class="quick-cmd-btn flex items-center px-3 py-1.5 text-xs bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full hover:from-orange-600 hover:to-red-600 transition-all shadow-sm"
-          :disabled="loading"
-        >
-          <span class="mr-1">🚀</span>
-          触发批改流水线
         </button>
       </div>
     </div>
@@ -179,6 +179,7 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import authApi from '../services/authApi'
+const emit = defineEmits(['fetch-task'])
 
 // 消息数据
 const messages = ref([])
@@ -193,16 +194,12 @@ const inputRef = ref(null)
 // 快捷指令配置
 const quickCommands = {
   fetch_homework: {
-    template: '请帮我从教务系统下载作业，需要提供以下信息：\n- 用户名：\n- 密码：\n- 课程名称：\n- 作业名称：',
-    placeholder: '请输入教务系统用户名、密码、课程名称和作业名称'
+    template: '请帮我从教务系统下载作业并批改，课程名称：，作业名称：',
+    placeholder: '请输入课程与作业名称，登录在任务浏览器中完成'
   },
   query_score: {
     template: '请帮我查询学生 ',
     placeholder: '请输入学号，例如：23009200042'
-  },
-  trigger_pipeline: {
-    template: '请帮我触发批改流水线，作业ID为 ',
-    placeholder: '请输入作业ID和文件路径'
   }
 }
 
@@ -287,7 +284,7 @@ const createNewSession = async () => {
       // 添加欢迎消息
       messages.value.push({
         role: 'assistant',
-        content: '您好！我是您的智能教学助手，可以帮您：\n\n1. **查询学生成绩** - 例如："查询学生 23009200042 的成绩"\n2. **触发批改流水线** - 例如："开始批改作业 ID 1，文件路径 /path/to/submissions.zip"\n3. **回答教学相关问题**\n\n请问有什么可以帮您的？',
+        content: '您好！我可以帮您从教务系统下载作业并批改，或查询学生成绩。\n\n下载作业时，请提供课程名称和作业名称；查询成绩时，请提供学号。',
         timestamp: new Date()
       })
     } else {
@@ -388,7 +385,7 @@ const loadSessionHistory = async (sessionId) => {
 // 发送消息
 const sendMessage = async () => {
   const message = inputMessage.value.trim()
-  if (!message) return
+  if (!message || loading.value) return
 
   // 检查是否已认证
   if (!isAuthenticated.value) {
@@ -423,14 +420,18 @@ const sendMessage = async () => {
     const response = await client.post('/api/agent/chat', {
       message: message,
       session_id: currentSessionId.value
-    })
+    }, { headers: { 'Idempotency-Key': globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` } })
 
     const data = response.data
+    if (data.job_id && (!data.job_type || data.job_type === 'rpa_fetch_homework')) emit('fetch-task', data.job_id)
 
     // 添加 Agent 回复
     messages.value.push({
       role: 'assistant',
       content: data.reply || '抱歉，暂时无法回答您的问题。',
+      jobId: data.job_id,
+      jobType: data.job_type,
+      resultUrl: /^\/(assignments|exams)\/\d+$/.test(data.result_url || '') ? data.result_url : '',
       timestamp: new Date()
     })
 

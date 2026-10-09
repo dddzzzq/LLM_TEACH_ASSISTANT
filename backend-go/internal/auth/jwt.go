@@ -15,8 +15,8 @@ import (
 type JWTConfig struct {
 	AccessTokenSecret  string
 	RefreshTokenSecret string
-	AccessTokenExpiry  time.Duration // 例如 15 分钟
-	RefreshTokenExpiry time.Duration // 例如 7 天
+	AccessTokenExpiry  time.Duration // 设置访问过期时间，15 分钟
+	RefreshTokenExpiry time.Duration // 设置刷新access Token过期时间，7 天
 }
 
 // 默认配置从环境变量读取

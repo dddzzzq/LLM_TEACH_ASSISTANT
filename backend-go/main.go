@@ -3,14 +3,20 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
+	"encoding/json"
 	"grading-gateway/internal/agent"
+	"grading-gateway/internal/agent/catalog"
+	"grading-gateway/internal/agent/modelclient"
+	"grading-gateway/internal/browseragent"
 	"grading-gateway/internal/database"
 	"grading-gateway/internal/grpcclient"
 	"grading-gateway/internal/handlers"
 	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/mq"
+	"grading-gateway/internal/rpa"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,14 +24,21 @@ import (
 func main() {
 	// 1. 连接数据库
 	dsn := "root:123456@tcp(127.0.0.1:3306)/grading_system?charset=utf8mb4&parseTime=True&loc=Local"
+	if configured := os.Getenv("DATABASE_DSN"); configured != "" {
+		dsn = configured
+	}
 	database.InitDB(dsn)
 
 	// 2. 初始化 Redis
 	database.InitRedis(nil)
 	defer database.CloseRedis()
 
-	// 2.1 初始化（/迁移后）种子技能定义
-	agent.EnsureDefaultSkillsSeeded(context.Background())
+	// 2.1 初始化工具配置；Markdown Skill 知识包不写入工具表。
+	agent.EnsureDefaultToolsSeeded(context.Background())
+	agent.EnsureRPATools(context.Background())
+	agent.EnsureGradingTools(context.Background())
+	rpa.PublishFetch = func(id string) error { return mq.PublishRPAFetchTask(mq.RPAFetchMessage{JobID: id}) }
+	rpa.PublishGrade = mq.PublishHomeworkTask
 
 	// 3. 初始化 Kafka
 	kafkaBrokers := []string{"localhost:9092"}
@@ -59,6 +72,10 @@ func main() {
 	// 5. 初始化grpc客户端
 	grpcclient.InitGrpcClient()
 	defer grpcclient.CloseGrpcClient()
+	rpa.DecidePage = func(ctx context.Context, input json.RawMessage, doc catalog.Document, contract json.RawMessage) (json.RawMessage, error) {
+		return browseragent.Decide(ctx, input, doc, contract, modelclient.NewPageClient().CallMessages)
+	}
+	go rpa.RunScheduler(context.Background())
 
 	// 6. 初始化gin框架，定义初始根路由
 	router := gin.Default()
@@ -67,7 +84,7 @@ func main() {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, Idempotency-Key")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
@@ -88,6 +105,8 @@ func main() {
 		publicGroup.POST("/login", authHandler.Login)
 		publicGroup.POST("/refresh", authHandler.Refresh)
 		publicGroup.POST("/register", authHandler.Register)
+		// The WebSocket authenticates its first message before accessing a task.
+		publicGroup.GET("/rpa/jobs/:id/stream", handlers.RPABrowserStream)
 	}
 
 	// 10. 定义需要认证的路由组
@@ -111,20 +130,28 @@ func main() {
 		// Agent对话路由（需要认证）
 		protectedGroup.POST("/agent/chat", handlers.AgentChat)
 
+		rpaGroup := protectedGroup.Group("/rpa/jobs")
+		rpaGroup.Use(middleware.RBACMiddleware("teacher", "admin"))
+		{
+			rpaGroup.POST("", handlers.CreateRPAJob)
+			rpaGroup.GET("", handlers.ListRPAJobs)
+			rpaGroup.GET("/:id", handlers.GetRPAJob)
+			rpaGroup.GET("/:id/browser", handlers.RPABrowserFrame)
+			rpaGroup.POST("/:id/:action", handlers.ControlRPAJob)
+		}
+
 		// 异步任务状态查询路由
 		protectedGroup.GET("/jobs/:job_id", handlers.GetJobStatus)
 
-		// Skills 管理（教师/管理员）
+		// 工具配置（教师/管理员），保留旧 /skills 接口。
 		adminGroup := protectedGroup.Group("/admin")
 		adminGroup.Use(middleware.RBACMiddleware("teacher", "admin"))
 		{
-			adminGroup.GET("/skills", handlers.ListSkillsAdmin)
-			adminGroup.PUT("/skills/:name", handlers.UpdateSkillAdmin)
-			adminGroup.POST("/skills/cache/refresh", handlers.RefreshSkillsCacheAdmin)
+			handlers.RegisterToolAdminRoutes(adminGroup)
 		}
 	}
 
-	// 11. 原有业务路由（保持原有结构）
+	// 11. 原有业务路由
 	// 布置作业路由
 	assignmentGroup := router.Group("/assignments")
 	assignmentGroup.Use(middleware.AuthMiddleware())
@@ -168,9 +195,16 @@ func main() {
 	router.Static("/uploads", "./uploads")
 
 	// 12. 启动监听在8000端口
-	port := ":8000"
+	port := backendAddress()
 	log.Println("服务器启动，监听在端口", port)
 	if err := router.Run(port); err != nil {
 		log.Fatalf("服务器启动失败：%v", err)
 	}
+}
+
+func backendAddress() string {
+	if address := os.Getenv("BACKEND_ADDR"); address != "" {
+		return address
+	}
+	return ":8000"
 }

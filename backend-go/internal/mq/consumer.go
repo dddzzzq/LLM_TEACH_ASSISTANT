@@ -211,6 +211,11 @@ func handleHomeworkTask(ctx context.Context, message []byte) error {
 		log.Printf("[Grading Consumer] ❌ 消息反序列化失败: %v", err)
 		return fmt.Errorf("failed to unmarshal homework task: %w", err)
 	}
+	var existing models.AsyncJob
+	if database.DB.First(&existing, "id = ?", task.JobID).Error == nil &&
+		(existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed) {
+		return nil // Durable terminal status prevents replay after the Redis lease expires.
+	}
 
 	// 加锁保证幂等性
 	redisClient := database.GetRedisClient()
@@ -271,14 +276,18 @@ func handleHomeworkTask(ctx context.Context, message []byte) error {
 		}
 	}()
 
-	tools.ProcessPipeline(fmt.Sprintf("%d", task.AssignmentID), task.ZipPath)
+	if err := tools.ProcessPipeline(fmt.Sprintf("%d", task.AssignmentID), task.ZipPath); err != nil {
+		updateAsyncJobStatus(task.JobID, models.JobStatusFailed, err.Error())
+		cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusFailed), err.Error())
+		return nil
+	}
 
 	log.Printf("[Grading Consumer] ✅ 批改流水线执行完成")
 
 	// 4. 处理完成，更新状态为 SUCCESS
 	log.Printf("[Grading Consumer] 📋 步骤 4/4: 更新任务状态为SUCCESS...")
-	updateAsyncJobStatus(task.JobID, models.JobStatusSuccess, "作业批改完成")
-	cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusSuccess), "作业批改完成")
+	updateAsyncJobStatus(task.JobID, models.JobStatusSuccess, "作业主批改完成，成绩池化在后台执行")
+	cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusSuccess), "作业主批改完成，成绩池化在后台执行")
 
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Printf("[Grading Consumer] 🎉 作业批改任务处理完成")
@@ -291,6 +300,11 @@ func handleExamTask(ctx context.Context, message []byte) error {
 	if err := json.Unmarshal(message, &task); err != nil {
 		log.Printf("[Grading Consumer] ❌ 消息反序列化失败: %v", err)
 		return fmt.Errorf("failed to unmarshal exam task: %w", err)
+	}
+
+	var existing models.AsyncJob
+	if database.DB.First(&existing, "id = ?", task.JobID).Error == nil && (existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed) {
+		return nil
 	}
 
 	// 加锁保证幂等性
@@ -337,7 +351,11 @@ func handleExamTask(ctx context.Context, message []byte) error {
 		}
 	}()
 
-	tools.ProcessExamSubmission(task.ExamID, task.StudentID, task.ImagePaths)
+	if err := tools.ProcessExamSubmission(task.ExamID, task.StudentID, task.ImagePaths); err != nil {
+		updateAsyncJobStatus(task.JobID, models.JobStatusFailed, err.Error())
+		cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusFailed), err.Error())
+		return nil
+	}
 
 	// 4. 处理完成，更新状态为 SUCCESS
 	updateAsyncJobStatus(task.JobID, models.JobStatusSuccess, "试卷批改完成")

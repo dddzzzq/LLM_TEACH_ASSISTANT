@@ -7,7 +7,10 @@ PYTHON="${PYTHON:-$ROOT/ai_engine_python/.venv/bin/python}"
 KAFKA_HOME="${KAFKA_HOME:-$RUNTIME_DIR/kafka_2.13-4.1.2}"
 KAFKA_CONFIG="${KAFKA_CONFIG:-$RUNTIME_DIR/kafka.properties}"
 export ROOT RUNTIME_DIR PYTHON KAFKA_HOME KAFKA_CONFIG
+export TEACH_SKILLS_DIR="${TEACH_SKILLS_DIR:-$ROOT/skills}"
 export RPA_CONTROL_TOKEN_FILE="${RPA_CONTROL_TOKEN_FILE:-$RUNTIME_DIR/.rpa-control-token}"
+export RPA_CONTROL_PORT="${RPA_CONTROL_PORT:-8765}"
+export RPA_CONTROL_URL="${RPA_CONTROL_URL:-http://127.0.0.1:$RPA_CONTROL_PORT}"
 mkdir -p "$RUNTIME_DIR"
 chmod 700 "$RUNTIME_DIR"
 [[ -x "$PYTHON" ]] || { echo "缺少 Python 环境：$PYTHON" >&2; exit 1; }
@@ -99,6 +102,30 @@ for topic in topic_grading_homework topic_grading_exam topic_rpa_fetch; do
   "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server localhost:9092 \
     --create --if-not-exists --topic "$topic" --partitions 1 --replication-factor 1 >>"$RUNTIME_DIR/kafka-topics.log" 2>&1
 done
+start rpa "$RPA_CONTROL_PORT" "$ROOT/ai_engine_python" 60 "$PYTHON" -u -m app.rpa.worker
+# A listening port may belong to the old Python decision loop. Verify the
+# authenticated execution-only protocol before starting its Go decision driver.
+"$PYTHON" - <<'PY'
+import json, os, sys
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+try:
+    token = Path(os.environ['RPA_CONTROL_TOKEN_FILE']).read_text().strip()
+    request = Request(os.environ['RPA_CONTROL_URL'].rstrip('/') + '/health',
+                      headers={'X-RPA-Token': token})
+    with urlopen(request, timeout=10) as response:
+        health = json.load(response)
+except (OSError, ValueError, HTTPError, URLError):
+    sys.exit('浏览器 Worker 健康检查失败，请检查控制地址、令牌文件及 rpa.log')
+if (not isinstance(health, dict) or health.get('ok') is not True
+        or health.get('protocol_version') != 'browser.v1'
+        or health.get('decision_driver') != 'go-eino'
+        or health.get('browser_stream') != 'browser.stream.v1'):
+    sys.exit('浏览器 Worker 与 Go/Eino 不兼容，请用 scripts/kill.bash 停止旧服务后重新启动')
+print('rpa：已验证 browser.v1 和流式浏览器，页面决策由 Go/Eino 执行')
+PY
 start ai 50051 "$ROOT/ai_engine_python" "${AI_START_TIMEOUT:-300}" "$PYTHON" -u app/grpc_server.py
 if ! port_open 8000; then
   echo '编译 Go 后端…'

@@ -181,26 +181,29 @@ const (
 
 // AsyncJob 异步任务表
 type AsyncJob struct {
-	ID          string         `json:"id" gorm:"type:char(36);primaryKey"`                   // UUID 主键
-	JobType     AsyncJobType   `json:"job_type" gorm:"type:varchar(20);not null;index"`      // 任务类型: HOMEWORK 或 EXAM
-	ReferenceID string         `json:"reference_id" gorm:"type:varchar(255);not null;index"` // 关联作业或考试ID
-	StudentID   string         `json:"student_id" gorm:"type:varchar(100);index"`            // 针对试卷的学生ID
-	Status      AsyncJobStatus `json:"status" gorm:"type:varchar(20);not null;index"`        // 状态: PENDING, PROCESSING, SUCCESS, FAILED
-	Message     string         `json:"message" gorm:"type:text"`                             // 错误信息等
-	CreatedAt   time.Time      `json:"created_at" gorm:"autoCreateTime"`                     // 创建时间
-	UpdatedAt   time.Time      `json:"updated_at" gorm:"autoUpdateTime"`                     // 更新时间
+	OwnerID      uint           `json:"owner_id,omitempty" gorm:"index;default:0"`
+	SkillName    string         `json:"skill_name,omitempty" gorm:"size:64"`
+	SkillVersion string         `json:"skill_version,omitempty" gorm:"size:64"`
+	ID           string         `json:"id" gorm:"type:char(36);primaryKey"`                   // UUID 主键
+	JobType      AsyncJobType   `json:"job_type" gorm:"type:varchar(20);not null;index"`      // 任务类型: HOMEWORK 或 EXAM
+	ReferenceID  string         `json:"reference_id" gorm:"type:varchar(255);not null;index"` // 关联作业或考试ID
+	StudentID    string         `json:"student_id" gorm:"type:varchar(100);index"`            // 针对试卷的学生ID
+	Status       AsyncJobStatus `json:"status" gorm:"type:varchar(20);not null;index"`        // 状态: PENDING, PROCESSING, SUCCESS, FAILED
+	Message      string         `json:"message" gorm:"type:text"`                             // 错误信息等
+	CreatedAt    time.Time      `json:"created_at" gorm:"autoCreateTime"`                     // 创建时间
+	UpdatedAt    time.Time      `json:"updated_at" gorm:"autoUpdateTime"`                     // 更新时间
 }
 
 // =========================
-//    Agent Skills 配置模块
+//    Agent Tools 配置模块
 // =========================
 
-// SkillDefinition 表示一个可供 LLM 调用的工具（skill）的定义配置。
-// 注意：技能的执行逻辑仍然由 Go 内置实现提供（impl_key 映射到代码实现），这里仅存放工具定义、开关与权限。
-type SkillDefinition struct {
+// ToolDefinition stores tool availability, role policy and description overrides.
+// SchemaJSON and ImplKey are legacy metadata; executors and schemas come from the registry.
+type ToolDefinition struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
 	Name         string    `json:"name" gorm:"type:varchar(128);uniqueIndex;not null"` // tool/function name
-	ImplKey      string    `json:"impl_key" gorm:"type:varchar(128);not null"`         // 内置实现标识（用于映射到代码执行器）
+	ImplKey      string    `json:"impl_key" gorm:"type:varchar(128);not null"`         // 历史元数据，不用于动态选择执行器
 	Description  string    `json:"description" gorm:"type:text;not null"`
 	SchemaJSON   string    `json:"schema_json" gorm:"type:longtext;not null"` // JSON Schema 字符串
 	Enabled      bool      `json:"enabled" gorm:"type:boolean;default:true;not null;index"`
@@ -208,3 +211,9 @@ type SkillDefinition struct {
 	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
+
+// Keep the existing table and all configured switches/roles during the naming migration.
+func (ToolDefinition) TableName() string { return "skill_definitions" }
+
+// Deprecated: use ToolDefinition. Markdown Skills are stored separately under skills/.
+type SkillDefinition = ToolDefinition

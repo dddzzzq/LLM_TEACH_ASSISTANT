@@ -148,7 +148,7 @@ export default {
    * @param {string} jobId - 任务ID
    */
   getJobStatus(jobId) {
-    return apiClient.get(`/jobs/${jobId}`);
+    return apiClient.get(`/api/jobs/${jobId}`);
   },
 
 };

@@ -13,7 +13,7 @@ import ExamDetailView from '../views/ExamDetailView.vue'
 import StudentReportView from '../views/StudentReportView.vue'
 import AIAssistantView from '../views/AIAssistantView.vue'
 import LoginView from '../views/LoginView.vue'
-import SkillsAdminView from '../views/SkillsAdminView.vue'
+import ToolsAdminView from '../views/ToolsAdminView.vue'
 
 // 路由守卫：检查用户是否已认证
 const requireAuth = (to, from, next) => {
@@ -186,11 +186,12 @@ const router = createRouter({
       beforeEnter: requireAuth
     },
 
-    // Skills 管理（教师/管理员）
+    // 工具管理（教师/管理员）；旧 URL 继续可用。
     {
-      path: '/skills-admin',
+      path: '/tools-admin',
+      alias: '/skills-admin',
       name: 'skills-admin',
-      component: SkillsAdminView,
+      component: ToolsAdminView,
       beforeEnter: checkRolePermission(['teacher', 'admin'])
     },
     

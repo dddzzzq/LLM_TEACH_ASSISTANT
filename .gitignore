@@ -37,6 +37,13 @@ playwright-report/
 test-results/
 /backend-go/grading-gateway
 /backend-go/test_build
+/docs/*
+!/docs/tool-skill-boundaries.md
+!/docs/grading-skills.md
+!/docs/tool-skill-management-design.md
+!/docs/go-eino-python-architecture-design.md
+!/docs/go-eino-python-implementation.md
+!/docs/rpa-implementation.md
 *.test
 *.out
 

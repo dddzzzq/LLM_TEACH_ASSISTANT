@@ -23,6 +23,12 @@ export default defineConfig({
     // allowedHosts: ['http://localhost:5173'],    // 5173端口网址
     // 新增 proxy 配置
     proxy: {
+      '/api/rpa/jobs': {
+        target: 'http://127.0.0.1:8000',
+        ws: true,
+        // Preserve the browser's Host so the Go WebSocket can verify Origin.
+        changeOrigin: false,
+      },
       '/api': {
         target: 'http://127.0.0.1:8000', // 目标为本地后端服务，8000端口
         changeOrigin: true, // 需要虚拟主机站点

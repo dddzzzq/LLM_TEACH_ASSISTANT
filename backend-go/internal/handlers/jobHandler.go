@@ -7,6 +7,9 @@ import (
 	"net/http"
 
 	"grading-gateway/internal/cache"
+	"grading-gateway/internal/database"
+	"grading-gateway/internal/middleware"
+	"grading-gateway/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,7 +35,35 @@ func GetJobStatus(c *gin.Context) {
 		return
 	}
 
+	userID, _ := middleware.GetUserIDFromContext(c)
+	var owned models.AsyncJob
+	ownership := database.DB.WithContext(c.Request.Context()).First(&owned, "id = ?", jobID)
+	if ownership.Error != nil && !errors.Is(ownership.Error, gorm.ErrRecordNotFound) {
+		c.JSON(503, gin.H{"error": "无法核验任务归属"})
+		return
+	}
+	if ownership.Error == nil && owned.OwnerID != 0 && owned.OwnerID != userID {
+		c.JSON(404, gin.H{"error": "任务不存在或无权访问"})
+		return
+	}
 	ctx := context.Background()
+	// The legacy generic status endpoint must not bypass RPA task ownership.
+	var rpaJob models.RPAJob
+	lookup := database.DB.Where("id = ?", jobID).First(&rpaJob)
+	if errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
+		var child models.AsyncJob
+		if database.DB.First(&child, "id = ?", jobID).Error == nil {
+			lookup = database.DB.Where("id = ?", child.ReferenceID).First(&rpaJob)
+		}
+	}
+	if lookup.Error == nil && rpaJob.UserID != userID {
+		c.JSON(404, gin.H{"error": "任务不存在或无权访问"})
+		return
+	}
+	if lookup.Error != nil && !errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
+		c.JSON(503, gin.H{"error": "暂时无法核验任务权限"})
+		return
+	}
 
 	fromRedis, fromDB, err := cache.GetJobStatusWithFallback(ctx, jobID)
 	if err != nil {

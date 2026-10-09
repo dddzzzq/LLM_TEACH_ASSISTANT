@@ -16,7 +16,12 @@ const (
 
 // publishMessage 通用消息发布函数
 func publishMessage(topic string, message interface{}) error {
-	producer := GetProducer()
+	mu.RLock()
+	currentProducer := producer
+	mu.RUnlock()
+	if currentProducer == nil {
+		return fmt.Errorf("Kafka producer unavailable")
+	}
 
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
@@ -28,7 +33,7 @@ func publishMessage(topic string, message interface{}) error {
 		Value: sarama.ByteEncoder(messageJSON),
 	}
 
-	partition, offset, err := producer.SendMessage(msg)
+	partition, offset, err := currentProducer.SendMessage(msg)
 	if err != nil {
 		return fmt.Errorf("failed to send message to Kafka topic %s: %w", topic, err)
 	}
@@ -61,8 +66,7 @@ func PublishRPAFetchTask(message RPAFetchMessage) error {
 		return err
 	}
 
-	log.Printf("RPA fetch task published successfully: job=%s, course=%s, assignment=%s",
-		message.JobID, message.CourseName, message.AssignmentName)
+	log.Printf("RPA fetch task published successfully: job=%s", message.JobID)
 	return nil
 }
 

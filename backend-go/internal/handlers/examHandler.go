@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,9 +11,9 @@ import (
 
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/grading"
 	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
-	"grading-gateway/internal/mq"
 	"grading-gateway/internal/schemas"
 
 	"github.com/gin-gonic/gin"
@@ -187,75 +186,39 @@ func AddExamQuestion(c *gin.Context) {
 
 // 提交学生试卷并开启后台并发处理
 func UploadStudentExam(c *gin.Context) {
+	actor, ok := gradingActor(c)
+	if !ok {
+		return
+	}
 	examID := c.Param("id")
+	if !checkGradingTarget(c, actor, "exam", examID) {
+		return
+	}
 	studentID := c.PostForm("student_id")
 	if studentID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "student_id 不能为空"})
+		c.JSON(400, gin.H{"error": "student_id 不能为空"})
 		return
 	}
-
 	form, err := c.MultipartForm()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无法解析表单数据"})
+	if err != nil || len(form.File["images"]) == 0 {
+		c.JSON(400, gin.H{"error": "请按页顺序上传答卷图片"})
 		return
 	}
-	files := form.File["images"]
-	if len(files) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请至少上传一张图片"})
+	uploadDir := filepath.Join("uploads", "exams", examID, uuid.NewString())
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		c.JSON(500, gin.H{"error": "无法创建上传目录"})
 		return
 	}
-
-	// 保存图片以在前端展示
-	uploadDir := filepath.Join("uploads", "exams", examID, studentID)
-	os.MkdirAll(uploadDir, os.ModePerm)
-
-	var savedPaths []string
-	for _, file := range files {
-		// 生成随机名字，防止中文乱码和重复
-		ext := filepath.Ext(file.Filename)
-		newFileName := uuid.New().String() + ext
-		savePath := filepath.Join(uploadDir, newFileName)
-
-		if err := c.SaveUploadedFile(file, savePath); err == nil {
-			savedPaths = append(savedPaths, savePath)
+	paths := []string{}
+	for _, file := range form.File["images"] {
+		path := filepath.Join(uploadDir, uuid.NewString()+filepath.Ext(file.Filename))
+		if err := c.SaveUploadedFile(file, path); err != nil {
+			c.JSON(500, gin.H{"error": "答卷图片保存失败，未提交批改"})
+			return
 		}
+		paths = append(paths, path)
 	}
-
-	// 生成 UUID 作为 jobID
-	jobID := uuid.New().String()
-	log.Printf("创建异步试卷任务: job=%s, exam=%s, student=%s", jobID, examID, studentID)
-
-	ctx := context.Background()
-
-	// 1. 在 MySQL 中创建 AsyncJob 记录，状态设为 PENDING
-	err = mq.CreateAsyncJob(jobID, models.JobTypeExam, examID, studentID)
-	if err != nil {
-		log.Printf("ERROR: Failed to create async job in database: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建异步任务失败"})
-		return
-	}
-
-	// 2. 在 Redis 中缓存初始状态
-	if err := cache.SetJobStatus(ctx, jobID, string(models.JobStatusPending), "任务已创建，等待处理"); err != nil {
-		log.Printf("WARNING: Failed to cache job status in Redis: %v", err)
-		// 不返回错误，继续执行
-	}
-
-	// 3. 调用 mq.PublishExamTask 将任务推送到 Kafka
-	if err := mq.PublishExamTask(jobID, examID, studentID, savedPaths); err != nil {
-		log.Printf("ERROR: Failed to publish exam task to Kafka: %v", err)
-		// 更新任务状态为 FAILED（先数据库后缓存）
-		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
-		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "任务提交失败，请重试"})
-		return
-	}
-
-	// 4. 修改 HTTP 响应，返回 http.StatusAccepted (202)，并在 JSON 中包含 job_id
-	c.JSON(http.StatusAccepted, gin.H{
-		"message": fmt.Sprintf("已收到学生 %s 的 %d 张试卷图片，任务已加入队列，系统将异步处理批改，请稍后通过 job_id 查询状态。", studentID, len(savedPaths)),
-		"job_id":  jobID,
-	})
+	submitGradingUpload(c, actor, grading.Request{Kind: "exam", ResourceID: examID, StudentID: studentID, ImagePaths: paths})
 }
 
 // 获取一次考试的所有学生成绩概览

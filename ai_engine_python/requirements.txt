@@ -175,3 +175,5 @@ pytesseract
 pillow
 grpcio 
 grpcio-tools
+# Interactive homework browser Worker
+playwright>=1.49,<2

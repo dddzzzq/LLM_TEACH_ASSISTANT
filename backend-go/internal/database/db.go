@@ -30,7 +30,7 @@ func InitDB(dsn string) {
 		&models.User{},
 		&models.ChatSession{},
 		&models.ChatMessage{},
-		&models.SkillDefinition{},
+		&models.ToolDefinition{},
 		&models.Assignment{},
 		&models.Submission{},
 		&models.Exam{},
@@ -40,6 +40,8 @@ func InitDB(dsn string) {
 		&models.StudentExamAnswer{},
 		&models.ExamReport{},
 		&models.AsyncJob{},
+		&models.RPAJob{},
+		&models.RPAFile{},
 	)
 	if err != nil {
 		log.Fatalf("自动迁移表结构失败: %v", err)
@@ -47,7 +49,7 @@ func InitDB(dsn string) {
 	fmt.Println("表结构映射完成！")
 }
 
-func SaveAssignment(assignmentID, studentID, studentName string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string) {
+func SaveAssignment(assignmentID, studentID, studentName string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string) error {
 	aID, _ := strconv.ParseUint(assignmentID, 10, 32)
 
 	// 再次清洗确保所有存入 DB 的字符都是绝对纯净的 UTF-8
@@ -68,5 +70,7 @@ func SaveAssignment(assignmentID, studentID, studentName string, score float64, 
 	}
 	if err := DB.Create(&submission).Error; err != nil {
 		log.Printf("[DB错误] 无法保存学生 %s 记录: %v\n", studentID, err)
+		return err
 	}
+	return nil
 }

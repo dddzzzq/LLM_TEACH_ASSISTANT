@@ -15,9 +15,9 @@ import (
 
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/grading"
 	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
-	"grading-gateway/internal/mq"
 	"grading-gateway/internal/schemas"
 	"grading-gateway/internal/tools"
 
@@ -271,71 +271,30 @@ func DeleteAssignment(c *gin.Context) {
 
 // 上传学生提交handler
 func UploadAssignment(c *gin.Context) {
+	actor, ok := gradingActor(c)
+	if !ok {
+		return
+	}
 	assignmentID := c.Param("id")
-
-	// 读取上传的batchFile
+	if !checkGradingTarget(c, actor, "homework", assignmentID) {
+		return
+	}
 	file, err := c.FormFile("batch_file")
 	if err != nil {
-		log.Printf("上传压缩包错误：%v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("无法读取的压缩包：%v", err)})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "请上传本次作业 ZIP"})
 		return
 	}
-
-	if filepath.Ext(file.Filename) != ".zip" {
-		log.Printf("上传压缩包错误：仅支持zip压缩包")
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "只允许上传 .zip 格式的压缩包"})
-		return
-	}
-
-	// 保存压缩文件以供读取
 	uploadDir := "./uploads/assignments"
-	// 确保保存路径存在
-	os.MkdirAll(uploadDir, os.ModePerm)
-	savePath := filepath.Join(uploadDir, fmt.Sprintf("assignment_%s_%s", assignmentID, file.Filename))
-
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		c.JSON(500, gin.H{"detail": "无法创建上传目录"})
+		return
+	}
+	savePath := filepath.Join(uploadDir, fmt.Sprintf("assignment_%s_%s%s", assignmentID, uuid.NewString(), filepath.Ext(file.Filename)))
 	if err := c.SaveUploadedFile(file, savePath); err != nil {
-		log.Printf("保存上传压缩文件错误：%v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "文件保存失败"})
+		c.JSON(500, gin.H{"detail": "文件保存失败"})
 		return
 	}
-
-	// 生成 UUID 作为 jobID
-	jobID := uuid.New().String()
-	log.Printf("创建异步作业任务: job=%s, assignment=%s", jobID, assignmentID)
-
-	ctx := context.Background()
-
-	// 1. 在 MySQL 中创建 AsyncJob 记录，状态设为 PENDING
-	err = mq.CreateAsyncJob(jobID, models.JobTypeHomework, assignmentID, "")
-	if err != nil {
-		log.Printf("ERROR: Failed to create async job in database: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "创建异步任务失败"})
-		return
-	}
-
-	// 2. 在 Redis 中缓存初始状态
-	if err := cache.SetJobStatus(ctx, jobID, string(models.JobStatusPending), "任务已创建，等待处理"); err != nil {
-		log.Printf("WARNING: Failed to cache job status in Redis: %v", err)
-		// 不返回错误，继续执行
-	}
-
-	// 3. 调用 mq.PublishHomeworkTask 将任务推送到 Kafka
-	assignmentIDUint, _ := strconv.ParseUint(assignmentID, 10, 32)
-	if err := mq.PublishHomeworkTask(jobID, uint(assignmentIDUint), savePath); err != nil {
-		log.Printf("ERROR: Failed to publish homework task to Kafka: %v", err)
-		// 更新任务状态为 FAILED（先数据库后缓存）
-		mq.UpdateAsyncJobStatus(jobID, models.JobStatusFailed, "发布到消息队列失败")
-		cache.SetJobStatus(ctx, jobID, string(models.JobStatusFailed), "发布到消息队列失败")
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "任务提交失败，请重试"})
-		return
-	}
-
-	// 4. 修改 HTTP 响应，返回 http.StatusAccepted (202)，并在 JSON 中包含 job_id
-	c.JSON(http.StatusAccepted, gin.H{
-		"message":   "文件已成功接收！任务已加入队列，系统将异步处理批改，请稍后通过 job_id 查询状态。",
-		"job_id":    jobID,
-		"file_path": savePath,
-	})
+	submitGradingUpload(c, actor, grading.Request{Kind: "homework", ResourceID: assignmentID, FilePath: savePath})
 }
 
 // 一键清空所有学生提交handler
