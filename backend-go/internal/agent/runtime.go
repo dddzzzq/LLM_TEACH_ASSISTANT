@@ -15,7 +15,7 @@ type RunResult struct {
 	LoadedSkills map[string]string
 }
 
-// RunDialogue is the application boundary; Eino owns the model/tool loop.
+// RunDialogue 是业务边界; Eino 控制整个 Agent/Tool Loop.
 func RunDialogue(ctx context.Context, system, user, role, username string, registry *ToolRegistry, definitions []map[string]interface{}, catalog SkillCatalog, call ModelCall) (RunResult, error) {
 	g := newGateway(role, username, registry)
 	if key, ok := ctx.Value(requestKeyContext{}).(string); ok && key != "" && len(key) <= 128 {

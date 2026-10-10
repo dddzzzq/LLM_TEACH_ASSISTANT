@@ -29,9 +29,9 @@ type AgentChatResponse struct {
 	LoadedSkills map[string]string `json:"loaded_skills,omitempty"`
 }
 
-// AgentChat 处理前端对话请求，由新的 Go Agent 引擎接管
+// AgentChat 处理前端对话请求，由 Go Eino Agent 引擎接管
 func AgentChat(c *gin.Context) {
-	// 获取当前用户ID（需要 AuthMiddleware）
+	// 获取当前用户ID（经过 AuthMiddleware 鉴权）
 	userID, err := middleware.GetUserIDFromContext(c)
 	if err != nil {
 		log.Printf("AgentChat: 未授权访问: %v", err)
