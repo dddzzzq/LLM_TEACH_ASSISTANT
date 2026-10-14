@@ -1,5 +1,7 @@
 # LLM_TEACH_ASSISTANT
 
+Windows 本机部署、D 盘存储布局与 uv 环境说明见 [WINDOWS_DEPLOYMENT.md](WINDOWS_DEPLOYMENT.md)。
+
 智能教学助理，支持从教务平台下载作业并自动批改、试卷主观题批改、学术诚信分析和对话式成绩查询。
 
 当前版本由 **Go 业务后端 + Python AI 计算服务 + Vue 3 前端**组成。Go 负责 HTTP 接口、认证、数据管理、Eino 主助手与页面 Agent、工具调用和异步任务调度；Python 通过 gRPC 提供 OCR、查重、AIGC 检测与评分，独立的 RPA Worker 负责人工协作浏览器及附件下载。

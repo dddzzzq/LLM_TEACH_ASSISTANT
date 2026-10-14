@@ -2,6 +2,7 @@ import re
 import json
 import time
 import os
+import math
 import requests
 import asyncio
 from ..core.config import settings
@@ -33,7 +34,7 @@ class DeepSeekService:
 
         if response_format:
             payload["response_format"] = response_format
-        
+
         max_retries = 3
         backoff_factor = 2
         response = None
@@ -41,14 +42,14 @@ class DeepSeekService:
         for attempt in range(max_retries):
             try:
                 response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=180)
-                response.raise_for_status() 
-                
+                response.raise_for_status()
+
                 # 强制UTF-8编码
                 if response.encoding is None or response.encoding.lower() == 'iso-8859-1':
                     response.encoding = 'utf-8'
-                
+
                 response_text = response.text
-                
+
                 if not response_text.strip():
                     raise ValueError("API返回了空响应内容")
 
@@ -63,7 +64,7 @@ class DeepSeekService:
                     print("============================================================")
 
                 print(f"调用DeepSeek API时出错 (第 {attempt + 1} 次尝试): {e}")
-                
+
                 if attempt < max_retries - 1:
                     wait_time = backoff_factor ** attempt
                     print(f"将在 {wait_time} 秒后进行第 {attempt + 2} 次尝试...")
@@ -77,7 +78,7 @@ class DeepSeekService:
     def _call_api(self, user_prompt: str, system_prompt: str, temperature: float = 0.2, response_format: Optional[Dict[str, str]] = None) -> Optional[str]:
         """一个通用的、私有的API调用方法，增加自动重试和对不完整/无效JSON响应、多种编码格式的安全处理。"""
         full_response = self._call_api_with_usage(user_prompt, system_prompt, temperature, response_format)
-        
+
         if full_response:
             try:
                 return full_response['choices'][0]['message']['content']
@@ -85,22 +86,22 @@ class DeepSeekService:
                 print(f"警告: LLM API返回了不完整的JSON数据: {full_response}")
                 return None
         return None
-    
+
     def _call_api_json(self, user_prompt: str, system_prompt: str, temperature: float = 0.1) -> Optional[Dict[str, Any]]:
         """
         调用API并期望返回一个JSON对象。
         """
         response_str = self._call_api(
-            user_prompt, 
-            system_prompt, 
+            user_prompt,
+            system_prompt,
             temperature,
             response_format={"type": "json_object"}
         )
-        
+
         if not response_str:
             print("API调用未返回任何内容")
             return None
-            
+
         try:
             # response_format="json_object" 模式会确保返回的是一个合法的JSON字符串
             return json.loads(response_str)
@@ -113,13 +114,13 @@ class DeepSeekService:
                     return json.loads(json_match.group(1))
                 except json.JSONDecodeError:
                     print("从Markdown中提取JSON也失败了")
-                    
+
         return None
 
-    
+
     def analyze_plagiarism(self, content1: str, content2: str, content_type: str) -> Optional[Dict]:
         system_prompt = "你是一个客观、精准的分析助手。你的输出必须是一个单一、有效的JSON对象，不能包含任何其他内容。"
-        
+
         if content_type == 'text':
             user_prompt = self._get_text_plagiarism_prompt(content1, content2)
         elif content_type == 'code':
@@ -132,11 +133,11 @@ class DeepSeekService:
 
         try:
             full_response = self._call_api_with_usage(user_prompt, system_prompt, 0.1, response_format={"type": "json_object"})
-            
+
             if full_response:
                 response_str = full_response.get('choices', [{}])[0].get('message', {}).get('content')
                 usage_data = full_response.get('usage', {})
-                
+
                 usage_info = {
                     "prompt_tokens": usage_data.get("prompt_tokens", 0),
                     "completion_tokens": usage_data.get("completion_tokens", 0),
@@ -148,15 +149,15 @@ class DeepSeekService:
 
         except Exception as e:
             print(f"LLM抄袭分析时出错: {e}")
-        
+
         return analysis_result, usage_info
-    
-    
+
+
     def analyze_code_doc_match(self, code_content: str, doc_content: str, assignment_requirement: str) -> Tuple[Optional[Dict], Dict]:
         """调用LLM来评估代码和文档的匹配度，结合作业要求过滤无关代码。"""
-        
+
         system_prompt = "你是一位经验丰富的计算机科学课程助教。你的输出必须是一个单一、有效的JSON对象，不能包含任何其他内容。"
-        
+
         # 修改包含作业要求的新prompt
         user_prompt = f"""
         你是一位经验丰富的计算机科学课程助教，你的任务是评估学生提交的作业中，代码和项目文档之间的一致性和匹配程度。
@@ -176,7 +177,7 @@ class DeepSeekService:
         ```
 
         请基于【作业具体要求】，对【项目代码】和【项目文档】进行综合评估。
-        
+
         **重要指令**：
         1.  **聚焦核心任务**：学生提交的代码可能包含大量库函数、框架自动生成文件或非作业要求的辅助代码。请**忽略**这些无关部分，只检查**实现【作业具体要求】的核心逻辑代码**是否与文档一致。
         2.  **评估维度**：
@@ -219,11 +220,11 @@ class DeepSeekService:
             print(f"LLM代码-文档匹配度分析时出错: {e}")
 
         return analysis_result, usage_info
-    
+
     def grade_homework(self, question: str, rubric: dict, student_answer: str, plagiarism_reports: List[PlagiarismReport] = [], aigc_report: Optional[AIGCReport] = None, code_doc_match_report: Optional[CodeDocMatchReport] = None) -> dict:
-        
+
         # 由于作业的特殊性质，先不将抄袭检测结果交给大语言模型，否则会大幅影响评分结果
-        
+
         plagiarism_context = ""
         if plagiarism_reports:
             highest_plagiarism_score = 0
@@ -232,23 +233,23 @@ class DeepSeekService:
                 if report.llm_analysis and report.llm_analysis.similarity_score > highest_plagiarism_score:
                     highest_plagiarism_score = report.llm_analysis.similarity_score
                     worst_report = report
-            
+
             if highest_plagiarism_score > 95 and worst_report:
                  plagiarism_context = f"""
                 [学术诚信警报]:
                 AI深度分析表明，本次提交与学生'{worst_report.similar_to}'的'{worst_report.content_type}'部分存在高度相似（{highest_plagiarism_score}/100分）。
                 分析理由: {worst_report.llm_analysis.reasoning}
-                
+
                 """
-        
+
         aigc_context = ""
         if aigc_report and aigc_report.ai_probability > 0.8:
             aigc_context = f"""
             [AIGC内容警报]:
             检测模型发现，这份作业的'{aigc_report.detection_source}'部分有 {aigc_report.ai_probability * 100:.1f}% 的可能性由AI生成。
-            
+
             """
-        
+
         # 新增匹配报告
         match_context = ""
         if code_doc_match_report and code_doc_match_report.score < 70:
@@ -257,7 +258,7 @@ class DeepSeekService:
             AI分析发现，代码与文档的匹配度较低（{code_doc_match_report.score}/100分）。
             理由: {code_doc_match_report.reasoning}
             这可能表明学生未认真撰写文档，请在评分时予以考虑。
-            
+
             """
 
         system_prompt = (
@@ -268,32 +269,32 @@ class DeepSeekService:
 
         user_prompt = f"""
         请为学生的项目作业进行评分。
-        
+
         [任务信息]
         题目: {question}
         评分细则: {json.dumps(rubric, ensure_ascii=False)}
-        
+
         [参考信息]
         {plagiarism_context}
         {aigc_context}
         {match_context}
-        
+
         [评分指导原则 (区分度指南)]
         请依据以下标准进行客观评分，确保分数能真实反映作业质量差异，分数分布在70-100之间：
-        
-        - **90-100分 (优秀)**: 
+
+        - **90-100分 (优秀)**:
           完成度极高，代码规范，逻辑清晰，并且有明显的亮点（如代码结构优雅、文档详尽、有额外的优化思考）。
           *不要吝啬给高分，但前提是作业真的好，而不是因为习惯性好评。*
-          
-        - **80-89分 (良好/符合预期)**: 
+
+        - **80-89分 (良好/符合预期)**:
           这是大多数认真完成作业的学生的得分区间。
           功能全部实现，没有重大Bug，文档也写了。虽然代码可能不够惊艳，或者有一些小的瑕疵（如变量命名一般、注释较少），但整体是合格且扎实的。
-          
-        - **70-79分 (中等/勉强达标)**: 
+
+        - **70-79分 (中等/勉强达标)**:
           作业做完了，程序也能跑，但质量一般。
           存在明显的“应付”痕迹，例如：代码杂乱无章、硬编码严重、文档寥寥数语或逻辑不通。
-          
-        
+
+
         [评分逻辑]
         1. **从85分起评**: 假设一份完成了所有基本要求的作业是85分。
         2. **加分项**: 代码整洁、逻辑严密、有扩展功能 -> 往90+加分。
@@ -306,14 +307,14 @@ class DeepSeekService:
         2. **干扰噪音**：实验生成的raw data（如大量的.txt数据行）、程序日志(.log)、或者是上传的测试数据集等。
         [内容过滤与图片识别指令 - 重要]
         学生提交的内容是多个文件的合并文本，请注意以下结构：
-        
+
         1. **核心材料**：源代码文件、Markdown/Word文档。这是评分的主要依据。
-        
+
         2. **图片与截图 (OCR识别)**：
            系统已自动将文档内嵌图片（Word/PDF）或独立图片文件通过OCR转换为文本，**通常附加在提交内容的末尾**。
            - 标记特征：通常以 `--- [图片文件内容 (OCR): ...` 或 `[内嵌图片 ...]` 开头。
            - 注意：但可能有ocr识别错误或者背景杂乱，请你酌情查看这部分内容
-        
+
         **请务必在评分时执行以下操作：**
         - **自动忽略**那些显然是机器生成的、纯数据堆砌的文本（例如长篇的数字列表、无意义的日志）。
         - **只关注**体现学生逻辑的源代码和体现学生思考的文档/注释。
@@ -321,7 +322,7 @@ class DeepSeekService:
 
         [学生提交内容]
         {json.dumps(student_answer[:settings.MAX_STUDENT_ANSWER_LENGTH])}
-        
+
         请严格按照以下JSON格式提供你的最终评估:
         {{
           "total_score": <number>,
@@ -331,7 +332,7 @@ class DeepSeekService:
           ]
         }}
         """
-        
+
         try:
             response_json = self._call_api_json(user_prompt, system_prompt, 0.1)
             if response_json:
@@ -352,13 +353,13 @@ class DeepSeekService:
         3.  列出1-3个最能支撑你结论的**核心文本片段**作为证据。
 
         [报告 A]:
-        
+
         {escaped_text1}
-        
+
         [报告 B]:
-        
+
         {escaped_text2}
-        
+
         请严格按照以下JSON格式返回你的分析报告:
         {{
           "similarity_score": <number>,
@@ -380,13 +381,13 @@ class DeepSeekService:
         3.  列出1-3个最能支撑你结论的**核心文本片段**作为证据。
 
         [报告 A]:
-        
+
         {escaped_code1}
-        
+
         [报告 B]:
-        
+
         {escaped_code2}
-        
+
         请严格按照以下JSON格式返回你的分析报告:
         {{
           "similarity_score": <number>,
@@ -396,7 +397,7 @@ class DeepSeekService:
           ]
         }}
         """
-    
+
     async def identify_question_number(self, ocr_text: str, question_list: str) -> int:
         """
         判断OCR文本最可能属于试卷中的哪一道题。
@@ -407,16 +408,16 @@ class DeepSeekService:
             "你的任务是根据提供的OCR文本片段和试卷题目列表，判断这段文本最可能是对哪道题的回答。"
             "请务必以 JSON 格式输出结果 (Must output JSON)."
         )
-        
+
         user_prompt = f"""
         [试卷题目列表]:
         {question_list}
-        
+
         [图片OCR文本]:
-        
-        {ocr_text[:2000]} 
-        
-        
+
+        {ocr_text[:2000]}
+
+
         [任务]:
         请分析[图片OCR文本]的内容，它看起来是针对[试卷题目列表]中哪一道题的回答？
         请注意：
@@ -424,14 +425,14 @@ class DeepSeekService:
         2. 如果没有明确标识，请根据语义内容匹配题目。
         3. 如果文本包含多道题的回答，请返回第一道出现的题号。
         4. 如果完全无关或无法识别，返回0。
-        
+
         [输出格式]:
         请严格返回如下 JSON 格式：
         {{
             "question_number": <int>
         }}
         """
-        
+
         try:
             response_json = await asyncio.to_thread(
                 self._call_api_json,
@@ -446,7 +447,7 @@ class DeepSeekService:
         return 0
 
 
-    #  试卷评分新方法 
+    #  试卷评分新方法
 
     async def grade_exam_question(self, question: str, standard_answer: str, rubric: str, max_score: float, full_student_text: str) -> Optional[Dict[str, Any]]:
         """
@@ -460,7 +461,7 @@ class DeepSeekService:
             "**核心指令**：为了保证评分的准确性和逻辑一致性，请务必**先进行详细的分析和点评（Thinking）**，仔细推导每一步的得分和扣分，**最后**再根据你的分析总结出最终得分。"
             "你必须严格按照指定的JSON格式返回结果。"
         )
-        
+
         user_prompt = f"""
         请评分以下题目：
 
@@ -478,9 +479,9 @@ class DeepSeekService:
 
         [学生试卷完整OCR文本]:
         (学生在试卷上所有题目的作答内容都在这里，请仔细查找对应的作答区域)
-        
+
         {full_student_text[:50000]}
-        
+
 
         [评分原则 / Grading Philosophy]:
         1.  **思维链 (Chain of Thought)**: 请不要直接给出分数。**必须先在 'feedback' 字段中详细写出你的思考过程**。逐条对比评分标准，说明学生答对了哪些点，答错了哪些点，哪些地方因为OCR错误被纠正了。
@@ -501,21 +502,21 @@ class DeepSeekService:
           "score": <number, 最终得分，必须与feedback中的计算一致>
         }}
         """
-        
+
         try:
             # 这是一个异步方法，所以我们使用 await
             response_json = await asyncio.to_thread(
                 self._call_api_json,
-                user_prompt, 
+                user_prompt,
                 system_prompt,
                 0.1
             )
-            
+
             # 确保分数不会超过最大分
             if response_json and 'score' in response_json:
                 # 再次做一层防御性编程：确保分数不超过max_score
                 response_json['score'] = min(max_score, float(response_json['score']))
-                
+
             return response_json
         except Exception as e:
             print(f"调用LLM批改题目时出错: {e}")
@@ -531,15 +532,15 @@ class DeepSeekService:
             "报告应简明扼要，重点突出知识点的掌握情况和改进方向。"
             "直接返回报告文本，不要使用JSON。"
         )
-        
+
         feedback_str = "\n".join(all_feedback)
-        
+
         user_prompt = f"""
         以下是学生在一张试卷上所有题目的得分和评语列表：
 
-        
+
         {feedback_str}
-        
+
 
         [任务]:
         请根据以上信息，为该学生撰写一份100-200字的试卷总结报告，包括：
@@ -549,13 +550,13 @@ class DeepSeekService:
         [输出]:
         请直接输出报告正文（纯文本）。
         """
-        
+
         try:
             # 这是一个异步方法，所以我们使用 await
             response_text = await asyncio.to_thread(
                 self._call_api,
-                user_prompt, 
-                system_prompt, 
+                user_prompt,
+                system_prompt,
                 0.5 # 总结时温度可以稍高，增加多样性
             )
             return response_text
@@ -563,7 +564,7 @@ class DeepSeekService:
             print(f"调用LLM生成总结报告时出错: {e}")
             return None
 
-    async def pool_scores(self, assignment_id: str, scores_data_json: str) -> Optional[Dict[str, Any]]:
+    async def pool_scores(self, assignment_id: str, scores_data_json: str) -> Optional[List[Dict[str, Any]]]:
         """
         对批量成绩进行池化处理
         """
@@ -574,7 +575,7 @@ class DeepSeekService:
 2. 调整后的最低分不得低于 70 分。
 3. 学生的成绩需要有区分度，不能全都一个分数。
 4. 调整后的整体分数呈现近似正态分布，均值应控制在 85 分左右。"""
-        
+
         try:
             scores_data = json.loads(scores_data_json)
         except json.JSONDecodeError as e:
@@ -596,21 +597,22 @@ class DeepSeekService:
 4. 综合评价参考：在调整时，可结合学生的原始简要评价生成 `pool_reason`。
 
 【输出要求】:
-请只输出一个严格合法的 JSON 数组，不要包含任何 markdown 标记（如 ```json），包含每个学生的以下字段：
+请只输出一个严格合法的 JSON 对象，唯一字段 `pooled_results` 的值是数组。
+不要包含任何 markdown 标记（如 ```json），数组包含每个学生的以下字段：
 - `student_id`: 学生ID
 - `original_score`: 原始分数
 - `pooled_score`: 池化后的新分数（保留2位小数）
 - `pool_reason`: 调整理由，限一句话（中文，如"原始最高分锚定为100分"或"依正态分布及相对排名映射至均值区间"）
 
 示例格式：
-[
+{{"pooled_results": [
   {{
     "student_id": "23009200042",
     "original_score": 60.5,
     "pooled_score": 78.5,
     "pool_reason": "依正态分布模型映射，提升低分段表现"
   }}
-]
+]}}
 """
         try:
             response_json = await asyncio.to_thread(
@@ -619,7 +621,24 @@ class DeepSeekService:
                 system_prompt,
                 0.1 # 保持较低的 temperature 以确保格式严格和映射逻辑稳定
             )
-            return response_json
+            # JSON object mode requires an object at the API boundary. The RPC
+            # contract consumed by Go remains an array of student results.
+            results = response_json.get("pooled_results") if isinstance(response_json, dict) else response_json
+            if not isinstance(results, list) or not results:
+                raise ValueError("成绩池化响应缺少 pooled_results 数组")
+            expected_ids = {str(item["student_id"]) for item in scores_data}
+            returned_ids = [str(item["student_id"]) for item in results]
+            if len(returned_ids) != len(expected_ids) or set(returned_ids) != expected_ids:
+                raise ValueError("成绩池化响应的学生名单与输入不一致")
+            for item in results:
+                for field in ("original_score", "pooled_score"):
+                    score = item[field]
+                    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+                        raise ValueError("成绩池化响应包含无效分数")
+                if not 0 <= item["pooled_score"] <= 100 or not isinstance(item["pool_reason"], str):
+                    raise ValueError("成绩池化响应包含无效分数或理由")
+                item["student_id"] = str(item["student_id"])
+            return results
         except Exception as e:
             print(f"调用LLM进行成绩池化时出错: {e}")
             return None

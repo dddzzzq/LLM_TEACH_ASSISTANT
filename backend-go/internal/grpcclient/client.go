@@ -3,6 +3,7 @@ package grpcclient
 import (
 	"grading-gateway/pb"
 	"log"
+	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,7 +16,11 @@ var conn *grpc.ClientConn
 func InitGrpcClient() {
 	var err error
 	// 后续可考虑负载均衡策略
-	conn, err = grpc.Dial("localhost:50051",
+	address := os.Getenv("AI_GRPC_ADDR")
+	if address == "" {
+		address = "localhost:50051"
+	}
+	conn, err = grpc.Dial(address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(1024*1024*50), // 50MB
@@ -26,7 +31,7 @@ func InitGrpcClient() {
 		log.Fatalf("无法连接至 Python AI 节点: %v", err)
 	}
 	Client = pb.NewComputeServiceClient(conn)
-	log.Println("成功连接到 Python gRPC 服务 (localhost:50051)")
+	log.Printf("Python gRPC 客户端已配置 (%s)，将在首次 RPC 时验证连接", address)
 }
 
 // CloseGrpcClient 关闭连接

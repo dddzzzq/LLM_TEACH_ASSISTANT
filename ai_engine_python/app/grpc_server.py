@@ -53,11 +53,11 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(request.file_content)
                 tmp_path = tmp.name
-                
+
             ocr_text = ocr_service_instance.get_concatenated_text([tmp_path])
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                
+
             return pb2.ExtractResponse(text_content=ocr_text)
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -73,16 +73,16 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
 
             llm_analysis_cache = {}
             all_suspicious_pairs = [(*pair, 'text') for pair in suspicious_text_pairs] + [(*pair, 'code') for pair in suspicious_code_pairs]
-            
+
             for i, (s1, s2, initial_score, content_type) in enumerate(all_suspicious_pairs, 1):
                 content1 = separated_contents.get(s1, {}).get(content_type)
                 content2 = separated_contents.get(s2, {}).get(content_type)
                 if not content1 or not content2: continue
-                
+
                 llm_analysis, _ = deepseek_service.analyze_plagiarism(content1, content2, content_type)
                 if llm_analysis:
                     llm_analysis_cache[(s1, s2, content_type)] = {'initial_score': initial_score, 'llm_analysis': llm_analysis}
-            
+
             final_plag_data = {sid: [] for sid in student_texts.keys()}
             for (s1, s2, content_type), analysis_result in llm_analysis_cache.items():
                 llm_data = analysis_result.get('llm_analysis')
@@ -115,7 +115,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             if aigc_report_raw and "ai_probability" in aigc_report_raw:
                 try: aigc_report = AIGCReport(**aigc_report_raw)
                 except: pass
-            
+
             prose_content, code_content = aigc_detector_service._separate_content(request.student_text)
             match_analysis, _ = deepseek_service.analyze_code_doc_match(code_content=code_content, doc_content=prose_content, assignment_requirement=request.question)
             code_doc_match_report = None
@@ -124,7 +124,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 except: pass
 
             ai_result = deepseek_service.grade_homework(question=request.question, rubric=rubric, student_answer=request.student_text, plagiarism_reports=plag_reports, aigc_report=aigc_report, code_doc_match_report=code_doc_match_report)
-            
+
             return pb2.GradeResponse(total_score=ai_result.get("total_score", -1.0), feedback=ai_result.get("overall_feedback", "评分失败"), merged_content=request.student_text, code_doc_match_report_json=json.dumps(match_analysis, ensure_ascii=False) if match_analysis else "{}")
         except Exception as e:
             return pb2.GradeResponse(total_score=-1.0, feedback=f"评分失败: {str(e)}")
@@ -136,13 +136,13 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             logging.info("试卷批改节点: 开始识别OCR文本归属题号...")
             predicted_q_num = asyncio.run(
                 deepseek_service.identify_question_number(
-                    ocr_text=request.ocr_text, 
+                    ocr_text=request.ocr_text,
                     question_list=request.question_list_str
                 )
             )
             logging.info(f"[题号识别] 完成，识别结果: 第 {predicted_q_num} 题, 耗时: {time.time()-start_time:.2f}s")
             return pb2.IdentifyQuestionResponse(question_number=predicted_q_num)
-        
+
         except Exception as e:
             logging.error(f"[IdentifyQuestionNumber] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -162,17 +162,17 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                     full_student_text=request.full_student_text
                 )
             )
-            
+
             if not grading_result:
                 raise ValueError("大模型未能返回有效的批改JSON数据")
-                
+
             logging.info(f"[单题批改] 完成，得分: {grading_result.get('score', 0)}, 耗时: {time.time()-start_time:.2f}s")
             return pb2.GradeExamQuestionResponse(
                 score=float(grading_result.get("score", 0.0)),
                 feedback=grading_result.get("feedback", "无评语"),
                 student_answer_extracted=grading_result.get("student_answer_extracted", "未能提取到答案")
             )
-            
+
         except Exception as e:
             logging.error(f"[GradeExamQuestion] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -188,7 +188,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             )
             logging.info(f"[试卷总评] 完成，耗时: {time.time()-start_time:.2f}s")
             return pb2.SummarizeExamResponse(summary_report=summary_report or "生成总结报告失败。")
-            
+
         except Exception as e:
             logging.error(f"[SummarizeExam] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -199,7 +199,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
         start_time = time.time()
         try:
             logging.info(f"成绩池化节点: 开始对作业 {request.assignment_id} 进行成绩池化处理...")
-            
+
             # 调用DeepSeek服务进行成绩池化
             pooled_results = asyncio.run(
                 deepseek_service.pool_scores(
@@ -207,7 +207,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                     scores_data_json=request.scores_data_json
                 )
             )
-            
+
             if not pooled_results:
                 logging.error(f"[PoolScores] 大模型未能返回有效的池化结果")
                 return pb2.PoolScoresResponse(
@@ -215,14 +215,14 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                     pooled_results_json="{}",
                     error_message="AI成绩池化处理失败"
                 )
-            
+
             logging.info(f"[成绩池化] 完成，处理了 {len(pooled_results) if isinstance(pooled_results, list) else '未知'} 条记录，耗时: {time.time()-start_time:.2f}s")
             return pb2.PoolScoresResponse(
                 success=True,
                 pooled_results_json=json.dumps(pooled_results, ensure_ascii=False),
                 error_message=""
             )
-            
+
         except Exception as e:
             logging.error(f"[PoolScores] 失败: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -241,7 +241,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
             logging.info(f"  - 用户名: {request.username}")
             logging.info(f"  - 课程名称: {request.course_name}")
             logging.info(f"  - 作业名称: {request.assignment_name}")
-            
+
             # 调用RPA工具执行作业下载
             result = fetch_homework_sync(
                 username=request.username,
@@ -249,14 +249,14 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 course_name=request.course_name,
                 assignment_name=request.assignment_name
             )
-            
+
             # 判断返回结果类型
             if isinstance(result, list):
                 # 成功返回文件路径列表
                 logging.info(f"[FetchPortalHomework] RPA执行成功，获取到 {len(result)} 个文件")
                 for idx, file_path in enumerate(result, 1):
                     logging.info(f"  - 文件 {idx}: {file_path}")
-                
+
                 return pb2.FetchResponse(
                     success=True,
                     message=f"成功下载 {len(result)} 个作业附件",
@@ -270,7 +270,7 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                     message=str(result),
                     file_paths=[]
                 )
-        
+
         except Exception as e:
             logging.error(f"[FetchPortalHomework] 接口异常: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -288,12 +288,14 @@ def serve():
     _ = aigc_detector_service
     _ = plagiarism_service
 
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=int(os.environ.get('AI_GRPC_WORKERS', '10'))))
     pb2_grpc.add_ComputeServiceServicer_to_server(ComputeServicer(), server)
-    
-    server.add_insecure_port('0.0.0.0:50051')
+
+    address = os.environ.get('AI_GRPC_BIND', '127.0.0.1:50051')
+    if not server.add_insecure_port(address):
+        raise RuntimeError(f'无法监听 AI gRPC 地址：{address}')
     server.start()
-    logging.info("Python AI 节点启动成功，纯粹作为推理机监听 50051 端口...")
+    logging.info("Python AI 节点启动成功，监听 %s", address)
     server.wait_for_termination()
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassifica
 from typing import Dict, Any, Tuple
 import os
 import re
+from ..core.paths import model_path, model_cache_dir
 
 class AIGCDetectorService:
     """
@@ -15,15 +16,14 @@ class AIGCDetectorService:
         初始化服务并加载两个专门的模型和分词器。
         """
         self.device = 0 if torch.cuda.is_available() else -1
-        
+
         # --- 定义两个模型 ---
         # 请确保这两个路径下的模型 config.json 标签定义一致 (0=Human, 1=ChatGPT)
-        self.prose_model_name = r"/root/autodl-tmp/dzq/models/chatgpt-detector-roberta-chinese" # 用于文字报告
-        self.code_model_name = r"/root/autodl-tmp/dzq/models/chatgpt-detector-roberta"       # 用于源代码
-        
-        cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
-        os.makedirs(cache_dir, exist_ok=True)
-        
+        self.prose_model_name = model_path("chatgpt-detector-roberta-chinese")
+        self.code_model_name = model_path("chatgpt-detector-roberta")
+
+        cache_dir = model_cache_dir()
+
         # --- 加载两个分类器 ---
         self.prose_classifier = self._load_classifier(self.prose_model_name, cache_dir)
         self.code_classifier = self._load_classifier(self.code_model_name, cache_dir)
@@ -34,9 +34,9 @@ class AIGCDetectorService:
         try:
             tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
             model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=cache_dir)
-            
+
             classifier = pipeline(
-                "text-classification", 
+                "text-classification",
                 model=model,
                 tokenizer=tokenizer,
                 device=self.device
@@ -53,10 +53,10 @@ class AIGCDetectorService:
         """
         prose_parts = []
         code_parts = []
-        
+
         prose_extensions = ['.txt', '.md', '.docx', '.pdf', '.doc']
         file_blocks = re.split(r'--- 文件开始: (.*?) ---', merged_text)
-        
+
         if len(file_blocks) < 2:
             return merged_text, ""
 
@@ -64,13 +64,13 @@ class AIGCDetectorService:
             filename = file_blocks[i].strip()
             content = file_blocks[i+1]
             content = re.sub(r'--- 文件结束: (.*?) ---\n\n', '', content)
-            
+
             _, ext = os.path.splitext(filename)
             if ext.lower() in prose_extensions:
                 prose_parts.append(content)
             else:
                 code_parts.append(content)
-                
+
         return "\n".join(prose_parts), "\n".join(code_parts)
 
     def _detect_single_part(self, text: str, content_type: str) -> Dict[str, Any]:
@@ -82,22 +82,22 @@ class AIGCDetectorService:
 
         if not classifier:
             return {"error": f"{content_type.capitalize()} 模型不可用。"}
-        
+
         if not text or len(text.strip()) < 50:
             return {"predicted_label": "人类写作", "confidence": 1.0, "ai_probability": 0.0}
 
         try:
             prediction = classifier(text, truncation=True, max_length=512)[0]
-            
+
             label = prediction['label']
             score = prediction['score']
 
             # 根据chatgpt-detector-roberta官方文档，更改得分逻辑，更改前后端交互的数据格式问题
-            
-            ai_labels = ['ChatGPT', 'LABEL_1'] 
-            
+
+            ai_labels = ['ChatGPT', 'LABEL_1']
+
             is_ai = label in ai_labels
-            
+
             if is_ai:
                 final_label = "AI生成"
                 # 如果预测是AI，那么当前的 score 就是 AI 的概率
@@ -122,13 +122,13 @@ class AIGCDetectorService:
         检测合并后的文本。
         """
         prose_content, code_content = self._separate_content(merged_text)
-        
+
         prose_result = self._detect_single_part(prose_content, 'prose')
         code_result = self._detect_single_part(code_content, 'code')
-        
+
         if "error" in prose_result: return prose_result
         if "error" in code_result: return code_result
-        
+
         # 返回AI概率更高的那个结果作为最终判决
         if prose_result['ai_probability'] >= code_result['ai_probability']:
             final_result = prose_result
@@ -136,7 +136,7 @@ class AIGCDetectorService:
         else:
             final_result = code_result
             final_result['detection_source'] = '源代码'
-            
+
         return final_result
 
 # 创建服务的实例

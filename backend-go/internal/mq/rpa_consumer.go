@@ -32,9 +32,12 @@ func (RPAConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 }
 
 func StartRPAConsumer() error {
-	config := sarama.NewConfig()
+	config, err := newKafkaConfig()
+	if err != nil {
+		return err
+	}
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	group, err := sarama.NewConsumerGroup([]string{"localhost:9092"}, "rpa-consumer-group", config)
+	group, err := sarama.NewConsumerGroup(BrokerAddresses(), "rpa-consumer-group", config)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,42 @@
+[project]
+name = "teaching-ai-engine"
+version = "0.1.0"
+description = "AI compute service and interactive browser Worker"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi==0.115.14",
+    "uvicorn==0.35.0",
+    "websockets==15.0.1",
+    "playwright==1.58.0",
+    "python-dotenv==1.1.1",
+    "pydantic==2.11.7",
+    "pydantic-settings==2.10.1",
+    "grpcio==1.78.0",
+    "protobuf>=6.31.1,<7",
+    "requests>=2.32.4,<3",
+    "httpx==0.28.1",
+    "torch==2.8.0",
+    "transformers==4.55.0",
+    "scikit-learn==1.7.1",
+    "numpy==2.3.2",
+    "tqdm==4.67.1",
+    "paddlepaddle==3.2.1",
+    "paddleocr==3.2.0",
+    "paddlex==3.2.1",
+]
+
+[dependency-groups]
+dev = ["grpcio-tools==1.78.0"]
+
+[tool.uv]
+package = false
+
+# RTX 5080 (Blackwell): use an explicit CUDA 12.8 PyTorch build.
+# Paddle runs OCR on CPU initially, avoiding mixed CUDA library requirements.
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

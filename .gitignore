@@ -100,3 +100,6 @@ Makefile
 
 # Codex local tests and diagnostic scripts
 /codex-local/
+
+# Local deployment tools, caches and logs (stored on the project drive)
+.runtime/

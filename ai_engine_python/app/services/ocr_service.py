@@ -26,14 +26,19 @@ class OCRService:
     def _init_ocr(self):
         logger.info("正在初始化单例 OCR 引擎")
         try:
+            # Paddle/ModelScope also imports Torch. On Windows loading Paddle
+            # first can bind incompatible DLLs before Torch initializes them.
+            if os.name == 'nt':
+                import torch
             from paddleocr import PaddleOCR
             import logging as pd_logging
             pd_logging.getLogger('ppocr').setLevel(pd_logging.ERROR)
 
             self.ocr = PaddleOCR(
-                use_doc_orientation_classify=True, 
-                use_doc_unwarping=True,            
-                use_textline_orientation=True,     
+                device=os.environ.get('OCR_DEVICE', 'cpu'),
+                use_doc_orientation_classify=True,
+                use_doc_unwarping=True,
+                use_textline_orientation=True,
                 lang='ch'
             )
             logger.info("OCR 引擎加载成功")
@@ -53,7 +58,7 @@ class OCRService:
                 data_dict = result_pages[0]
                 texts = data_dict.get('rec_texts', [])
                 scores = data_dict.get('rec_scores', [])
-                polys = data_dict.get('rec_polys', []) 
+                polys = data_dict.get('rec_polys', [])
 
                 if not (len(texts) == len(scores) == len(polys)):
                     min_len = min(len(texts), len(scores), len(polys))
@@ -74,10 +79,10 @@ class OCRService:
         all_text = []
         for i, img_path in enumerate(image_path_list):
             all_text.append(f"--- 图片 {i+1} 开始 ---")
-            
+
             # 调用 process_image 时会自动触发排队锁
             results = self.process_image(img_path)
-            
+
             if not results:
                 all_text.append("[未识别到文本]")
             else:
@@ -85,7 +90,7 @@ class OCRService:
                     text, confidence = line[1]
                     all_text.append(text)
             all_text.append(f"--- 图片 {i+1} 结束 ---")
-            
+
         return "\n".join(all_text)
 
 
@@ -93,7 +98,7 @@ try:
     ocr_service_instance = OCRService()
 except Exception as e:
     logger.error(f"创建 OCR 服务失败: {e}")
-    ocr_service_instance = None 
+    ocr_service_instance = None
 
 if __name__ == '__main__':
     logger.info("OCR 模块已加载")

@@ -7,11 +7,12 @@ from tqdm import tqdm
 from ..schemas.models import PlagiarismReport
 from .deepseek_service import deepseek_service
 import torch
-from itertools import combinations, product 
+from itertools import combinations, product
 from transformers import AutoTokenizer, AutoModel
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import os
+from ..core.paths import model_path, model_cache_dir
 
 
 class PlagiarismService:
@@ -25,18 +26,16 @@ class PlagiarismService:
         可以从外部传入模型路径，如果未提供，则使用默认路径。
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # 如果外部没有指定路径，就使用默认的硬编码路径
-        self.text_model_name = text_model_name or r"/root/autodl-tmp/dzq/models/bert-base-chinese"
-        self.code_model_name = code_model_name or r"/root/autodl-tmp/dzq/models/unixcoder-base"
-        
-        cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models_cache')
-        os.makedirs(cache_dir, exist_ok=True)
-        
+
+        self.text_model_name = text_model_name or model_path("bert-base-chinese")
+        self.code_model_name = code_model_name or model_path("unixcoder-base")
+
+        cache_dir = model_cache_dir()
+
         print(f"正在加载文本模型: {self.text_model_name}")
         self.text_tokenizer = AutoTokenizer.from_pretrained(self.text_model_name, cache_dir=cache_dir)
         self.text_model = AutoModel.from_pretrained(self.text_model_name, cache_dir=cache_dir).to(self.device)
-        
+
         print(f"正在加载代码模型: {self.code_model_name}")
         self.code_tokenizer = AutoTokenizer.from_pretrained(self.code_model_name, cache_dir=cache_dir)
         self.code_model = AutoModel.from_pretrained(self.code_model_name, cache_dir=cache_dir).to(self.device)
@@ -74,7 +73,7 @@ class PlagiarismService:
             separated_data[student_id] = {"text": "\n".join(prose_parts), "code": "\n".join(code_parts)}
         return separated_data
 
-    # def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]], 
+    # def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]],
     #                            content_type: str, threshold: float) -> Set[Tuple[str, str, float]]:
     #     """根据语义相似度得到可疑抄袭片段"""
     #     student_ids = list(separated_data.keys())
@@ -92,7 +91,7 @@ class PlagiarismService:
     #     return suspicious_pairs
 
     # 因为电脑内存限制，修改计算方式
-    def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]], 
+    def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]],
                                  content_type: str, threshold: float) -> Set[Tuple[str, str, float]]:
         """
         根据语义相似度得到可疑抄袭片段
@@ -101,7 +100,7 @@ class PlagiarismService:
         student_ids = list(separated_data.keys())
         num_students = len(student_ids)
         if num_students < 2: return set()
-        
+
         contents = [separated_data[sid][content_type] for sid in student_ids]
         suspicious_pairs = set()
 
@@ -110,7 +109,7 @@ class PlagiarismService:
         BATCH_SIZE = 50
 
         total_comparisons = (num_students * (num_students - 1)) // 2
-        
+
         with tqdm(total=total_comparisons, desc=f"Comparing '{content_type}' pairs") as pbar:
             # 按批次处理
             for i in range(0, num_students, BATCH_SIZE):
@@ -156,7 +155,7 @@ class PlagiarismService:
                 # 关键：及时释放第一个批次的内存
                 del batch1_embeddings
                 gc.collect()
-                
+
         return suspicious_pairs
 
     def check_plagiarism_in_batch(self, submissions: Dict[str, str]) -> Dict:

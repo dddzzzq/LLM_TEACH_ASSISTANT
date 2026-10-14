@@ -41,7 +41,7 @@ func main() {
 	rpa.PublishGrade = mq.PublishHomeworkTask
 
 	// 3. 初始化 Kafka
-	kafkaBrokers := []string{"localhost:9092"}
+	kafkaBrokers := mq.BrokerAddresses()
 	if err := mq.InitKafka(kafkaBrokers); err != nil {
 		log.Printf("ERROR: Failed to initialize Kafka: %v", err)
 		log.Println("警告: Kafka 初始化失败，异步任务功能将不可用")

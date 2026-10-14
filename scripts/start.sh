@@ -4,6 +4,9 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-$(dirname "$ROOT")/teaching-runtime}"
 PYTHON="${PYTHON:-$ROOT/ai_engine_python/.venv/bin/python}"
+if [[ ! -x "$PYTHON" && -x "$RUNTIME_DIR/python-env/bin/python" ]]; then
+  PYTHON="$RUNTIME_DIR/python-env/bin/python"
+fi
 KAFKA_HOME="${KAFKA_HOME:-$RUNTIME_DIR/kafka_2.13-4.1.2}"
 KAFKA_CONFIG="${KAFKA_CONFIG:-$RUNTIME_DIR/kafka.properties}"
 export ROOT RUNTIME_DIR PYTHON KAFKA_HOME KAFKA_CONFIG
@@ -24,8 +27,11 @@ root = Path(os.environ['ROOT'])
 for k, v in dotenv_values(root / 'ai_engine_python/app/.env').items():
     if v is not None and k not in os.environ:
         os.environ[k] = v
+for k, v in dotenv_values(Path(os.environ['RUNTIME_DIR']) / '.database.env').items():
+    if v is not None:
+        os.environ.setdefault(k, v)
 if not os.environ.get('DEEPSEEK_API_KEY'):
-    sys.exit('请先在 ai_engine_python/app/.env 配置 DEEPSEEK_API_KEY')
+    print('DEEPSEEK_API_KEY 尚未填写；本地服务可启动，评分和 Agent 对话暂不可用。', flush=True)
 path = Path(os.environ['RUNTIME_DIR']) / '.jwt.env'
 if not path.exists():
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -40,7 +46,7 @@ fi
 exec 9>"$RUNTIME_DIR/start.lock"
 flock -n 9 || { echo '另一个启动脚本正在运行'; exit 1; }
 trap 'echo "启动失败（行 $LINENO），请查看 $RUNTIME_DIR 中对应服务的日志。已启动服务保留运行。" >&2' ERR
-for cmd in go node java mysql redis-cli service curl; do
+for cmd in go node java mysql redis-cli curl; do
   command -v "$cmd" >/dev/null || { echo "缺少命令：$cmd" >&2; exit 1; }
 done
 [[ -x "$KAFKA_HOME/bin/kafka-server-start.sh" && -f "$KAFKA_CONFIG" ]]
@@ -89,9 +95,12 @@ PY
   done
   echo "$name：已就绪（端口 $port）"
 }
-if ! port_open 3306; then service mysql start 9>&- >"$RUNTIME_DIR/mysql.log" 2>&1; fi
+start_system_service() {
+  if [[ $EUID == 0 ]]; then service "$1" start; else sudo -n service "$1" start; fi
+}
+if ! port_open 3306; then start_system_service mysql 9>&- >"$RUNTIME_DIR/mysql.log" 2>&1; fi
 port_open 3306
-if ! port_open 6379; then service redis-server start 9>&- >"$RUNTIME_DIR/redis.log" 2>&1; fi
+if ! port_open 6379; then start_system_service redis-server 9>&- >"$RUNTIME_DIR/redis.log" 2>&1; fi
 if [[ -n "${REDIS_PASSWORD:-}" ]]; then
   [[ "$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 ping)" == PONG ]]
 else
@@ -134,7 +143,7 @@ fi
 start backend 8000 "$ROOT/backend-go" 90 "$RUNTIME_DIR/grading-gateway"
 # Protected route must respond with 401 when called without authentication.
 [[ "$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/profile)" == 401 ]]
-start frontend 6006 "$ROOT/vue-grading-frontend" 60 node node_modules/vite/bin/vite.js --host 0.0.0.0 --port 6006 --strictPort
+start frontend 6006 "$ROOT/vue-grading-frontend" 60 node node_modules/vite/bin/vite.js --host "${FRONTEND_HOST:-0.0.0.0}" --port 6006 --strictPort
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6006/ >/dev/null
 printf '\n系统已启动：http://127.0.0.1:6006\n日志目录：%s\n' "$RUNTIME_DIR"
 if [[ -n "${AutoDLService6006URL:-}" ]]; then printf 'AutoDL 入口：%s\n' "$AutoDLService6006URL"; fi

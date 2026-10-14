@@ -1,11 +1,43 @@
 package mq
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/IBM/sarama"
 )
+
+// Configure the protocol explicitly when deploying a newer broker. Sarama's
+// default is Kafka 2.1; Kafka 4 removes several older request versions.
+func newKafkaConfig() (*sarama.Config, error) {
+	config := sarama.NewConfig()
+	if configured := os.Getenv("KAFKA_VERSION"); configured != "" {
+		version, err := sarama.ParseKafkaVersion(configured)
+		if err != nil {
+			return nil, fmt.Errorf("invalid KAFKA_VERSION: %w", err)
+		}
+		config.Version = version
+	}
+	return config, nil
+}
+
+// BrokerAddresses is shared by the producer and both consumer groups.
+func BrokerAddresses() []string {
+	configured := os.Getenv("KAFKA_BROKERS")
+	if configured == "" {
+		return []string{"localhost:9092"}
+	}
+	var brokers []string
+	for _, value := range strings.Split(configured, ",") {
+		if address := strings.TrimSpace(value); address != "" {
+			brokers = append(brokers, address)
+		}
+	}
+	return brokers
+}
 
 var (
 	producer      sarama.SyncProducer
@@ -20,7 +52,11 @@ func InitKafka(brokers []string) error {
 	var initErr error
 	once.Do(func() {
 		// 配置生产者
-		producerConfig := sarama.NewConfig()
+		producerConfig, err := newKafkaConfig()
+		if err != nil {
+			initErr = err
+			return
+		}
 		producerConfig.Producer.Return.Successes = true
 		producerConfig.Producer.Return.Errors = true
 		producerConfig.Producer.RequiredAcks = sarama.WaitForAll
@@ -35,7 +71,11 @@ func InitKafka(brokers []string) error {
 		producer = syncProducer
 
 		// 配置消费者组
-		consumerConfig := sarama.NewConfig()
+		consumerConfig, err := newKafkaConfig()
+		if err != nil {
+			initErr = err
+			return
+		}
 		consumerConfig.Consumer.Return.Errors = true
 		consumerConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 

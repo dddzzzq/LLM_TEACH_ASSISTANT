@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,9 +39,13 @@ type GradingConsumer struct {
 // NewGradingConsumer 创建并初始化一个新的GradingConsumer实例
 // 启动Worker Pool，包含8个Worker协程，任务通道缓冲大小为20
 func NewGradingConsumer() *GradingConsumer {
+	workers := 8
+	if configured, err := strconv.Atoi(os.Getenv("GRADING_WORKERS")); err == nil && configured > 0 {
+		workers = configured
+	}
 	consumer := &GradingConsumer{
 		jobChan:        make(chan JobItem, 20), // 缓冲通道，防止生产者过快
-		workerCount:    8,                      // 8个Worker，略小于Python端的10个max_workers
+		workerCount:    workers,
 		stopChan:       make(chan struct{}),
 		workersStopped: false,
 	}
