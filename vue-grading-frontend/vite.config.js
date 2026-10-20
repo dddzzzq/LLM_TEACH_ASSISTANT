@@ -13,12 +13,16 @@ const businessProxy = {
     }
   },
 }
+const windowsMountedSource = Boolean(process.env.WSL_DISTRO_NAME) &&
+  fileURLToPath(new URL('.', import.meta.url)).startsWith('/mnt/')
 
 export default defineConfig({
   plugins: [vue()],
   cacheDir: process.env.VITE_CACHE_DIR || 'node_modules/.vite',
   server: {
     host: true,
+    // Windows edits on a WSL-mounted drive do not reliably emit inotify events.
+    watch: { usePolling: windowsMountedSource, interval: 500 },
     allowedHosts: [new URL(process.env.AutoDLService6006URL || 'http://localhost').hostname],
     // allowedHosts: ['http://localhost:5173'],    // 5173端口网址
     // 新增 proxy 配置

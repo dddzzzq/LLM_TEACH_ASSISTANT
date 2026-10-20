@@ -1,20 +1,55 @@
 """Grounded observations and export evidence, using the working portal script as a baseline."""
 import hashlib
 import re
-from urllib.parse import urlsplit
+import asyncio
+from .errors import RpaIssue
+from .page_snapshot import HEADINGS, EXPORT_LABEL, inventory
 
 
 TARGET_URL = 'https://learning.xidian.edu.cn/portal'
 FORBIDDEN = re.compile(r'删除|发布|评分|保存成绩|提交成绩|修改|编辑|新建|创建|退课|退出登录|logout|delete|publish', re.I)
 EXPORT_CONFIRM = re.compile(r'确定|确认|confirm|提交|submit', re.I)
+CHOICES = ('label:has(input[type=checkbox]),label:has(input[type=radio]),'
+           'input[type=checkbox],input[type=radio],[role=checkbox],[role=radio],'
+           '.grade_check,.grade_checked')
+
+
+EXPORT_TIME = re.compile(r'(?<!\d)(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?(?!\d)')
+EXPORT_STATE = r'重新下载|导出中|等待|导出成功|下载|失败|处理中|已完成|重新导出|已过期|排队中'
+
+
+def export_identity(row):
+    # The portal replaces the displayed creation time with the completion time.
+    # Neither that timestamp nor a signed download URL identifies an export.
+    text = EXPORT_TIME.sub('', row['text'])
+    text = re.sub(r'(?:(?:' + EXPORT_STATE + r')|\s)+$', '', text)
+    return re.sub(r'\s+', '', text)
 
 
 def fingerprint(row):
-    # Download hrefs often appear only after packaging; using them changes identity mid-task.
-    stable = row.get('platform_id')
-    if not stable:
-        stable = re.sub(r'重新下载|导出中|等待|导出成功|下载|失败|处理中|已完成|重新导出|\s+', '', row['text'])
+    stable = row.get('platform_id') or export_identity(row)
     return hashlib.sha256(stable.strip().encode()).hexdigest()[:24]
+
+
+def reconcile_exports(exports, rows, baseline):
+    """Recover old timestamp-based references without changing saved file identities."""
+    resolved, claimed = [], set()
+    identities = [export_identity(e) for e in exports]
+    for export in exports:
+        refs = {export['ref'], export.get('row_ref')}
+        matches = [r for r in rows if r['ref'] in refs and not r.get('ambiguous')]
+        if not matches:
+            identity = export_identity(export)
+            matches = [r for r in rows if identity and identities.count(identity) == 1 and export_identity(r) == identity
+                       and not r.get('ambiguous') and r['ref'] not in baseline
+                       and r.get('legacy_ref') not in baseline]
+        if len(matches) != 1 or matches[0]['ref'] in claimed:
+            resolved.append({**export, 'available': False})
+            continue
+        row = matches[0]
+        claimed.add(row['ref'])
+        resolved.append({**export, **row, 'ref': export['ref'], 'row_ref': row['ref'], 'available': True})
+    return resolved
 
 
 def match_new_exports(rows, baseline, assignment, scope):
@@ -23,6 +58,15 @@ def match_new_exports(rows, baseline, assignment, scope):
     names = [c['name'] for c in scope.get('classes', [])] if scope.get('mode') == 'selected' else []
     matched = [r for r in fresh if assignment in r['text'] and
                (not names or any(name in r['text'] for name in names))]
+    # A unique fresh record for an explicitly selected all-class export can be
+    # associated without asking for an otherwise redundant second confirmation.
+    if scope.get('mode') == 'all':
+        if not scope.get('baseline_observed'):
+            return []  # An unopened download center cannot prove which records are new.
+        title = re.compile(r'(?:^|[\s_\-/【\[(（:：])' + re.escape(assignment) +
+                           r'(?=$|[\s_.\-/】\])）:：])')
+        exact = [r for r in rows if r['ref'] not in baseline and title.search(r['text'])]
+        return exact if len(exact) == 1 and not exact[0].get('ambiguous') else []
     # A single row per selected class is required; otherwise ask a human to bind records.
     if names and len(matched) == len(names) and all(
             sum(name in r['text'] for r in matched) == 1 for name in names):
@@ -41,6 +85,7 @@ class PortalAdapter:
         self.assignment_confirmed = False
         self.course_pages = set()
         self.assignment_pages = set()
+        self.target_candidates = {}
 
     async def login_required(self):
         for page in self.context.pages:
@@ -66,50 +111,52 @@ class PortalAdapter:
         return False
 
     async def observe(self):
-        self.refs = {}
-        pages, elements = [], []
-        for pi, page in enumerate(self.context.pages):
-            if page.is_closed():
-                continue
-            page_id = str(pi)
-            parsed = urlsplit(page.url)
-            pages.append({'page_id': page_id, 'url': parsed.scheme + '://' + parsed.netloc + parsed.path,
-                          'title': (await page.title())[:100]})
-            for fi, frame in enumerate(page.frames):
-                controls = frame.locator('a,button,input:not([type=hidden]):not([type=password]),select,[role=button],.grade_check')
-                # Extract no input values, cookies, hidden tokens or whole student submission content.
-                data = await controls.evaluate_all('''els => els.map((e,i) => {
-                  const box=e.getBoundingClientRect();
-                  const visible=box.width>0 && box.height>0 && getComputedStyle(e).visibility!=='hidden';
-                  const row=e.closest('.myde_course_item,li,tr,.export-range,label');
-                  return {i, visible, tag:e.tagName.toLowerCase(), type:e.getAttribute('type')||'',
-                    name:(e.getAttribute('aria-label')||e.getAttribute('title')||e.innerText||e.getAttribute('placeholder')||'').trim().slice(0,100),
-                    context:(row?.getAttribute('cname')||row?.innerText||'').trim().slice(0,180)};
-                })''')
-                for item in data:
-                    if not item.pop('visible') or item['type'] in ('password', 'email'):
-                        continue
-                    if item['tag'] == 'input' and re.search('用户名|密码|验证码|username|password|captcha', item['name'], re.I):
-                        continue
-                    if not item['name'] and not item['context']:
-                        continue
-                    ref = f'p{pi}f{fi}e{item.pop("i")}'
-                    idx = int(ref.split('e')[-1])
-                    self.refs[ref] = (page, controls.nth(idx), item)
-                    elements.append({'ref': ref, 'page_id': page_id, **item})
+        view, self.refs = await inventory(self.context, self.target)
+        self.target_candidates = view['target_candidates']
         export_entry = await self.export_entry()
-        return {'pages': pages, 'elements': elements[:250],
+        return {**view, 'target_evidence': {'course_confirmed':self.course_confirmed,
+                                          'assignment_confirmed':self.assignment_confirmed},
                 'can_open_export': bool(self.assignment_confirmed and export_entry)}
 
     async def export_entry(self):
+        candidates = []
         for page in self.context.pages:
             if page.is_closed():
                 continue
             for frame in page.frames:
+                for role in ('link', 'button', 'menuitem'):
+                    entry = frame.get_by_role(role, name=re.compile(EXPORT_LABEL))
+                    for i in range(await entry.count()):
+                        candidates.append((page, entry.nth(i)))
+        if len(candidates) == 1:
+            return candidates[0]
+        if candidates:
+            return None  # Never guess between multiple live export menus.
+        for page in self.context.pages:
+            if page.is_closed(): continue
+            for frame in page.frames:
+                entries = frame.locator('a,button,[onclick],[role=menuitem]').filter(has_text=re.compile(EXPORT_LABEL))
+                for i in range(await entries.count()):
+                    if await entries.nth(i).is_visible(): candidates.append((page, entries.nth(i)))
+        if candidates:
+            return candidates[0] if len(candidates) == 1 else None
+        # Compatibility with the old portal's hidden, site-owned menu.
+        for page in self.context.pages:
+            if page.is_closed(): continue
+            for frame in page.frames:
                 entry = frame.locator('ul.morePop a').filter(has_text='导出作业附件')
-                if await entry.count() == 1:
-                    return page, entry
-        return None
+                active_view = await entry.evaluate('''e => {
+                  const menu=e.closest('ul.morePop');
+                  for(let node=menu?.parentElement; node; node=node.parentElement) {
+                    const style=getComputedStyle(node);
+                    if(node.hidden || node.getAttribute('aria-hidden')==='true' ||
+                       style.display==='none' || style.visibility==='hidden') return false;
+                  }
+                  return !!menu;
+                }''') if await entry.count() == 1 else False
+                if active_view:
+                    candidates.append((page, entry))
+        return candidates[0] if len(candidates) == 1 else None
 
     async def open_export(self):
         entry = await self.export_entry()
@@ -126,23 +173,22 @@ class PortalAdapter:
     async def record_navigation(self, locator, item, page):
         course = self.target['course_name']
         assignment = self.target['assignment_name']
-        course_card = locator.locator('xpath=ancestor-or-self::*[@cname][1]')
-        is_course = await course_card.count() and (await course_card.get_attribute('cname')) == course
-        # A course name must identify the card itself, not an arbitrary surrounding list.
-        if is_course or item['name'] == course:
-            matches = 0
-            for candidate in self.context.pages:
-                for frame in candidate.frames:
-                    names = await frame.locator('[cname]').evaluate_all('els => els.map(e=>e.getAttribute("cname"))')
-                    matches += sum(name == course for name in names)
-            if matches > 1 and not (self.target.get('term') and self.target['term'] in item['context']):
-                raise ValueError('存在同名课程，需要人工选择或提供学期')
+        def matches(info, title):
+            return info['name'] == title or title in info.get('context_labels', [])
+        if matches(item, course):
+            evidence = self.target_candidates.get('course', {})
+            group = item.get('record_id') or item.get('context_id') or item.get('ref')
+            if evidence.get('group_count', 0) > 1 and evidence.get('term_matches') != [group]:
+                raise RpaIssue('TARGET_AMBIGUOUS', '存在同名课程，需要人工选择或提供学期',
+                               {'kind':'course', **evidence})
             self.course_confirmed = True
             self.course_pages.add(page)
-        row = locator.locator('xpath=ancestor::li[.//h2][1]')
-        if self.course_confirmed and await row.count():
-            titles = await row.locator('h2').all_text_contents()
-            if any(t.strip() == assignment for t in titles) and '批阅' in item['name']:
+        if self.course_confirmed and matches(item, assignment):
+            if item['name'] == assignment or re.search('批阅|评阅|查看提交|查看作业|作业详情', item['name']):
+                evidence = self.target_candidates.get('assignment', {})
+                if evidence.get('group_count', 0) > 1:
+                    raise RpaIssue('TARGET_AMBIGUOUS', '存在多个同名作业，需要人工核对',
+                                   {'kind':'assignment', **evidence})
                 self.assignment_confirmed = True
                 self.assignment_pages.add(page)
 
@@ -152,16 +198,19 @@ class PortalAdapter:
             if page.is_closed():
                 continue
             for frame in page.frames:
-                course_titles = frame.locator('h1,h2,.courseName,.course-name,.coursename')
-                if self.target['course_name'] in [s.strip() for s in await course_titles.all_text_contents()]:
+                course_titles = frame.locator(HEADINGS + ',.courseName,.course-name,.coursename')
+                title_reader = '''els => els.filter(e => e.getClientRects().length &&
+                  !e.closest('[hidden],[aria-hidden="true"],li,tr,[role=listitem],[role=row],[role=list]'))
+                  .map(e => (e.innerText||'').trim())'''
+                if self.target['course_name'] in await course_titles.evaluate_all(title_reader):
                     self.course_confirmed = True
                     self.course_pages.add(page)
-                headings = frame.locator('h1,h2,.work-title,.workTitle,.mark_title')
-                visible_titles = await headings.evaluate_all('els => els.filter(e=>e.getClientRects().length).map(e=>e.innerText.trim())')
+                headings = frame.locator(HEADINGS + ',.work-title,.workTitle,.mark_title')
+                visible_titles = await headings.evaluate_all(title_reader)
                 if self.course_confirmed and self.target['assignment_name'] in visible_titles:
                     # A list title alone is insufficient; the export menu must belong to this page.
-                    entry = frame.locator('ul.morePop a').filter(has_text='导出作业附件')
-                    if await entry.count() and await entry.first.evaluate('e => !!e.closest("ul.morePop")?.parentElement?.getClientRects().length'):
+                    entry = await self.export_entry()
+                    if entry and entry[0] == page:
                         self.assignment_confirmed = True
                         self.assignment_pages.add(page)
 
@@ -179,58 +228,137 @@ class PortalAdapter:
     async def classes(self, modal):
         self.class_locators = {}
         options = []
-        controls = modal.locator('.export-range .grade_check,input[type=checkbox],[role=checkbox]')
-        for i in range(await controls.count()):
-            control = controls.nth(i)
-            if not await control.is_visible():
+        for control, info in await self.export_choices(modal):
+            if info['group'] != 'scope' or not info['name'] or len(info['name']) > 120:
                 continue
-            info = await control.evaluate('''e => {
-              const label=e.closest('label,li,.export-range')||e.parentElement;
-              return {name:(label?.innerText||e.getAttribute('aria-label')||'').trim(),
-                all:!!e.closest('.all') || /所有班级|全部班级/.test(label?.innerText||'')};
-            }''')
-            if not info['name'] or len(info['name']) > 120:
-                continue
-            ref = 'class_' + str(i)
+            ref = 'class_' + str(len(options))
             options.append({'id': ref, 'name': info['name'], 'all': info['all']})
             self.class_locators[ref] = control
         return options
 
+    async def export_choices(self, modal):
+        """Classify options by their section; descriptions are not class names."""
+        controls = modal.locator(CHOICES)
+        infos = await controls.evaluate_all(r'''els => {
+          const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
+          const visible=e=>!!e.getClientRects().length && getComputedStyle(e).visibility!=='hidden' &&
+            !e.closest('[hidden],[aria-hidden=true]');
+          const labelled=e=>clean(e.getAttribute('aria-label') ||
+            (e.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)?.textContent||'').join(' '));
+          const sectionName=e=>labelled(e) || clean(e.querySelector(':scope > legend')?.textContent);
+          return els.flatMap((e,i)=>{
+            if(!visible(e)) return [];
+            if(!e.matches('label') && e.closest('label')?.querySelector('input[type=checkbox],input[type=radio]')) return [];
+            const roleOwner=e.closest('[role=checkbox],[role=radio]');
+            if(roleOwner && roleOwner!==e) return [];
+            const owner=e.closest('label,li,.export-range,.out,.nameItem,[role=radio],[role=checkbox]')||e.parentElement;
+            const name=labelled(e) || clean(owner?.innerText);
+            let group='';
+            for(let node=e; node && !node.matches('[role=dialog],.popDiv.centerPop'); node=node.parentElement) {
+              if(node.matches('.nameItem')) {group='naming';break;}
+              if(node.matches('.out')) {group='format';break;}
+              if(node.matches('.export-range')) {group='scope';break;}
+              if(node.matches('fieldset,[role=group],[role=radiogroup]')) {
+                const heading=sectionName(node);
+                if(/命名|文件名/.test(heading)) group='naming';
+                else if(/导出格式|导出内容|附件格式/.test(heading)) group='format';
+                else if(/导出范围|班级范围|导出班级|选择班级/.test(heading)) group='scope';
+                if(group) break;
+              }
+            }
+            // Compatibility with simple labels without fieldsets. Recognize
+            // actual option labels, never an incidental "班级" in a description.
+            if(!group && /默认格式|文件原名|命名|学号.*姓名/.test(name)) group='naming';
+            if(!group && /^(导出完整答题记录|仅导出文档|导出(?:学生)?(?:提交|作业)?附件)/.test(name)) group='format';
+            if(!group && /^(?:导出(?:作业下)?)?(?:本班级|当前班级|所有班级|全部班级)(?:$|\s|作业|附件|[（(])/.test(name)) group='scope';
+            if(!group && /^(班级|教学班|行政班)[A-Za-z0-9一二三四五六七八九十（( -]/.test(name)) group='scope';
+            return [{i,name,group,all:group==='scope' &&
+              (!!e.closest('.all') || /(?:所有|全部)班级/.test(name) || /^(全部|所有)$/.test(name))}];
+          });
+        }''')
+        return [(controls.nth(info['i']), info) for info in infos]
+
     @staticmethod
     async def checked(control):
         return await control.evaluate('''e => {
-          if(e.matches('input')) return e.checked;
-          if(e.getAttribute('aria-checked')!==null) return e.getAttribute('aria-checked')==='true';
-          const input=e.closest('label,li,.export-range')?.querySelector('input[type=checkbox],input[type=radio]');
-          if(input) return input.checked;
-          return /(^|\s)(checked|active|selected|check_on|on)(\s|$)/.test(e.className);
+          if(e.matches('input[type=checkbox],input[type=radio]')) return e.checked;
+          const parent=e.closest('label,li,.export-range,.out,[role=radio],[role=checkbox]');
+          const inputs=(parent||e).querySelectorAll('input[type=checkbox],input[type=radio]');
+          if(inputs.length===1) return inputs[0].checked;
+          for(const node of [e,parent].filter(Boolean)) {
+            const state=node.getAttribute('aria-checked') ?? node.getAttribute('data-checked');
+            if(state!==null) return state==='true' || state==='1';
+          }
+          const selected=/(^|\s)(checked|active|selected|check_on|on|grade_checked|check_answer)(\s|$)/;
+          return [e,parent].filter(Boolean).some(node=>selected.test(String(node.className)));
         }''')
+
+    async def wait_checked(self, control, desired):
+        for _ in range(16):
+            if await self.checked(control) == desired:
+                return True
+            await asyncio.sleep(.1)
+        return False
+
+    async def select_attachments(self, modal):
+        candidates = []
+        other_formats = []
+        for control, info in await self.export_choices(modal):
+            if info['group'] != 'format':
+                continue
+            if re.match(r'^导出(?:学生)?(?:提交|作业)?附件', info['name']):
+                candidates.append(control)
+            elif re.match(r'^导出完整答题记录|^仅导出文档', info['name']):
+                other_formats.append(control)
+        if len(candidates) > 1:
+            raise RpaIssue('ATTACHMENT_AMBIGUOUS', '发现多个附件导出选项，请在官网选择“导出提交附件”后交还自动化')
+        if not candidates:
+            if await modal.get_by_text(re.compile('导出完整答题记录|仅导出文档')).count():
+                raise RpaIssue('ATTACHMENT_MISSING', '未识别到“导出提交附件”控件，请在官网选中该项后交还自动化')
+            return  # Some attachment-only dialogs have no separate content choice.
+        control = candidates[0]
+        if not await self.checked(control):
+            await control.click(timeout=5000)
+        if not await self.wait_checked(control, True):
+            raise RpaIssue('ATTACHMENT_UNVERIFIED', '未能核验“导出提交附件”的选中状态，请检查该选项后交还自动化')
+        if any([await self.checked(other) for other in other_formats]):
+            raise RpaIssue('ATTACHMENT_MISMATCH', '导出格式仍选中了其他内容，请在官网只选“导出提交附件”后交还自动化')
+
+    async def scope_diagnostics(self, modal):
+        # Selected-state metadata only, intentionally omitting labels, attributes
+        # such as value/onclick/href, and any text from student submissions.
+        return await modal.locator(CHOICES).evaluate_all('''els => els.slice(0,30).map(e=>({
+          tag:e.tagName.toLowerCase(),classes:String(e.className).slice(0,100),
+          parent_classes:String(e.parentElement?.className||'').slice(0,100),
+          role:e.getAttribute('role')||'',aria_checked:e.getAttribute('aria-checked'),
+          checked:e.matches('input[type=checkbox],input[type=radio]')?e.checked:null
+        }))''')
 
     async def apply_scope(self, modal, scope, options):
         requested = set(scope.get('class_ids', []))
         available = {o['id']: o for o in options}
         if scope.get('mode') == 'all':
             selected = {o['id'] for o in options if o['all']}
+            if len(selected) > 1:
+                raise RpaIssue('SCOPE_AMBIGUOUS', '识别到多个全部班级控件，请检查导出范围分组后交还自动化')
         else:
             if not requested or not requested <= available.keys() or any(available[x]['all'] for x in requested):
-                raise ValueError('请选择当前列表中的具体班级')
+                raise RpaIssue('SCOPE_CHANGED', '班级列表已变化，请重新选择当前列表中的具体班级')
             selected = requested
         if not selected:
-            raise ValueError('当前页面没有可验证的班级范围，请人工打开正确的导出设置')
-        for option in options:
+            raise RpaIssue('SCOPE_MISSING', '当前页面没有可验证的班级范围，请打开正确的导出设置')
+        # Select requested radios first: their group deselects its previous choice.
+        # Clicking an already selected radio cannot uncheck it.
+        for option in sorted(options, key=lambda o: o['id'] not in selected):
             control = self.class_locators[option['id']]
             desired = option['id'] in selected
             if await self.checked(control) != desired:
                 await control.click(timeout=5000)
+                await self.wait_checked(control, desired)
         actual = {o['id'] for o in options if await self.checked(self.class_locators[o['id']])}
         if actual != selected:
-            raise ValueError('官网当前班级选择与确认范围不一致，请人工核对')
-        attachment = modal.locator('div.out').filter(has_text='导出提交附件').locator('.grade_check')
-        if await attachment.count():
-            if not await self.checked(attachment.first):
-                await attachment.first.click(timeout=5000)
-            if not await self.checked(attachment.first):
-                raise ValueError('无法核验“导出提交附件”选项')
+            raise RpaIssue('SCOPE_MISMATCH', '官网班级选择未能与已确认范围一致，请检查班级选项后交还自动化；无需再次确认作业')
+        await self.select_attachments(modal)
         return {'mode': scope['mode'], 'classes': [available[x] for x in sorted(selected)]}
 
     async def export_rows(self):
@@ -248,6 +376,8 @@ class PortalAdapter:
                     locators = center.locator('.dataBody_td')
                 for i in range(await locators.count()):
                     loc = locators.nth(i)
+                    if not await loc.is_visible():
+                        continue
                     info = await loc.evaluate('''e => ({text:(e.innerText||'').trim(),
                       platform_id:e.getAttribute('data-id')||e.getAttribute('data-taskid')||e.id||'',
                       href:e.querySelector('a.download_ic,a[download]')?.getAttribute('href')||''})''')
@@ -257,7 +387,10 @@ class PortalAdapter:
                         info['href'] = ''
                     info['ref'] = fingerprint(info)
                     text = info['text']
-                    info['status'] = 'FAILED' if re.search('失败|错误', text) else ('READY' if re.search('导出成功|已完成', text) else 'PENDING')
+                    legacy = info.get('platform_id') or re.sub(
+                        r'重新下载|导出中|等待|导出成功|下载|失败|处理中|已完成|重新导出|\s+', '', text)
+                    info['legacy_ref'] = hashlib.sha256(legacy.strip().encode()).hexdigest()[:24]
+                    info['status'] = 'FAILED' if re.search('失败|错误|已过期', text) else ('READY' if re.search('导出成功|已完成', text) else 'PENDING')
                     # Only opaque refs and display text are exposed outside the executor.
                     rows.append({k: v for k, v in info.items() if k not in ('href', 'platform_id')})
                     self.export_locators[info['ref']] = (page, loc)
@@ -269,3 +402,14 @@ class PortalAdapter:
             if row['ambiguous']:
                 self.export_locators.pop(row['ref'], None)
         return rows
+
+    async def export_center_visible(self):
+        for page in self.context.pages:
+            if page.is_closed():
+                continue
+            for frame in page.frames:
+                centers = frame.locator('#downloadcenter,.downloadCenter')
+                for i in range(await centers.count()):
+                    if await centers.nth(i).is_visible():
+                        return True
+        return False

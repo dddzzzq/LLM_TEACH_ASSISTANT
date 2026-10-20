@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"grading-gateway/internal/database"
 	"grading-gateway/internal/grpcclient"
+	"grading-gateway/internal/materials"
+	"grading-gateway/internal/models"
 	"grading-gateway/pb"
 	"io"
 	"log"
@@ -129,6 +131,10 @@ func extractSingleFile(file *zip.File, destPath string) error {
 
 // processPipeline Go 核心调度中心
 func ProcessPipeline(assignmentID string, zipPath string) error {
+	return ProcessPipelineForJob(assignmentID, zipPath, models.AsyncJob{})
+}
+
+func ProcessPipelineForJob(assignmentID string, zipPath string, job models.AsyncJob) error {
 	log.Printf("\n======================================================\n")
 	log.Printf("[调度中心] 启动全新批改流线, 作业ID: %s\n", assignmentID)
 	startTime := time.Now()
@@ -141,8 +147,33 @@ func ProcessPipeline(assignmentID string, zipPath string) error {
 		return fmt.Errorf("找不到作业ID %s", assignmentID)
 	}
 	assignment := *assignmentPtr
+	if job.QuestionSnapshot != "" {
+		assignment.Question, assignment.Rubric = job.QuestionSnapshot, job.RubricSnapshot
+	}
 
-	tasks, err := extractAndGroupTasks(assignmentID, zipPath)
+	var tasks []GradingTask
+	if job.MaterialBatchID != "" {
+		var batch models.MaterialBatch
+		if err := database.DB.First(&batch, "id = ? AND grading_job_id = ?", job.MaterialBatchID, job.ID).Error; err != nil {
+			return fmt.Errorf("材料批次与批改任务不匹配")
+		}
+		if batch.ManifestPath != zipPath || batch.AssignmentID != uint(parsedID) {
+			return fmt.Errorf("材料路径或作业不匹配")
+		}
+		manifest, loadErr := materials.LoadManifest(batch.ManifestPath, batch.ManifestSHA256)
+		if loadErr != nil {
+			return loadErr
+		}
+		for _, student := range manifest.Students {
+			paths := []string{}
+			for _, file := range student.Files {
+				paths = append(paths, filepath.Join(filepath.Dir(batch.ManifestPath), filepath.FromSlash(file.Path)))
+			}
+			tasks = append(tasks, GradingTask{StudentID: student.ID, StudentName: student.Name, AssignmentID: assignmentID, FilePaths: paths})
+		}
+	} else {
+		tasks, err = extractAndGroupTasks(assignmentID, zipPath)
+	}
 	if err != nil || len(tasks) == 0 {
 		log.Printf("[错误] 解压失败或包内无文件\n")
 		return fmt.Errorf("解压失败或包内无学生文件")
@@ -297,7 +328,7 @@ func ProcessPipeline(assignmentID string, zipPath string) error {
 					atomic.AddInt32(&failedGrades, 1)
 				}
 
-				if err := database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON); err != nil && finalScore >= 0 {
+				if err := database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON, job.MaterialBatchID, job.ID); err != nil && finalScore >= 0 {
 					atomic.AddInt32(&failedGrades, 1)
 				}
 
@@ -319,6 +350,9 @@ func ProcessPipeline(assignmentID string, zipPath string) error {
 	log.Printf("\n[调度中心] 作业 %s 批改任务全流程结束！\n总耗时: %v\n======================================================\n", assignmentID, time.Since(startTime))
 
 	// 启动成绩池化处理
-	go AddPoolingToPipeline(assignmentID)
+	// A prepared batch keeps rubric-based scores stable and never pools historical batches.
+	if job.MaterialBatchID == "" {
+		go AddPoolingToPipeline(assignmentID)
+	}
 	return nil
 }

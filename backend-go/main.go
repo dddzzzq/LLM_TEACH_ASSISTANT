@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"encoding/json"
@@ -12,8 +14,11 @@ import (
 	"grading-gateway/internal/agent/modelclient"
 	"grading-gateway/internal/browseragent"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/grading"
 	"grading-gateway/internal/grpcclient"
 	"grading-gateway/internal/handlers"
+	"grading-gateway/internal/logbook"
+	"grading-gateway/internal/materials"
 	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/mq"
 	"grading-gateway/internal/rpa"
@@ -28,6 +33,16 @@ func main() {
 		dsn = configured
 	}
 	database.InitDB(dsn)
+	logRoot := os.Getenv("RUNTIME_DIR")
+	if logRoot == "" {
+		logRoot = filepath.Join("..", "..", "teaching-runtime")
+	}
+	logService := logbook.New(database.DB, logRoot)
+	if err := logService.Init(); err != nil {
+		log.Printf("日志索引初始化失败（%T）", err)
+	} else {
+		go logService.Run(context.Background())
+	}
 
 	// 2. 初始化 Redis
 	database.InitRedis(nil)
@@ -38,7 +53,6 @@ func main() {
 	agent.EnsureRPATools(context.Background())
 	agent.EnsureGradingTools(context.Background())
 	rpa.PublishFetch = func(id string) error { return mq.PublishRPAFetchTask(mq.RPAFetchMessage{JobID: id}) }
-	rpa.PublishGrade = mq.PublishHomeworkTask
 
 	// 3. 初始化 Kafka
 	kafkaBrokers := mq.BrokerAddresses()
@@ -76,9 +90,17 @@ func main() {
 		return browseragent.Decide(ctx, input, doc, contract, modelclient.NewPageClient().CallMessages)
 	}
 	go rpa.RunScheduler(context.Background())
+	go materials.Default().Run(context.Background(), grading.ContinuePrepared)
+	go grading.RunMaterialOutbox(context.Background())
 
 	// 6. 初始化gin框架，定义初始根路由
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipQueryString: true,
+		Skip: func(c *gin.Context) bool {
+			return strings.HasPrefix(c.Request.URL.Path, "/api/logs/")
+		},
+	}), gin.Recovery())
 
 	// 7. 配置CORS，使可跨域访问
 	router.Use(func(c *gin.Context) {
@@ -115,6 +137,15 @@ func main() {
 	{
 		// 用户个人信息
 		protectedGroup.GET("/profile", authHandler.Profile)
+		logGroup := protectedGroup.Group("/logs") // LogHandler centrally enforces admin-only access.
+		handlers.LogHandler{Service: logService}.Register(logGroup)
+		materialGroup := protectedGroup.Group("/materials", middleware.RBACMiddleware("teacher", "admin"))
+		materialGroup.GET("", handlers.ListMaterials)
+		materialGroup.POST("", handlers.CreateMaterials)
+		materialGroup.GET("/:id", handlers.GetMaterials)
+		materialGroup.POST("/:id/retry", handlers.RetryMaterials)
+		materialGroup.POST("/:id/grade", handlers.GradeMaterials)
+		materialGroup.POST("/:id/cancel", handlers.CancelMaterials)
 
 		// 会话管理
 		sessionGroup := protectedGroup.Group("/sessions")
@@ -135,7 +166,9 @@ func main() {
 		{
 			rpaGroup.POST("", handlers.CreateRPAJob)
 			rpaGroup.GET("", handlers.ListRPAJobs)
+			rpaGroup.GET("/attention", handlers.GetRPAAttention)
 			rpaGroup.GET("/:id", handlers.GetRPAJob)
+			rpaGroup.GET("/:id/requirements", handlers.GetRPARequirements)
 			rpaGroup.GET("/:id/browser", handlers.RPABrowserFrame)
 			rpaGroup.POST("/:id/:action", handlers.ControlRPAJob)
 		}

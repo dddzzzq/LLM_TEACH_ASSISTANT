@@ -27,7 +27,7 @@ def verify_zip(path):
             'sha256': digest.hexdigest(), 'status': 'VERIFIED'}
 
 
-async def save_download(download, directory, export_ref, progress=None, stall_seconds=120):
+async def save_download(download, directory, export_ref, progress=None, stall_seconds=120, on_verifying=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = safe_filename(download.suggested_filename)
@@ -48,6 +48,8 @@ async def save_download(download, directory, export_ref, progress=None, stall_se
         await transfer
         if await download.failure():
             raise ValueError('平台文件传输失败')
+        if on_verifying:
+            on_verifying()
         result = await asyncio.to_thread(verify_zip, partial)
         partial.replace(path)
         return {**result, 'path': str(path.resolve()), 'filename': name, 'export_ref': export_ref}

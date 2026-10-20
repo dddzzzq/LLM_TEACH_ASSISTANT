@@ -15,8 +15,8 @@
     <div class="sidebar-note"><AppIcon name="sparkles" /><p>让繁琐交给技术<br /><span>让用心回归教学</span></p></div>
     <div class="sidebar-footer">
       <div v-if="currentUser" class="sidebar-user">
-        <div class="user-avatar">{{ (currentUser.name || currentUser.username || 'U').charAt(0).toUpperCase() }}</div>
-        <div class="user-info"><p>{{ currentUser.name || currentUser.username }}</p><span>{{ getRoleName(currentUser.role) }}</span></div>
+        <div class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</div>
+        <div class="user-info"><p :title="hasRealName ? '真实姓名' : '登录账号'">{{ displayName }}</p><span>{{ getRoleName(currentUser.role) }}</span></div>
         <span class="user-role">{{ getRoleName(currentUser.role) }}</span>
       </div>
       <button @click="handleLogout" class="logout-button"><AppIcon name="logout" /><span>退出登录</span></button>
@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import authApi from "../services/authApi";
 import AppIcon from "./AppIcon.vue";
@@ -34,7 +34,24 @@ const router = useRouter();
 const route = useRoute();
 
 // 获取当前用户信息
-const currentUser = computed(() => authApi.getCurrentUser());
+const currentUser = ref(authApi.getCurrentUser());
+const profileVerified = ref(false);
+// Confirm the server profile before displaying a name from an older browser cache.
+const hasRealName = computed(() => profileVerified.value && Boolean(currentUser.value?.name?.trim()));
+const displayName = computed(() => hasRealName.value ? currentUser.value.name.trim() : currentUser.value?.username || '用户');
+onMounted(async () => {
+  if (!authApi.isAuthenticated()) return;
+  try {
+    const { data } = await authApi.getProfile();
+    if (!data?.username || !['student', 'teacher', 'admin'].includes(data.role)) return;
+    const account = { ...(authApi.getCurrentUser() || {}), user_id:data.id, username:data.username, name:data.name, role:data.role };
+    authApi.setUserInfo(account);
+    currentUser.value = account;
+    profileVerified.value = true;
+  } catch (error) {
+    console.warn('账号信息同步失败:', error.response?.status || 'network');
+  }
+});
 
 // 获取角色名称
 const getRoleName = (role) => {
@@ -66,6 +83,8 @@ const allMenuItems = [
   { name: "作业自动评分", path: "/assignments", icon: CheckBadgeIcon },
   { name: "主观题自动评分", path: "/exams", icon: PencilSquareIcon },
   { name: "AI教学助手", path: "/ai-assistant", icon: ChatBubbleLeftRightIcon },
+  { name: "日志查阅", path: "/logs", icon: "history" },
+  { name: "作业材料", path: "/materials", icon: "download" },
   { name: "工具管理", path: "/tools-admin", icon: WrenchScrewdriverIcon },
 ]
 
@@ -78,11 +97,11 @@ const filteredMenuItems = computed(() => {
     return allMenuItems.filter(item => item.path === '/ai-assistant')
   }
   
-  // 教师/管理员可见；其中 工具管理建议仅管理员可见
+  // 教师保留教学功能；日志查阅入口仅管理员可见。
   if (userRole === 'teacher') {
-    return allMenuItems.filter(item => item.path !== '/tools-admin')
+    return allMenuItems.filter(item => !['/tools-admin', '/logs'].includes(item.path))
   }
-  return allMenuItems
+  return userRole === 'admin' ? allMenuItems : []
 })
 
 // 处理退出登录

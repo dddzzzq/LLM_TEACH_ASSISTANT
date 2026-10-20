@@ -42,6 +42,7 @@ func InitDB(dsn string) {
 		&models.AsyncJob{},
 		&models.RPAJob{},
 		&models.RPAFile{},
+		&models.MaterialBatch{},
 	)
 	if err != nil {
 		log.Fatalf("自动迁移表结构失败: %v", err)
@@ -49,7 +50,7 @@ func InitDB(dsn string) {
 	fmt.Println("表结构映射完成！")
 }
 
-func SaveAssignment(assignmentID, studentID, studentName string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string) error {
+func SaveAssignment(assignmentID, studentID, studentName string, score float64, feedback, mergedContent, plagJSON, aigcJSON, matchJSON string, provenance ...string) error {
 	aID, _ := strconv.ParseUint(assignmentID, 10, 32)
 
 	// 再次清洗确保所有存入 DB 的字符都是绝对纯净的 UTF-8
@@ -67,6 +68,9 @@ func SaveAssignment(assignmentID, studentID, studentName string, score float64, 
 		AIGCReport:         aigcJSON,
 		CodeDocMatchReport: matchJSON,
 		IsHumanReviewed:    false,
+	}
+	if len(provenance) >= 2 {
+		submission.MaterialBatchID, submission.GradingJobID = provenance[0], provenance[1]
 	}
 	if err := DB.Create(&submission).Error; err != nil {
 		log.Printf("[DB错误] 无法保存学生 %s 记录: %v\n", studentID, err)

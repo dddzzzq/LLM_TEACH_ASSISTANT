@@ -5,6 +5,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -94,6 +95,13 @@ class Manager:
                  'state_version': old.get('state_version', 0) + 1,
                  'auth_status': 'UNKNOWN', 'waiting_reason': '',
                  'message': '正在启动任务浏览器', 'files': [f for f in old.get('files', []) if f['status'] == 'VERIFIED'], 'exports': old.get('exports', [])}
+        scope = state.get('requested_scope') or {}
+        if scope.get('mode') == 'selected' and any(
+                re.search('本班级|当前班级', scope.get('option_names', {}).get(ref, ''))
+                for ref in scope.get('class_ids', [])):
+            # A new login can open a different default class. A generic "this
+            # class" label alone cannot identify the previously selected class.
+            state['requested_scope'] = None
         task = Task(self, state)
         self.tasks[job_id] = task
         self.persist(state)
@@ -113,27 +121,41 @@ class Manager:
                     task.event('会话等待或任务总时限已到，已关闭浏览器；可重新启动并登录')
 
 
+async def shutdown_tasks(manager, watchdog, timeout=8):
+    watchdog.cancel()
+    cleanup = [watchdog] + [asyncio.create_task(task.cancel('INTERRUPTED'))
+                           for task in manager.tasks.values() if task.state['status'] not in TERMINAL]
+    done, pending = await asyncio.wait(cleanup, timeout=timeout)
+    for future in done:
+        if not future.cancelled() and future.exception() is not None:
+            # Exceptions can contain authenticated page URLs; log only the type.
+            print('RPA shutdown cleanup failed: ' + type(future.exception()).__name__, flush=True)
+    for future in pending:
+        future.cancel()
+    if pending:
+        print('RPA shutdown cleanup timed out; proceeding with browser driver shutdown', flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app):
     RUNTIME.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = (RUNTIME / 'rpa-worker.lock').open('w')
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    app.state.token = control_token()
-    async with async_playwright() as playwright:
-        manager = Manager()
-        manager.playwright = playwright
-        app.state.manager = manager
-        watchdog = asyncio.create_task(manager.watchdog())
+    # Always release the lock, including failed startup and failed cleanup.
+    # Never unlink the lock file: another process could still hold its inode.
+    with (RUNTIME / 'rpa-worker.lock').open('a') as lock:
         try:
-            yield
-        finally:
-            watchdog.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await watchdog
-            for task in manager.tasks.values():
-                if task.state['status'] not in TERMINAL:
-                    await task.cancel('INTERRUPTED')
-    lock.close()
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('已有 RPA Worker 持有运行锁，请先停止旧进程后再启动') from None
+        app.state.token = control_token()
+        async with async_playwright() as playwright:
+            manager = Manager()
+            manager.playwright = playwright
+            app.state.manager = manager
+            watchdog = asyncio.create_task(manager.watchdog())
+            try:
+                yield
+            finally:
+                await shutdown_tasks(manager, watchdog)
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -169,7 +191,8 @@ async def health():
 
 @app.get('/capabilities')
 async def capabilities():
-    return {'protocol_version': 'browser.v1', 'action_schema': json.loads(tool_instructions())}
+    return {'protocol_version': 'browser.v1', 'observation_version': 'page.snapshot.v2',
+            'action_schema': json.loads(tool_instructions())}
 
 
 @app.get('/tasks/{job_id}/observation')
@@ -216,7 +239,8 @@ async def control(job_id: str, action: str, request: Request):
         return {'ok': True}
     elif action == 'class-scope':
         async with task.lock:
-            if task.state['control_mode'] != 'HUMAN' or task.state.get('export_attempted'):
+            if (task.state['control_mode'] != 'HUMAN' or task.state.get('export_attempted')
+                    or task.state.get('waiting_reason') not in {'CLASS_SCOPE', 'SCOPE_SELECTION'}):
                 raise ValueError('只有导出前的人工阶段可以确认范围')
             payload = await request.json()
             if payload.get('mode') not in ('all', 'selected'):
@@ -231,6 +255,7 @@ async def control(job_id: str, action: str, request: Request):
             task.scope_request = payload
             task.scope_request['option_names'] = {o['id']: o['name'] for o in options}
             task.update(requested_scope=payload)
+            task.event('已确认全部班级范围' if payload['mode'] == 'all' else '已确认所选班级范围')
     elif action == 'bind-exports':
         async with task.lock:
             if task.state['control_mode'] != 'HUMAN' or not task.state.get('export_attempted') or task.state.get('exports'):
@@ -243,7 +268,8 @@ async def control(job_id: str, action: str, request: Request):
             task.update(exports=[candidates[r] for r in refs], export_candidates=[])
     elif action == 'confirm-target':
         async with task.lock:
-            if task.state['control_mode'] != 'HUMAN' or task.state.get('export_attempted'):
+            if (task.state['control_mode'] != 'HUMAN' or task.state.get('export_attempted')
+                    or task.state.get('waiting_reason') != 'TARGET_CONFIRMATION'):
                 raise ValueError('当前不能重新确认目标')
             payload = await request.json()
             if any(payload.get(k) != task.state['target'][k] for k in ('course_name', 'assignment_name')):
@@ -282,4 +308,4 @@ async def browser_stream(job_id: str, socket: WebSocket):
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run(app, host='127.0.0.1', port=int(os.environ.get('RPA_CONTROL_PORT', 8765)),
-                access_log=False, ws_max_size=16 * 1024)
+                access_log=False, ws_max_size=16 * 1024, timeout_graceful_shutdown=10)

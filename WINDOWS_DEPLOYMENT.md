@@ -115,6 +115,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\stop.ps1
 
 完整启动成功后访问 `http://127.0.0.1:6006`，在页面注册自己的账号。启动顺序为基础服务、Kafka、RPA Worker、
 Python AI、Go 和前端。停止脚本停止它记录的应用进程及 Kafka，保留 MySQL/Redis。
+启停脚本会核对服务工作目录、进程命令及启动时间；RPA 还会核对单实例锁，旧进程尚未退出时拒绝重复启动。
+服务端口就绪后才保存正式 PID，启动失败不会留下失效的正式 PID。停止时先通知主进程清理子进程，
+默认等待 30 秒；超时后只强制结束已核实身份的服务进程组。`STOP_TIMEOUT` 可调整等待秒数。
+RPA 会将未结束的浏览器任务标记为中断，后台请求的优雅退出等待为 10 秒，任务清理等待最多 8 秒。
+若日志出现运行锁占用，先执行停止命令再启动；不要删除 `rpa-worker.lock` 文件来绕过检查。
 日志在 WSL 的 `/opt/teaching-runtime` 中。
 例如在 PowerShell 执行：
 

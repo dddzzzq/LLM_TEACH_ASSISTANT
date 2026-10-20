@@ -1,19 +1,24 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
+import re
 import time
+import traceback
 from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlsplit
 
 from .tools import validate_action
+from .errors import RpaIssue
 from .download_manager import save_download
-from .portal_adapter import PortalAdapter, TARGET_URL, FORBIDDEN, EXPORT_CONFIRM, match_new_exports
+from .portal_adapter import PortalAdapter, TARGET_URL, FORBIDDEN, EXPORT_CONFIRM, match_new_exports, reconcile_exports
 
 
 TERMINAL = {'SUCCEEDED', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED', 'INTERRUPTED'}
 ALLOWED_HOSTS = ('xidian.edu.cn', 'chaoxing.com', 'chaoxing.com.cn')
+logger = logging.getLogger('uvicorn.error')
 
 
 def allowed_url(url):
@@ -30,7 +35,7 @@ class Task:
         self.frame_lock = asyncio.Lock()
         self.gate = asyncio.Event()
         self.runner = None
-        self.scope_request = None
+        self.scope_request = state.get('requested_scope')
         self.last_activity = time.monotonic()
         self.last_progress = time.monotonic()
         self.recent = []
@@ -45,6 +50,8 @@ class Task:
         self.observation_revision = 0
         self.browser_frames = None
         self.pointer_owner = self.pointer_page = None
+        self.navigation_marker = None
+        self.stagnant_actions = 0
 
     def update(self, **fields):
         self.state.update(fields, updated_at=time.time(), state_version=self.state.get('state_version', 0) + 1)
@@ -55,6 +62,29 @@ class Task:
         events.append({'time': time.time(), 'message': message})
         self.state['events'] = events[-60:]
         self.update(message=message)
+        logger.info('RPA event job=%s stage=%s reason=%s message=%s',
+                    self.state['job_id'], self.state.get('stage'), self.state.get('waiting_reason', ''), message)
+
+    def record_failure(self, exc, operation, details=None):
+        # Browser/network exception strings can contain signed URLs, credentials,
+        # or page text. Only application-owned messages and stack locations leave
+        # this boundary; no raw exception strings, HTML, or form values.
+        known = isinstance(exc, RpaIssue)
+        report = {'code': exc.code if known else 'BROWSER_TIMEOUT' if type(exc).__name__ == 'TimeoutError' else 'PAGE_OPERATION_FAILED',
+                  'type': type(exc).__name__, 'operation': operation,
+                  'stage': self.state.get('stage'),
+                  'message': exc.public_message if known else '页面操作暂未完成（' + type(exc).__name__ + '）',
+                  'locations': [f'{Path(f.filename).name}:{f.lineno}:{f.name}'
+                                for f in traceback.extract_tb(exc.__traceback__)[-5:]]}
+        if details:
+            report['controls'] = details
+        if known and exc.evidence:
+            report['evidence'] = exc.evidence
+        self.update(last_error=report)
+        logger.warning('RPA failure job=%s diagnostic=%s', self.state['job_id'],
+                       json.dumps(report, ensure_ascii=False))
+        self.event(report['message'])
+        return report
 
     def wait_human(self, reason, message):
         self.gate.clear()
@@ -159,10 +189,9 @@ class Task:
                     raise
                 except Exception as exc:
                     errors += 1
-                    # Error messages from network/browser libraries may contain URLs or tokens.
-                    self.event('页面操作未完成：' + type(exc).__name__)
+                    report = self.record_failure(exc, 'export_loop')
                     if errors >= 3 or isinstance(exc, ValueError):
-                        self.wait_human('RECOVERY', '自动化需要协助，请检查当前页面后交还自动化')
+                        self.wait_human('RECOVERY', report['message'] + '；请检查当前页面后交还自动化')
                         errors = 0
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
@@ -246,15 +275,31 @@ class Task:
                 await self.execute(action)
                 receipts[action_id]['outcome'] = 'completed'
                 count = self.state.get('auto_actions', 0) + 1
-                self.update(action_receipts=receipts, auto_actions=count)
+                self.update(action_receipts=receipts, auto_actions=count, navigation_failures=0,
+                            decision_failures=0, last_error=None)
+                marker = (current['fingerprint'], {k:v for k,v in action.items() if k != 'value'})
+                self.stagnant_actions = self.stagnant_actions + 1 if marker == self.navigation_marker else 1
+                self.navigation_marker = marker
+                if self.stagnant_actions >= 3 and self.automatic():
+                    self.wait_human('NO_PROGRESS', '连续三次相同操作后页面仍没有变化，请协助检查页面')
                 if count >= 60 and self.automatic():
                     self.wait_human('ACTION_BUDGET', '自动页面操作已达到本轮预算，请检查页面后交还自动化')
             except asyncio.CancelledError:
                 # Durable UNKNOWN receipt survives Worker shutdown; do not execute again.
                 raise
-            except Exception:
-                if self.state['status'] not in TERMINAL:
-                    self.wait_human('RECOVERY', '动作执行结果需要核对，请检查当前页面后交还自动化')
+            except Exception as exc:
+                report = self.record_failure(exc, 'navigation:' + action['tool'])
+                self.recent.append({'tool':action['tool'], 'outcome':'unknown',
+                                    'error_code':report['code'], 'message':report['message']})
+                if self.automatic():
+                    failures = self.state.get('navigation_failures', 0) + 1
+                    self.update(navigation_failures=failures)
+                    if isinstance(exc, RpaIssue) and exc.code == 'TARGET_AMBIGUOUS':
+                        self.wait_human('TARGET_AMBIGUOUS', report['message'])
+                    elif failures >= 3:
+                        self.wait_human('NAVIGATION', '连续三次页面操作未完成：' + report['message'] + '；请协助检查页面')
+                    else:
+                        self.event('页面操作暂未完成，正在重新观察并尝试恢复（' + str(failures) + '/3）')
             return {'outcome': receipts[action_id]['outcome'], 'action_id': action_id, 'state': self.state}
 
     async def decision_failed(self, payload):
@@ -264,7 +309,12 @@ class Task:
                 if payload.get('reason') == 'AGENT_CONFIGURATION':
                     self.wait_human('AGENT_CONFIGURATION', '导航 Skill 或浏览器协议不兼容，请检查服务版本后恢复任务')
                 else:
-                    self.wait_human('AGENT_UNAVAILABLE', '页面决策服务暂不可用，请稍后交还自动化或手动操作')
+                    failures = self.state.get('decision_failures', 0) + 1
+                    self.update(decision_failures=failures)
+                    if failures >= 3:
+                        self.wait_human('AGENT_UNAVAILABLE', '页面决策连续三次失败，请稍后交还自动化或手动操作')
+                    else:
+                        self.event('页面决策暂时失败，正在自动重试（' + str(failures) + '/3）')
             return self.state
 
     async def route(self, route):
@@ -315,11 +365,17 @@ class Task:
                 raise ValueError('观察引用已失效')
             page, loc, item = self.adapter.refs[ref]
             self.page = page
+            if item.get('submits_form') and not item.get('search_submit'):
+                raise ValueError('表单提交必须由任务控制器核验')
             if not allowed_url(page.url) or FORBIDDEN.search(item['name']):
                 raise ValueError('该操作不属于附件下载流程')
             if item['name'].strip() == '下载':
                 raise ValueError('文件下载必须使用已关联的导出记录')
-            if EXPORT_CONFIRM.search(item['name']):
+            # A read-only review entry can be named "查看提交" in a redesigned
+            # portal. It is not a submit button; actual confirmations remain
+            # controller-owned and cannot be clicked by the page Agent.
+            review_entry = re.fullmatch(r'(查看|浏览)(?:学生)?提交(?:记录|详情|列表|情况|附件)?', item['name'].strip())
+            if EXPORT_CONFIRM.search(item['name']) and not review_entry:
                 raise ValueError('提交动作必须由任务控制器核验')
             if tool == 'fill':
                 if not any(x in (item['name'] + item['context']).lower() for x in ('搜索', 'search', '查找')):
@@ -339,8 +395,6 @@ class Task:
                 if new_pages:
                     self.page = new_pages[-1]
         self.recent.append({k: v for k, v in decision.items() if k != 'value'})
-        if len(self.recent) >= 3 and self.recent[-1] == self.recent[-2] == self.recent[-3]:
-            self.wait_human('NO_PROGRESS', '相同操作没有明确进展，请协助检查页面')
 
     async def prepare_export(self, area):
         page, frame, modal = area
@@ -350,15 +404,25 @@ class Task:
             return
         options = await self.adapter.classes(modal)
         self.update(stage='SELECT_CLASSES', classes=options)
-        if self.scope_request and self.scope_request.get('option_names') != {o['id']: o['name'] for o in options}:
-            self.scope_request = None
+        if self.scope_request:
+            self.scope_request = self.reconcile_scope(self.scope_request, options)
+            if self.scope_request != self.state.get('requested_scope'):
+                self.update(requested_scope=self.scope_request)
         if not self.scope_request:
             self.wait_human('CLASS_SCOPE', '请在面板中明确选择要导出的班级，或选择全部班级')
             return
-        scope = await self.adapter.apply_scope(modal, self.scope_request, options)
+        try:
+            scope = await self.adapter.apply_scope(modal, self.scope_request, options)
+        except RpaIssue as exc:
+            report = self.record_failure(exc, 'apply_scope', await self.adapter.scope_diagnostics(modal))
+            self.wait_human('EXPORT_FORMAT' if exc.code.startswith('ATTACHMENT_') else 'SCOPE_SELECTION',
+                            report['message'])
+            return
         before = await self.adapter.export_rows()
+        scope['baseline_observed'] = bool(before) or await self.adapter.export_center_visible()
         self.update(class_scope=scope, export_baseline=[r['ref'] for r in before],
-                    export_attempted=True, stage='EXPORT', export_started_at=time.time())
+                    export_attempted=True, stage='EXPORT', export_started_at=time.time(), last_error=None)
+        self.event('班级范围和附件导出选项已核验，正在提交导出')
         # Persist intent BEFORE clicking; an uncertain result can never blindly submit again.
         confirm = modal.locator('a.confirmDown').filter(has_text='确定')
         if not await confirm.count():
@@ -366,6 +430,26 @@ class Task:
         await confirm.click(timeout=8000)
         self.update(stage='WAIT_EXPORT')
         self.event('已提交导出，正在关联下载中心任务')
+
+    @staticmethod
+    def reconcile_scope(request, options):
+        """Retain explicit intent after excluding an unrelated option or reordering."""
+        names = {option['id']:option['name'] for option in options}
+        if request.get('mode') == 'all':
+            # The user confirmed all classes in this already verified assignment;
+            # removing a spurious naming option does not change that intent.
+            return {**request, 'class_ids':[], 'option_names':names} if any(o['all'] for o in options) else None
+        if request.get('mode') != 'selected' or not request.get('class_ids'):
+            return None
+        normalize = lambda value: re.sub(r'\s+', ' ', value).strip()
+        selected = []
+        for ref in request['class_ids']:
+            old_name = normalize(request.get('option_names', {}).get(ref, ''))
+            matches = [o['id'] for o in options if not o['all'] and normalize(o['name']) == old_name]
+            if not old_name or len(matches) != 1:
+                return None
+            selected.append(matches[0])
+        return {**request, 'class_ids':selected, 'option_names':names}
 
     async def process_exports(self):
         async with self.lock:
@@ -395,37 +479,53 @@ class Task:
                         self.wait_human('EXPORT_ASSOCIATION', '请核对并勾选本次导出的全部记录；系统不会按行号猜测归属')
                     return
                 self.update(exports=exports)
-            current = {r['ref']: r for r in rows}
+            exports = reconcile_exports(exports, rows, self.state.get('export_baseline', []))
+            if exports != self.state.get('exports'):
+                self.update(exports=exports)
             files = self.state.get('files', [])
             completed = {f['export_ref'] for f in files if f['status'] == 'VERIFIED'}
             failed = {f['export_ref'] for f in files if f['status'] == 'FAILED'}
+            ready, missing, pending = [], [], []
             for export in exports:
                 ref = export['ref']
                 if ref in completed or ref in failed:
                     continue
-                row = current.get(ref)
-                if not row:
-                    self.wait_human('EXPORT_ASSOCIATION', '已关联的导出记录暂不可见，请检查下载中心')
-                    return
-                if row['status'] == 'FAILED':
-                    files.append({'export_ref': ref, 'status': 'FAILED', 'error': '平台导出失败'})
+                if not export['available']:
+                    missing.append(export)
+                elif export['status'] == 'FAILED':
+                    files.append({'export_ref': ref, 'status': 'FAILED', 'error': '平台导出失败或已过期'})
                     self.update(files=files)
-                    continue
-                if row['status'] != 'READY':
-                    if time.time() - self.state['export_started_at'] > 900:
-                        self.wait_human('EXPORT_TIMEOUT', '平台打包等待超过15分钟，请检查导出状态')
-                    return
-                page, loc = self.adapter.export_locators[ref]
+                elif export['status'] == 'READY':
+                    ready.append(export)
+                else:
+                    pending.append(export)
+            if ready:
+                export = ready[0]
+                ref = export['ref']
+                page, loc = self.adapter.export_locators[export['row_ref']]
                 self.page = page
                 button = loc.locator('a.download_ic').first
                 if not await button.count():
                     button = loc.get_by_text('下载', exact=True).first
-                self.update(stage='DOWNLOAD')
+                self.update(stage='DOWNLOAD', download_progress=None, last_error=None)
+                self.event(f'正在下载已导出的附件（已校验 {len(completed)}/{len(exports)}，仍在打包 {len(pending)}）')
                 async with page.expect_download(timeout=30000) as info:
                     await button.click(timeout=8000)
                 download = await info.value
-                break
             else:
+                if missing:
+                    self.wait_human('EXPORT_ASSOCIATION', '已关联的导出记录不可见或不唯一，请检查下载中心；已成功附件已保留')
+                    return
+                if pending:
+                    if time.time() - self.state['export_started_at'] > 900:
+                        self.wait_human('EXPORT_TIMEOUT', '平台打包等待超过15分钟，请检查导出状态')
+                    else:
+                        if self.state.get('stage') != 'WAIT_EXPORT':
+                            self.update(stage='WAIT_EXPORT')
+                        message = f'等待平台打包 {len(pending)} 个附件，已下载校验 {len(completed)}/{len(exports)} 个'
+                        if self.state.get('message') != message:
+                            self.event(message)
+                    return
                 verified = sum(f['status'] == 'VERIFIED' for f in files)
                 status = 'SUCCEEDED' if verified == len(exports) else 'PARTIAL_SUCCESS' if verified else 'FAILED'
                 self.update(status=status, stage='DONE', files=files)
@@ -434,15 +534,25 @@ class Task:
         # Transfer proceeds without owning the browser action lock. Human takeover stays responsive.
         try:
             result = await save_download(download, self.manager.download_root / self.state['job_id'], ref,
-                progress=lambda: self.download_bytes.get(self.download_urls.get(download.url), 0))
+                progress=lambda: self.download_bytes.get(self.download_urls.get(download.url), 0),
+                on_verifying=lambda: self.verifying_download(len(completed), len(exports)))
             result['class_name'] = next((c['name'] for c in self.state['class_scope'].get('classes', [])
                 if not c.get('all') and c['name'] in export['text']), '')
             files.append(result)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            self.record_failure(exc, 'download')
             files.append({'export_ref': ref, 'status': 'FAILED', 'error': '下载或压缩包校验失败'})
         self.update(files=files, stage='WAIT_EXPORT')
+        if self.state['control_mode'] == 'AUTO':
+            verified = sum(f['status'] == 'VERIFIED' for f in files)
+            self.event(f'附件处理进度：已下载校验 {verified}/{len(exports)} 个')
+
+    def verifying_download(self, completed, total):
+        self.update(stage='VERIFY')
+        if self.state['control_mode'] == 'AUTO':
+            self.event(f'附件传输完成，正在校验压缩包（此前已校验 {completed}/{total} 个）')
 
     async def pause(self):
         if self.state['status'] in TERMINAL:
@@ -469,7 +579,10 @@ class Task:
             await self._release_pointer_locked()
             self.update(control_mode='AUTO', status='RUNNING', waiting_reason='', auth_status='AUTHENTICATED',
                         stage='LOCATE_COURSE' if self.state['stage'] == 'AUTHENTICATE' else self.state['stage'],
-                        control_epoch=self.state['control_epoch'] + 1, auto_actions=0)
+                        control_epoch=self.state['control_epoch'] + 1, auto_actions=0,
+                        navigation_failures=0, decision_failures=0)
+            self.navigation_marker = None
+            self.stagnant_actions = 0
             self.event('正在重新核验页面并继续自动化')
             self.gate.set()
 

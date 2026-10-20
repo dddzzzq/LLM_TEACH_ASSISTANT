@@ -65,6 +65,13 @@ func (g *toolGateway) execute(ctx context.Context, name, args string) (string, e
 	if required != "" && g.visible[required] == "" {
 		return fail("请先调用 load_skill 加载 " + required + "，再按指导执行")
 	}
+	if extra, ok := t.(interface{ AdditionalSkills(string) []string }); ok {
+		for _, skill := range extra.AdditionalSkills(args) {
+			if g.visible[skill] == "" {
+				return fail("完整流程包含批改，请先加载 " + skill)
+			}
+		}
+	}
 	if g.role == "student" && name == "query_student_score" {
 		args, _ = toolJSON(map[string]string{"student_id": g.username})
 	}

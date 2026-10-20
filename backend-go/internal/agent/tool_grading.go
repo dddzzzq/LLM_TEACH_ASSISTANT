@@ -36,7 +36,7 @@ func (t *GradingTool) Schema() string {
 	case "status":
 		return `{"type":"object","properties":{"job_id":{"type":"string"}},"required":["job_id"],"additionalProperties":false}`
 	default:
-		return `{"type":"object","properties":{"kind":{"type":"string","enum":["homework","exam"]},"resource_id":{"type":"string"},"file_path":{"type":"string","description":"homework 的用户或上传结果提供的 ZIP 路径"},"student_id":{"type":"string","description":"exam 的学生学号"},"image_paths":{"type":"array","items":{"type":"string"},"description":"exam 的答卷图片，严格按页码排序"}},"required":["kind","resource_id"],"additionalProperties":false}`
+		return `{"type":"object","properties":{"kind":{"type":"string","enum":["homework","exam"]},"resource_id":{"type":"string"},"batch_id":{"type":"string","description":"已整理的本人材料批次ID，优先使用"},"directory_path":{"type":"string","description":"老师明确指定的本机目录或压缩包绝对路径；先整理再按要求批改"},"output_root":{"type":"string","description":"可选的材料保存根目录"},"allow_partial":{"type":"boolean","description":"仅在老师明确同意时批改异常批次中已识别的学生"},"file_path":{"type":"string","description":"兼容旧的班级ZIP入口"},"student_id":{"type":"string","description":"exam 的学生学号"},"image_paths":{"type":"array","items":{"type":"string"},"description":"exam 的答卷图片，严格按页码排序"}},"required":["kind","resource_id"],"additionalProperties":false}`
 	}
 }
 func (t *GradingTool) Execute(args string) (string, error) {

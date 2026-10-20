@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
 	"grading-gateway/internal/grading"
+	"grading-gateway/internal/materials"
 	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/schemas"
@@ -172,6 +174,7 @@ func GetAssignment(c *gin.Context) {
 		}
 
 		formattedSubmissions = append(formattedSubmissions, map[string]interface{}{
+			"material_batch_id": sub.MaterialBatchID, "grading_job_id": sub.GradingJobID,
 			"id":                    sub.ID,
 			"student_id":            sub.StudentID,
 			"student_name":          sub.StudentName,
@@ -211,6 +214,9 @@ func GetAssignmentSubmissions(c *gin.Context) {
 
 	var submissions = make([]models.Submission, 0)
 	query := database.DB.Where("assignment_id = ?", assignmentID)
+	if batch := c.Query("batch_id"); batch != "" {
+		query = query.Where("material_batch_id = ?", batch)
+	}
 
 	// 如果是学生，只能查看自己的提交
 	if roleErr == nil && usernameErr == nil && role == "student" {
@@ -276,12 +282,15 @@ func UploadAssignment(c *gin.Context) {
 		return
 	}
 	assignmentID := c.Param("id")
-	if !checkGradingTarget(c, actor, "homework", assignmentID) {
+	id, parseErr := grading.ResourceID(assignmentID)
+	var target models.Assignment
+	if parseErr != nil || database.DB.First(&target, id).Error != nil {
+		c.JSON(404, gin.H{"detail": "作业不存在"})
 		return
 	}
 	file, err := c.FormFile("batch_file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "请上传本次作业 ZIP"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "请上传本次作业 ZIP/RAR/7z"})
 		return
 	}
 	uploadDir := "./uploads/assignments"
@@ -289,12 +298,23 @@ func UploadAssignment(c *gin.Context) {
 		c.JSON(500, gin.H{"detail": "无法创建上传目录"})
 		return
 	}
-	savePath := filepath.Join(uploadDir, fmt.Sprintf("assignment_%s_%s%s", assignmentID, uuid.NewString(), filepath.Ext(file.Filename)))
+	uploadDir = filepath.Join(uploadDir, uuid.NewString())
+	if err := os.MkdirAll(uploadDir, 0700); err != nil {
+		c.JSON(500, gin.H{"detail": "无法创建批次上传目录"})
+		return
+	}
+	savePath := filepath.Join(uploadDir, filepath.Base(strings.ReplaceAll(file.Filename, `\`, "/")))
 	if err := c.SaveUploadedFile(file, savePath); err != nil {
 		c.JSON(500, gin.H{"detail": "文件保存失败"})
 		return
 	}
-	submitGradingUpload(c, actor, grading.Request{Kind: "homework", ResourceID: assignmentID, FilePath: savePath})
+	path, _ := filepath.Abs(savePath)
+	batch, err := materials.Default().Create(c.Request.Context(), materials.Actor{UserID: actor.UserID, Role: actor.Role}, materials.Request{SourcePath: path, AssignmentID: id}, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		c.JSON(400, gin.H{"detail": err.Error()})
+		return
+	}
+	c.JSON(202, gin.H{"outcome": "accepted", "job_id": batch.ID, "job_type": "homework_materials", "batch_id": batch.ID, "message": "作业材料已导入，正在整理；完成后请主动点击开始批改"})
 }
 
 // 一键清空所有学生提交handler
@@ -316,7 +336,11 @@ func ExportAssignmentExcel(c *gin.Context) {
 	var assignment models.Assignment
 
 	// 预加载该作业的所有批改记录
-	if err := database.DB.Preload("Submissions").First(&assignment, id).Error; err != nil {
+	preload := database.DB.Preload("Submissions")
+	if batch := c.Query("batch_id"); batch != "" {
+		preload = database.DB.Preload("Submissions", "material_batch_id = ?", batch)
+	}
+	if err := preload.First(&assignment, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到该作业"})
 		return
 	}

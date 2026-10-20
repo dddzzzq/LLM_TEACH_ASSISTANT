@@ -117,7 +117,7 @@ apiClient.interceptors.response.use(
           refresh_token: refreshToken,
         });
 
-        const { access_token, refresh_token, user_id, role, name } = response.data;
+        const { access_token, refresh_token, user_id, role, name, username } = response.data;
 
         // 存储新的 Token
         setTokens(access_token, refresh_token);
@@ -128,6 +128,7 @@ apiClient.interceptors.response.use(
           userInfo.user_id = user_id;
           userInfo.role = role;
           userInfo.name = name;
+          if (username) userInfo.username = username;
           setUserInfo(userInfo);
         }
 

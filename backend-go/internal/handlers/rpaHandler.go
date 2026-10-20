@@ -57,6 +57,10 @@ func ControlRPAJob(c *gin.Context) {
 		return
 	}
 	action := c.Param("action")
+	if action == "requirements" {
+		supplementRPARequirements(c, job.ID)
+		return
+	}
 	if action == "map-file" {
 		if job.Status == "CANCELLED" {
 			c.JSON(409, gin.H{"error": "任务已取消"})
@@ -70,7 +74,7 @@ func ControlRPAJob(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "请提供有效的班级名称"})
 			return
 		}
-		result := database.DB.Model(&models.RPAFile{}).Where("id = ? AND job_id = ? AND grading_status = ?", payload.FileID, job.ID, "WAITING_RUBRIC").Updates(map[string]any{"class_name": strings.TrimSpace(payload.ClassName), "assignment_id": 0, "message": "用户已核对班级，等待匹配作业"})
+		result := database.DB.Model(&models.RPAFile{}).Where("id = ? AND job_id = ? AND grading_status IN ? AND grading_job_id = '' AND (material_batch_id = '' OR material_batch_id IS NULL)", payload.FileID, job.ID, []string{"WAITING_RUBRIC", "DOWNLOADED"}).Updates(map[string]any{"class_name": strings.TrimSpace(payload.ClassName), "assignment_id": 0, "message": "用户已核对班级，等待匹配作业"})
 		if result.Error != nil || result.RowsAffected == 0 {
 			c.JSON(409, gin.H{"error": "附件不存在或已开始批改"})
 			return

@@ -7,10 +7,15 @@ description: 组织课程作业批改：定位作业、核对提交批次与评�
 
 - 用 inspect_grading_target 查找或检查 homework 目标。优先使用用户指定的 resource_id；按名称查找返回多个候选时，让用户结合课程、班级、作业名称选择，不猜测 ID。
 - 题目要求和 JSON 评分标准来自目标作业的业务数据。若结果为 needs_input，说明缺少的具体内容和对应作业页面，请用户补齐；不要编造标准、满分或自动创建新作业。
-- 明确本次 ZIP 提交批次。file_path 必须由用户或系统上传结果提供，不搜索或猜测服务器路径。用户尚未上传时，引导到作业详情页上传；该页面上传会自动提交批改，不要再次提交同一批。
-- 若用户要求从官网获取作业，使用原有下载工具及人工登录流程；其工作流会自动接续批改，不另行重复调用 start_grading_job。
-- 用户明确要求开始批改且目标及材料齐备时，使用 start_grading_job，kind=homework。该工具再次检查标准及附件并返回 job_id；accepted/PENDING 仅表示任务已受理。
+- 明确本次材料来源。优先使用已有 batch_id；get_homework_materials 检查学生、文件和异常。老师只要求整理时，不提交批改。
+- 老师指定本机目录或压缩包时，可用 extract_homework_files 传 source_path、assignment_id、output_root 先整理（auto_grade 默认 false）；需要全流程时，可直接 start_grading_job 传 directory_path，后台先整理再批改。路径必须来自老师或系统返回，不能搜索、猜测任意服务器路径。
+- 作业详情页上传现在只导入并整理，不自动批改；整理完成后用 batch_id 发起。同一批次重复提交只查询/返回已有批改任务。
+- 老师要求从官网获取并批改时，还须 load_skill 加载 download-homework，再使用 fetch_homework 的 after_download=grade。下载流程已持久化后续批改要求，不另行重复提交。
+- 对现有下载附件仅发起批改时，extract_homework_files 可传 source_job_id、source_file_id、auto_grade=true，后台整理后继续。仅下载/解压请求不允许设置 auto_grade。
+- 用户明确要求批改、目标及材料齐备时，start_grading_job 的 kind=homework、resource_id=作业ID，并优先传 batch_id。directory_path 支持目录或 ZIP/RAR/7z，也可处理其中的嵌套压缩包；file_path 仅保留旧班级 ZIP 兼容入口。
+- 材料为 NEEDS_REVIEW 时先解释清单问题。老师明确同意只批改已识别学生时才传 allow_partial=true；冲突学生不会被默默选择。无法解析不等于缺交或零分。
+- accepted/PENDING 仅表示受理。材料整理任务 job_type=homework_materials，需用 get_homework_materials 查询；已创建的 HOMEWORK 批改任务使用 get_grading_job。
 - 工作流执行现有代码/报告解析、查重、AIGC 分析和评分，不承诺尚未实现的自选分析开关。
 - 查询已有任务用 get_grading_job，不重新提交。只报告返回的状态和结果入口；FAILED 说明需要处理错误，不能当作全部批改完成。任务创建后结束本轮等待，由用户稍后查询，不循环轮询。
-- SUCCESS 表示主批改完成。现有成绩池化仍可能后台运行，不能声称成绩已经最终定稿。跨批次汇总尚未隔离，不能将作业页面的所有历史提交说成本次新增结果。
+- 新材料批次批改保留评分配置快照，不对历史批次混合池化。旧 ZIP 兼容入口仍可能后台池化。不能将详情页所有历史提交说成本次新增结果。
 - 解释成绩时依据已保存的评分记录及本次标准，区分 AI 评分和教师复核。查重与 AIGC 分析是辅助信息，不据此自行修改标准或发布处分结论。不要在对话中伪造逐人分数和成功数量。

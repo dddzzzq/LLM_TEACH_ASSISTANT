@@ -73,6 +73,7 @@ func FormatSubmission(sub models.Submission) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
+		"material_batch_id": sub.MaterialBatchID, "grading_job_id": sub.GradingJobID,
 		"id":                    sub.ID,
 		"student_id":            sub.StudentID,
 		"student_name":          sub.StudentName,

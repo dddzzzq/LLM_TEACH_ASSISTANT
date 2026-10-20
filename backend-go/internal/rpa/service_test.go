@@ -1,6 +1,7 @@
 package rpa
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,8 +18,78 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/materials"
 	"grading-gateway/internal/models"
 )
+
+func TestIntegrationDownloadedArchivePreparesOnceWithoutGrading(t *testing.T) {
+	integrationDB(t)
+	root := t.TempDir()
+	t.Setenv("HOMEWORK_ALLOWED_ROOTS", root)
+	t.Setenv("HOMEWORK_MATERIALS_ROOT", filepath.Join(root, "prepared"))
+	job, err := Create(t.Context(), 8401, Target{CourseName: "流程测试课", AssignmentName: uuid.NewString(), OutputRoot: filepath.Join(root, "out")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.AfterDownload != "extract" {
+		t.Fatal("default flow is not extraction only")
+	}
+	dir := filepath.Join(root, job.ID)
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "班级A-作业.zip")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := zip.NewWriter(f)
+	for name, data := range map[string]string{"20260001_张三/src/main.py": "print(1)", "20260001_张三/报告.md": "design"} {
+		w, _ := z.Create(name)
+		w.Write([]byte(data))
+	}
+	z.Close()
+	f.Close()
+	hash, _ := materials.HashFile(path)
+	info, _ := os.Stat(path)
+	state, _ := json.Marshal(map[string]any{"files": []map[string]any{{"status": "VERIFIED", "path": path, "sha256": hash, "size": info.Size(), "class_name": "A", "export_ref": "e1"}}})
+	job.Status = "SUCCEEDED"
+	job.StateJSON = string(state)
+	database.DB.Save(job)
+	if err := importFiles(*job); err != nil {
+		t.Fatal(err)
+	}
+	var file models.RPAFile
+	database.DB.First(&file, "job_id = ?", job.ID)
+	if err := dispatchFile(file); err != nil {
+		t.Fatal(err)
+	}
+	database.DB.First(&file, "id = ?", file.ID)
+	if file.MaterialBatchID == "" || file.GradingJobID != "" {
+		t.Fatal("download did not create an independent material batch")
+	}
+	if err := materials.Default().ProcessOne(t.Context(), file.MaterialBatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatchFile(file); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	database.DB.Model(&models.MaterialBatch{}).Where("source_file_id = ?", file.ID).Count(&count)
+	if count != 1 {
+		t.Fatal("polling duplicated material batch")
+	}
+	var batch models.MaterialBatch
+	database.DB.First(&batch, "id = ?", file.MaterialBatchID)
+	if batch.Status != "READY" || batch.AutoGrade || batch.GradingJobID != "" {
+		t.Fatalf("unexpected prepared flow: %+v", batch)
+	}
+	if err := SaveState(job.ID, []byte(`{"status":"CANCELLED","state_version":99}`)); err != nil {
+		t.Fatal(err)
+	}
+	database.DB.First(&batch, "id = ?", batch.ID)
+	if batch.Status != "CANCELLED" || batch.AutoGrade {
+		t.Fatal("cancelled flow left continuation active")
+	}
+}
 
 func TestWorkerRequestAuthenticatesAndPreservesConflict(t *testing.T) {
 	token := filepath.Join(t.TempDir(), "token")
@@ -70,14 +141,14 @@ func integrationDB(t *testing.T) {
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old; sql, _ := db.DB(); sql.Close() })
-	if err := db.AutoMigrate(&models.RPAJob{}, &models.RPAFile{}, &models.AsyncJob{}, &models.Assignment{}, &models.Submission{}); err != nil {
+	if err := db.AutoMigrate(&models.RPAJob{}, &models.RPAFile{}, &models.AsyncJob{}, &models.Assignment{}, &models.Submission{}, &models.MaterialBatch{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestIntegrationOwnershipVersionAndGradingOutbox(t *testing.T) {
+func TestIntegrationOwnershipVersionAndDownloadDoesNotGrade(t *testing.T) {
 	integrationDB(t)
-	job, err := Create(context.Background(), 1001, Target{CourseName: "测试课程", AssignmentName: "测试作业"})
+	job, err := Create(context.Background(), 1001, Target{CourseName: "测试课程", AssignmentName: "测试作业", AfterDownload: "download"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +188,7 @@ func TestIntegrationOwnershipVersionAndGradingOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	database.DB.First(&files[0], "id = ?", files[0].ID)
-	if files[0].GradingStatus != "WAITING_RUBRIC" || files[0].GradingJobID != "" || files[0].AssignmentID == 0 {
+	if files[0].GradingStatus != "DOWNLOADED" || files[0].GradingJobID != "" || files[0].AssignmentID == 0 {
 		t.Fatal("missing rubric was automatically graded")
 	}
 	database.DB.Model(&models.Assignment{}).Where("id = ?", files[0].AssignmentID).Updates(map[string]any{"question": "task", "rubric": `{"correctness":100}`})
@@ -126,19 +197,16 @@ func TestIntegrationOwnershipVersionAndGradingOutbox(t *testing.T) {
 	}
 	database.DB.First(&files[0], "id = ?", files[0].ID)
 	firstID := files[0].GradingJobID
-	if files[0].GradingStatus != "READY" || firstID == "" {
-		t.Fatal("configured file not queued")
+	if files[0].GradingStatus != "DOWNLOADED" || firstID != "" {
+		t.Fatal("adding rubric unexpectedly submitted grading")
 	}
 	if err := dispatchFile(files[0]); err != nil {
 		t.Fatal(err)
 	}
 	var count int64
-	database.DB.Model(&models.AsyncJob{}).Where("id = ?", firstID).Count(&count)
-	if count != 1 {
-		t.Fatal("duplicate grading task created")
-	}
-	if firstID != uuid.NewSHA1(uuid.NameSpaceURL, []byte("rpa-grade:"+files[0].ID)).String() {
-		t.Fatal("unstable grading identity")
+	database.DB.Model(&models.AsyncJob{}).Where("reference_id = ? AND job_type = ?", job.ID, models.JobTypeHomework).Count(&count)
+	if count != 0 {
+		t.Fatal("download created an implicit grading task")
 	}
 	if err := SaveState(job.ID, []byte(`{"status":"CANCELLED","state_version":4}`)); err != nil {
 		t.Fatal(err)

@@ -8,13 +8,22 @@
       <div v-if="mode === 'selected'" class="space-y-2 pl-4">
         <label v-for="item in classes.filter(c => !c.all)" :key="item.id" class="flex gap-2 text-sm"><input v-model="ids" type="checkbox" :value="item.id" />{{ item.name }}</label>
       </div>
-      <button class="px-3 py-2 bg-amber-700 rounded text-white text-sm disabled:opacity-50" :disabled="!mode || (mode === 'selected' && !ids.length)" @click="$emit('confirm', { mode, class_ids: ids })">确认范围并继续</button>
+      <button class="px-3 py-2 bg-amber-700 rounded text-white text-sm disabled:opacity-50" :disabled="busy || !mode || (mode === 'selected' && !ids.length)" @click="$emit('confirm', { mode, class_ids: mode === 'all' ? [] : ids })">{{ confirmedScope ? '更新范围并继续' : '确认范围并继续' }}</button>
     </template>
   </div>
 </template>
 <script setup>
-import { ref } from 'vue'
-defineProps({ classes: { type: Array, default: () => [] } })
+import { ref, watch } from 'vue'
+const props = defineProps({
+  classes: { type: Array, default: () => [] },
+  confirmedScope: { type: Object, default: null },
+  busy: { type: Boolean, default: false },
+})
 defineEmits(['confirm'])
 const mode = ref(''), ids = ref([])
+watch(() => JSON.stringify(props.confirmedScope), () => {
+  const scope = props.confirmedScope
+  mode.value = scope?.mode || ''
+  ids.value = [...(scope?.class_ids || [])]
+}, { immediate: true })
 </script>

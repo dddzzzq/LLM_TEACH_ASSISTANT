@@ -30,15 +30,15 @@
       </div>
 
       <div class="p-5 md:p-7 surface">
-        <h2 class="mb-4 text-2xl font-bold text-gray-800">提交学生作业</h2>
+        <h2 class="mb-4 text-2xl font-bold text-gray-800">导入学生作业</h2>
         <form @submit.prevent="submitBatchFile">
           <label for="file-upload" class="block text-sm font-medium text-gray-700">
-            上传包含所有学生作业的ZIP压缩包
+            上传班级或学生作业 ZIP/RAR/7z；上传后只整理，不自动批改
           </label>
           <input
             id="file-upload"
             type="file"
-            accept=".zip,.rar"
+            accept=".zip,.rar,.7z"
             class="block w-full mt-2 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 rounded-full hover:file:bg-indigo-100"
             required
             @change="handleFileChange"
@@ -51,7 +51,7 @@
             :disabled="isSubmitting"
             class="flex justify-center px-6 py-2 mt-4 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm w-full sm:w-auto hover:bg-indigo-700 disabled:bg-indigo-400"
           >
-            <span v-if="!isSubmitting">提交并开始后台评分</span>
+            <span v-if="!isSubmitting">上传并整理材料</span>
             <span v-else>提交中...</span>
           </button>
         </form>
@@ -64,11 +64,12 @@
         >
           {{ submissionMessage }}
         </div>
+        <MaterialBatchPanel :assignment-id="props.id" :refresh-key="materialsVersion" @results="showBatchResults" />
       </div>
 
       <div class="p-5 md:p-7 surface">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-2xl font-bold text-gray-800">评分结果</h2>
+          <div><h2 class="text-2xl font-bold text-gray-800">评分结果</h2><p v-if="resultsBatchId" class="text-xs text-slate-500 mt-2">仅显示批次 {{ resultsBatchId }} <button class="text-blue-700 ml-2" @click="showBatchResults('')">查看全部批次</button></p></div>
           <div class="flex items-center gap-4">
             <button
               @click="exportResults"
@@ -80,6 +81,7 @@
             </button>
             <button
               @click="deleteAllResults"
+              v-if="!resultsBatchId"
               :disabled="isLoadingResults || results.length === 0"
               class="text-sm font-semibold text-red-600 hover:text-red-800 disabled:text-gray-400 disabled:cursor-not-allowed"
             >
@@ -298,6 +300,9 @@ import gradingApi from "../services/gradingApi";
 import Loader from "../components/Loader.vue";
 import ReportModal from "../components/ReportModal.vue";
 import ReviewModal from "../components/ReviewModal.vue";
+import MaterialBatchPanel from "../components/MaterialBatchPanel.vue";
+const materialsVersion=ref(0);
+const resultsBatchId=ref('');
 
 // --- 接口 ---
 interface CodeDocMatchReport {
@@ -370,7 +375,7 @@ const exportResults = async () => {
   }
   isExporting.value = true;
   try {
-    const response = await gradingApi.exportAssignment(props.id);
+    const response = await gradingApi.exportAssignment(props.id,resultsBatchId.value);
     const blob = new Blob([response.data], { type: response.headers["content-type"] });
 
     const contentDisposition = response.headers["content-disposition"];
@@ -426,7 +431,7 @@ const fetchAssignmentDetails = async () => {
 const fetchResults = async () => {
   isLoadingResults.value = true;
   try {
-    const response = await gradingApi.getResultsForAssignment(props.id);
+    const response = await gradingApi.getResultsForAssignment(props.id,resultsBatchId.value);
     // 添加 || []，防止 Go 后端返回 null 导致前端崩溃
     results.value = response.data || [];
   } catch (e) {
@@ -435,6 +440,8 @@ const fetchResults = async () => {
     isLoadingResults.value = false;
   }
 };
+
+const showBatchResults = async (batchId: string) => { resultsBatchId.value=batchId;await fetchResults(); };
 
 const submitBatchFile = async () => {
   if (!file.value) return;
@@ -446,6 +453,7 @@ const submitBatchFile = async () => {
   try {
     const response = await gradingApi.submitBatch(props.id, formData);
     submissionMessage.value = response.data.message;
+    materialsVersion.value++;
     fileName.value = "";
     file.value = null;
     (document.getElementById("file-upload") as HTMLInputElement).value = "";
@@ -556,7 +564,7 @@ const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
 
 const formatAIGC = (report?: AIGCReport): string => {
   if (!report) return "未检测";
-  const probability = (report.ai_probability * 100).toFixed(1); 
+  const probability = (report.ai_probability * 100).toFixed(1);
   const source = report.detection_source ? ` (${report.detection_source})` : "";
   return `${probability}% AI生成${source}`;
 };

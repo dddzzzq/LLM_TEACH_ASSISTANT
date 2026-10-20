@@ -21,10 +21,10 @@ func (s *FetchAndGradeHomeworkTool) Name() string {
 	return "fetch_and_grade_homework"
 }
 func (s *FetchAndGradeHomeworkTool) Description() string {
-	return "创建官网作业下载任务。仅需课程名和作业名；用户在任务浏览器中完成登录与验证码、选择班级，可随时接管。附件校验后按现有配置自动批改。禁止索取密码。"
+	return "创建独立的官网作业拉取任务。默认下载并按课程/作业整理到目录，不启动批改。after_download可选download、extract、grade；仅老师明确要求全流程批改时使用grade。禁止索取密码。"
 }
 func (s *FetchAndGradeHomeworkTool) Schema() string {
-	return `{"type":"object","properties":{"course_name":{"type":"string","description":"官网课程名称"},"assignment_name":{"type":"string","description":"官网作业名称"},"term":{"type":"string","description":"可选学期，帮助同名课程消歧"}},"required":["course_name","assignment_name"],"additionalProperties":false}`
+	return `{"type":"object","properties":{"course_name":{"type":"string","description":"官网课程名称"},"assignment_name":{"type":"string","description":"官网作业名称"},"term":{"type":"string","description":"可选学期"},"after_download":{"type":"string","enum":["download","extract","grade"],"description":"默认extract，下载并解压后停止；download仅下载；grade须老师明确要求批改"},"output_root":{"type":"string","description":"老师指定的保存根目录，系统追加课程/作业/班级/批次"}},"required":["course_name","assignment_name"],"additionalProperties":false}`
 }
 func (s *FetchAndGradeHomeworkTool) Execute(args string) (string, error) {
 	return s.ExecuteContext(context.Background(), args)
@@ -39,7 +39,7 @@ func (s *FetchAndGradeHomeworkTool) ExecuteContext(ctx context.Context, args str
 		return "", err
 	}
 	result := map[string]any{"outcome": "accepted", "job_type": "rpa_fetch_homework", "job_id": job.ID, "status": job.Status, "stage": job.Stage,
-		"message": "请在作业抓取控制台打开任务浏览器并完成登录；选择班级后系统自动导出、下载并继续批改"}
+		"message": "请在任务浏览器完成登录及班级选择；后续仅执行本次选择的下载/整理/批改范围", "after_download": job.AfterDownload, "output_root": job.OutputRoot}
 	b, err := json.Marshal(result)
 	return string(b), err
 }
@@ -91,7 +91,15 @@ func (s *FetchJobControlTool) ExecuteContext(ctx context.Context, args string) (
 }
 
 func (t *FetchAndGradeHomeworkTool) RequiredSkill(string) string { return "download-homework" }
-func (t *FetchAndGradeHomeworkTool) SubmitsJob() bool            { return true }
+func (t *FetchAndGradeHomeworkTool) AdditionalSkills(args string) []string {
+	var p rpa.Target
+	_ = json.Unmarshal([]byte(args), &p)
+	if p.AfterDownload == "grade" {
+		return []string{"grade-homework"}
+	}
+	return nil
+}
+func (t *FetchAndGradeHomeworkTool) SubmitsJob() bool { return true }
 func (t *FetchAndGradeHomeworkTool) ExecuteBound(ctx context.Context, args string, run ExecutionContext) (string, error) {
 	bound := *t
 	bound.RequestID = run.RequestID

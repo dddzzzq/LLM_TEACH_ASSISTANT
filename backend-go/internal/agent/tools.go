@@ -51,6 +51,9 @@ func NewBuiltinToolRegistry(userID uint, roles ...string) *ToolRegistry {
 	}
 	r.Register(&FetchAndGradeHomeworkTool{UserID: userID})
 	r.Register(&FetchAndGradeHomeworkTool{UserID: userID, UseFetchAlias: true})
+	for _, op := range []string{"prepare", "get", "cancel"} {
+		r.Register(&MaterialTool{UserID: userID, Role: role, Operation: op})
+	}
 	for _, op := range []string{"get", "pause", "resume", "cancel"} {
 		r.Register(&FetchJobControlTool{UserID: userID, Operation: op})
 	}

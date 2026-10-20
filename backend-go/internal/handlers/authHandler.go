@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"grading-gateway/internal/auth"
 	"grading-gateway/internal/models"
@@ -22,6 +23,7 @@ type LoginResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	UserID       uint   `json:"user_id"`
+	Username     string `json:"username"`
 	Role         string `json:"role"`
 	Name         string `json:"name"`
 }
@@ -101,6 +103,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		UserID:       user.ID,
+		Username:     user.Username,
 		Role:         string(user.Role),
 		Name:         user.Name,
 	})
@@ -159,6 +162,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		AccessToken:  newAccessToken,
 		RefreshToken: newRefreshToken,
 		UserID:       user.ID,
+		Username:     user.Username,
 		Role:         string(user.Role),
 		Name:         user.Name,
 	})
@@ -172,6 +176,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "无效的请求格式，请提供 username、password、name 和 role",
 		})
+		return
+	}
+	if strings.TrimSpace(req.Name) == strings.TrimSpace(req.Password) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "姓名不能与密码相同，请检查姓名栏是否被自动填充"})
 		return
 	}
 
@@ -232,6 +240,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		UserID:       user.ID,
+		Username:     user.Username,
 		Role:         string(user.Role),
 		Name:         user.Name,
 	})

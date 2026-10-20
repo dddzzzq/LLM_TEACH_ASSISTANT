@@ -1,7 +1,7 @@
 <template>
   <div class="ai-assistant-view">
     <header class="page-heading">
-      <div><h1 class="page-title">AI 教学助手</h1><p class="page-description">作业下载与批改、学生成绩查询，让教学事务在对话中完成。</p></div>
+      <div><h1 class="page-title">AI 教学助手</h1><p class="page-description">{{ canFetch ? '拉取并解压、批改作业、查询成绩，按本次需求组织教学事务。' : '解答学习问题，查询自己的作业与试卷成绩。' }}</p></div>
       <button v-if="canFetch" ref="consoleTrigger" type="button" class="console-trigger"
         aria-controls="homework-console" :aria-expanded="consoleOpen" @click="openConsole()">
         <AppIcon name="download" /> 打开作业控制台
@@ -18,7 +18,7 @@
           <aside id="homework-console" ref="consolePanel" role="dialog" aria-modal="true" aria-labelledby="homework-console-title"
             class="console-panel absolute inset-y-0 right-0 w-full bg-white shadow-2xl flex flex-col">
             <div class="flex items-center justify-between gap-3 px-5 py-4 border-b shrink-0">
-              <h2 id="homework-console-title" class="text-lg font-semibold text-gray-800">作业下载与批改</h2>
+              <h2 id="homework-console-title" class="text-lg font-semibold text-gray-800">作业拉取与材料</h2>
               <button ref="consoleClose" type="button" class="px-3 py-2 text-sm text-slate-600 rounded-lg hover:bg-slate-100"
                 aria-label="收起作业控制台" @click="closeConsole">收起控制台 ×</button>
             </div>
@@ -33,7 +33,8 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import AgentChatWidget from '../components/AgentChatWidget.vue'
 import AppIcon from '../components/AppIcon.vue'
 import RpaTaskPanel from '../components/RpaTaskPanel.vue'
@@ -43,6 +44,11 @@ const canFetch = ['teacher', 'admin'].includes(authApi.getCurrentUser()?.role)
 const consoleOpen = ref(false), consoleTaskId = ref('')
 const consoleTrigger = ref(null), consoleClose = ref(null), consolePanel = ref(null)
 let previousFocus
+const route = useRoute()
+watch(() => route.query.task, id => { if (typeof id === 'string' && id) openConsole(id) }, { immediate: true })
+const handleConsoleRequest = event => openConsole(event.detail?.jobId)
+onMounted(() => window.addEventListener('rpa-open-console', handleConsoleRequest))
+onBeforeUnmount(() => window.removeEventListener('rpa-open-console', handleConsoleRequest))
 
 async function openConsole(taskId) {
   if (!canFetch) return

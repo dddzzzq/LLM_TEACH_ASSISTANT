@@ -23,27 +23,29 @@
       <div class="login-card">
         <!-- 登录表单 -->
         <div v-if="!showRegister">
-          <form class="space-y-6" @submit.prevent="handleLogin">
+          <form name="login" class="space-y-6" @submit.prevent="handleLogin">
             <div>
               <label for="username" class="block text-sm font-medium text-gray-700">
-                用户名 / 学号
+                登录账号／学号
               </label>
               <div class="mt-1">
                 <input
                   id="username"
                   v-model="loginForm.username"
                   name="username"
+                  autocomplete="section-login username"
+                  :disabled="loading"
                   type="text"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  placeholder="请输入用户名"
+                  placeholder="请输入登录账号或学号"
                 />
               </div>
             </div>
 
             <div>
               <label for="password" class="block text-sm font-medium text-gray-700">
-                密码
+                登录密码
               </label>
               <div class="mt-1">
                 <input
@@ -51,6 +53,8 @@
                   v-model="loginForm.password"
                   name="password"
                   type="password"
+                  autocomplete="section-login current-password"
+                  :disabled="loading"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   placeholder="请输入密码"
@@ -99,6 +103,7 @@
             <div class="mt-6">
               <button
                 @click="showRegister = true"
+                :disabled="loading"
                 class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
                 注册新账户
@@ -109,27 +114,29 @@
 
         <!-- 注册表单 -->
         <div v-else>
-          <form class="space-y-6" @submit.prevent="handleRegister">
+          <form name="register" class="space-y-6" @submit.prevent="handleRegister">
             <div>
               <label for="reg-username" class="block text-sm font-medium text-gray-700">
-                用户名 / 学号
+                登录账号／学号
               </label>
               <div class="mt-1">
                 <input
                   id="reg-username"
                   v-model="registerForm.username"
                   name="username"
+                  autocomplete="section-register username"
+                  :disabled="loading"
                   type="text"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  placeholder="请输入用户名"
+                  placeholder="请输入登录账号或学号"
                 />
               </div>
             </div>
 
             <div>
               <label for="reg-password" class="block text-sm font-medium text-gray-700">
-                密码
+                登录密码
               </label>
               <div class="mt-1">
                 <input
@@ -137,6 +144,8 @@
                   v-model="registerForm.password"
                   name="password"
                   type="password"
+                  autocomplete="section-register new-password"
+                  :disabled="loading"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   placeholder="请输入密码"
@@ -146,18 +155,22 @@
 
             <div>
               <label for="reg-name" class="block text-sm font-medium text-gray-700">
-                姓名
+                真实姓名
               </label>
               <div class="mt-1">
                 <input
                   id="reg-name"
                   v-model="registerForm.name"
                   name="name"
+                  autocomplete="section-register name"
+                  aria-describedby="reg-name-help"
+                  :disabled="loading"
                   type="text"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   placeholder="请输入真实姓名"
                 />
+                <p id="reg-name-help" class="mt-2 text-xs text-gray-500">用于登录后的姓名展示，请填写真实姓名。</p>
               </div>
             </div>
 
@@ -170,6 +183,7 @@
                   id="reg-role"
                   v-model="registerForm.role"
                   name="role"
+                  :disabled="loading"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                 >
@@ -185,6 +199,7 @@
               <button
                 type="button"
                 @click="showRegister = false"
+                :disabled="loading"
                 class="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
                 返回登录
@@ -201,7 +216,7 @@
         </div>
 
         <!-- 错误提示 -->
-        <div v-if="errorMessage" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+        <div v-if="errorMessage" role="alert" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
           <div class="flex">
             <div class="flex-shrink-0">
               <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -278,13 +293,17 @@ onMounted(() => {
 })
 
 // 处理登录
-const handleLogin = async () => {
+const handleLogin = async (event) => {
+  if (loading.value) return
+  const fields = new FormData(event.currentTarget)
+  const credentials = { username: String(fields.get('username') || ''), password: String(fields.get('password') || '') }
+  Object.assign(loginForm, credentials)
   errorMessage.value = ''
   successMessage.value = ''
   loading.value = true
 
   try {
-    const response = await authApi.login(loginForm)
+    const response = await authApi.login(credentials)
     
     if (response.data) {
       const { access_token, refresh_token, user_id, role, name } = response.data
@@ -294,7 +313,7 @@ const handleLogin = async () => {
         user_id,
         role,
         name,
-        username: loginForm.username,
+        username: response.data.username || credentials.username,
         access_token,
         refresh_token
       })
@@ -306,14 +325,7 @@ const handleLogin = async () => {
       successMessage.value = `欢迎回来，${name}！`
 
       // 根据角色进行路由分流
-      let redirectPath = '/';
-      if (role === 'student') {
-        redirectPath = '/student/exams';
-      } else if (role === 'teacher') {
-        redirectPath = '/teacher/dashboard';
-      } else if (role === 'admin') {
-        redirectPath = '/admin/dashboard';
-      }
+      const redirectPath = role === 'student' ? '/ai-assistant' : '/home'
       
       // 延迟跳转
       setTimeout(() => {
@@ -321,7 +333,7 @@ const handleLogin = async () => {
       }, 1000)
     }
   } catch (error) {
-    console.error('登录失败:', error)
+    console.error('登录失败:', error.response?.status || 'network')
     errorMessage.value = error.response?.data?.error || '登录失败，请检查用户名和密码'
   } finally {
     loading.value = false
@@ -329,13 +341,26 @@ const handleLogin = async () => {
 }
 
 // 处理注册
-const handleRegister = async () => {
+const handleRegister = async (event) => {
+  if (loading.value) return
+  const fields = new FormData(event.currentTarget)
+  const registration = {
+    username: String(fields.get('username') || ''),
+    password: String(fields.get('password') || ''),
+    name: String(fields.get('name') || ''),
+    role: String(fields.get('role') || '')
+  }
+  Object.assign(registerForm, registration)
   errorMessage.value = ''
   successMessage.value = ''
+  if (registration.name.trim() === registration.password.trim()) {
+    errorMessage.value = '姓名不能与密码相同，请检查姓名栏是否被自动填充'
+    return
+  }
   loading.value = true
 
   try {
-    const response = await authApi.register(registerForm)
+    const response = await authApi.register(registration)
     
     if (response.data) {
       successMessage.value = '注册成功！已自动登录。'
@@ -347,7 +372,7 @@ const handleRegister = async () => {
         user_id,
         role,
         name,
-        username: registerForm.username,
+        username: response.data.username || registration.username,
         access_token,
         refresh_token
       })
@@ -356,11 +381,11 @@ const handleRegister = async () => {
 
       // 延迟跳转
       setTimeout(() => {
-        router.push('/')
+        router.push(role === 'student' ? '/ai-assistant' : '/home')
       }, 1500)
     }
   } catch (error) {
-    console.error('注册失败:', error)
+    console.error('注册失败:', error.response?.status || 'network')
     errorMessage.value = error.response?.data?.error || '注册失败，请稍后重试'
   } finally {
     loading.value = false

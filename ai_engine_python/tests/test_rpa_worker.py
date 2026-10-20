@@ -1,7 +1,9 @@
 """Behavioral tests use real Chromium against intercepted portal pages, never real accounts."""
 import asyncio
 import contextlib
+import hashlib
 import json
+import re
 import socket
 import tempfile
 import time
@@ -18,9 +20,10 @@ from websockets.exceptions import InvalidStatus
 from playwright.async_api import async_playwright
 
 from app.rpa.download_manager import safe_filename, verify_zip, save_download
-from app.rpa.portal_adapter import fingerprint, match_new_exports, PortalAdapter
+from app.rpa.portal_adapter import fingerprint, match_new_exports, reconcile_exports, PortalAdapter
 from app.rpa.task_controller import Task, allowed_url
 from app.rpa.worker import Manager, app
+from tests.fixtures.export_dialog import PORTAL_EXPORT_OPTIONS
 
 
 class FileAndEvidenceTests(unittest.TestCase):
@@ -29,6 +32,37 @@ class FileAndEvidenceTests(unittest.TestCase):
         ready = {'text': '第一次作业 班级A 2026-10-07 10:00 导出成功 下载', 'href': '/signed-download?token=private'}
         self.assertEqual(fingerprint(pending), fingerprint(ready))
 
+    def test_export_completion_time_does_not_change_identity(self):
+        pending = {'text': '班级2CS20510501-第一次作业(附件)\n\n10-15 17:55 导出中'}
+        ready = {'text': '班级2CS20510501-第一次作业(附件)\n\n10-15 17:59 导出成功'}
+        self.assertEqual(fingerprint(pending), fingerprint(ready))
+        ready['text'] = ready['text'].replace('10-15 17:59', '2026-10-15 18:01:02')
+        self.assertEqual(fingerprint(pending), fingerprint(ready))
+        self.assertNotEqual(fingerprint(pending), fingerprint({
+            'text': ready['text'].replace('2CS20510501', '2CS20510502')}))
+        self.assertEqual(fingerprint({'platform_id': 'record-a', **pending}),
+                         fingerprint({'platform_id': 'record-a', **ready}))
+
+    def test_legacy_export_recovery_preserves_reference_and_rejects_uncertainty(self):
+        bound = {'ref': 'legacy-bound-ref', 'text': '班级A-第一次作业(附件) 10-15 17:55 导出中'}
+        ready = {'ref': 'current', 'text': '班级A-第一次作业(附件) 10-15 17:59 导出成功',
+                 'status': 'READY'}
+        resolved = reconcile_exports([bound], [ready], [])[0]
+        self.assertEqual(resolved['ref'], bound['ref'])
+        self.assertEqual(resolved['row_ref'], ready['ref'])
+        self.assertEqual(resolved['status'], 'READY')
+        for rows, baseline in [([ready], ['current']),
+                               ([{**ready, 'legacy_ref': 'old-history'}], ['old-history']),
+                               ([{**ready, 'ambiguous': True}], []),
+                               ([ready, {**ready, 'ref': 'another'}], [])]:
+            self.assertFalse(reconcile_exports([bound], rows, baseline)[0]['available'])
+
+    def test_recovery_does_not_bind_two_exports_to_one_record(self):
+        exports = [{'ref': ref, 'text': '班级A-第一次作业 10-15 17:55 导出中'} for ref in ('a', 'b')]
+        rows = [{'ref': 'new', 'text': '班级A-第一次作业 10-15 17:59 导出成功', 'status': 'READY'}]
+        resolved = reconcile_exports(exports, rows, [])
+        self.assertFalse(any(e['available'] for e in resolved))
+
     def test_never_associate_foreign_or_ambiguous_exports(self):
         rows = [{'ref':'old','text':'第一次作业 A'}, {'ref':'new','text':'其他作业 A'},
                 {'ref':'ambiguous','text':'第一次作业 A','ambiguous':True}]
@@ -36,6 +70,30 @@ class FileAndEvidenceTests(unittest.TestCase):
         self.assertEqual(match_new_exports(rows, ['old'], '第一次作业', scope), [])
         rows.append({'ref':'ours','text':'第一次作业 A','status':'READY'})
         self.assertEqual(match_new_exports(rows, ['old'], '第一次作业', scope)[0]['ref'], 'ours')
+
+    def test_all_class_export_associates_only_one_unique_new_matching_record(self):
+        scope = {'mode':'all','baseline_observed':True}
+        rows = [{'ref':'old','text':'第一次作业'},{'ref':'foreign','text':'第二次作业'},
+                {'ref':'ours','text':'第一次作业 全部班级 导出中'}]
+        self.assertEqual(match_new_exports(rows, ['old'], '第一次作业', scope), [rows[-1]])
+        self.assertEqual(match_new_exports(rows, ['old'], '第一次作业', {'mode':'all'}), [])
+        rows.append({'ref':'other-new','text':'第一次作业 导出中'})
+        self.assertEqual(match_new_exports(rows, ['old'], '第一次作业', scope), [])
+        self.assertEqual(match_new_exports([{'ref':'suffix','text':'第一次作业补交 导出中'}],
+                                          [], '第一次作业', scope), [])
+        self.assertEqual(match_new_exports([{'ref':'ambiguous','text':'第一次作业 导出中','ambiguous':True}],
+                                          [], '第一次作业', scope), [])
+
+    def test_confirmed_class_names_survive_reordering_but_invalid_choices_do_not(self):
+        old = {'mode':'selected','class_ids':['class_2'],'option_names':{
+            'class_0':'默认格式包含班级名称','class_1':'班级A','class_2':'班级B'}}
+        options = [{'id':'class_0','name':'班级A','all':False},
+                   {'id':'class_1','name':'班级B','all':False},
+                   {'id':'class_2','name':'全部班级','all':True}]
+        self.assertEqual(Task.reconcile_scope(old, options)['class_ids'], ['class_1'])
+        self.assertIsNone(Task.reconcile_scope({**old,'class_ids':['class_0']}, options))
+        self.assertIsNone(Task.reconcile_scope(old, [options[0], options[2]]))
+        self.assertIsNone(Task.reconcile_scope({'mode':'all'}, options[:2]))
 
     def test_download_rejects_error_page_empty_and_corrupt_zip(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,6 +235,173 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scope['classes'][0]['name'], '班级A')
         self.assertEqual(await task.page.locator('input:checked').count(), 1)
         with self.assertRaises(ValueError): await task.adapter.apply_scope(modal, {'mode':'selected','class_ids':[]}, options)
+
+    async def test_scope_supports_custom_parent_state_and_attachment_radio(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>选择格式
+          <div class="export-range checked"><span class=grade_check onclick="choose(this, '.export-range')"></span>导出本班级作业附件</div>
+          <div class=export-range><span class=grade_check onclick="choose(this, '.export-range')"></span>导出作业下所有班级作业附件</div>
+          <div class="out checked"><span class=grade_check onclick="choose(this, '.out')"></span>导出完整答题记录</div>
+          <div class=out><span class=grade_check onclick="choose(this, '.out')"></span>导出提交附件</div></div>
+          <style>.grade_check {display:inline-block;width:20px;height:20px}</style>
+          <script>function choose(e, group) {document.querySelectorAll(group).forEach(x=>x.classList.remove('checked'));e.parentElement.classList.add('checked')}</script>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        scope = await task.adapter.apply_scope(modal, {'mode':'all'}, options)
+        self.assertEqual(scope['mode'], 'all')
+        self.assertTrue(await task.adapter.checked(task.page.locator('.export-range .grade_check').nth(1)))
+        self.assertTrue(await task.adapter.checked(task.page.locator('.out .grade_check').nth(1)))
+        self.assertFalse(await task.adapter.checked(task.page.locator('.out .grade_check').first))
+
+    async def test_portal_naming_description_is_not_a_class_and_format_is_attachments(self):
+        task = await self.bare_task()
+        await task.page.set_content('<div role=dialog>选择格式' + PORTAL_EXPORT_OPTIONS + '</div>')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        self.assertEqual(len(options), 2, options)
+        self.assertFalse(any('默认格式' in option['name'] for option in options))
+        await task.adapter.apply_scope(modal, {'mode':'all'}, options)
+        self.assertTrue(await task.adapter.checked(task.page.locator('.export-range.all .grade_check')))
+        self.assertTrue(await task.adapter.checked(task.page.locator('#attachment-option .grade_check')))
+        self.assertEqual(await task.page.locator('.out .grade_checked').count(), 1)
+        self.assertTrue(await task.adapter.checked(task.page.locator('#default-naming .grade_check')))
+        self.assertIsNone(await task.page.evaluate('window.namingClicks'))
+
+    async def test_semantic_export_groups_keep_naming_and_format_separate_from_scope(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>
+          <fieldset><legend>导出范围</legend><label><input type=radio name=scope checked>本班级</label>
+          <label><input type=radio name=scope>全部班级</label></fieldset>
+          <fieldset><legend>导出格式</legend><label><input type=radio name=content checked>导出完整答题记录</label>
+          <label><input type=radio name=content>导出提交附件</label></fieldset>
+          <fieldset><legend>命名格式</legend><label><input type=radio name=naming checked>班级-学号-姓名</label>
+          <label><input type=radio name=naming>默认格式，包含班级信息</label></fieldset></div>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        self.assertEqual(len(options), 2, options)
+        await task.adapter.apply_scope(modal, {'mode':'all'}, options)
+        self.assertTrue(await task.page.locator('input[name=content]').nth(1).is_checked())
+        self.assertTrue(await task.page.locator('input[name=naming]').first.is_checked())
+
+    async def test_previously_confirmed_all_scope_survives_removing_spurious_naming_option(self):
+        task = await self.bare_task()
+        await task.page.set_content('<div role=dialog>选择格式' + PORTAL_EXPORT_OPTIONS +
+            """<a class=confirmDown onclick="window.exports=(window.exports||0)+1">确定</a></div>""")
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        task.scope_request = {'mode':'all','class_ids':[],'option_names':{
+            'class_0':'导出本班级作业附件',
+            'class_1':'导出作业下所有班级作业附件 若班级内没有学生提交，将自动跳过导出',
+            'class_2':'默认格式 学生提交的文件将保留文件原名；答题记录按照“院系-专业-班级-学号-姓名”命名'}}
+        task.update(requested_scope=task.scope_request)
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, task.page.locator('[role=dialog]')))
+        self.assertEqual(task.state['stage'], 'WAIT_EXPORT', task.state)
+        self.assertNotEqual(task.state.get('status'), 'WAITING_USER')
+        self.assertEqual(task.state['requested_scope']['mode'], 'all')
+        self.assertEqual(len(task.state['requested_scope']['option_names']), 2)
+        self.assertEqual(await task.page.evaluate('window.exports'), 1)
+        self.assertTrue(await task.adapter.checked(task.page.locator('#attachment-option .grade_check')))
+        self.assertIsNone(await task.page.evaluate('window.namingClicks'))
+
+    async def test_missing_attachment_choice_does_not_request_class_confirmation_again(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>导出设置
+          <label class=export-range><input type=checkbox checked>全部班级</label>
+          <div class=out><span class="grade_check grade_checked"></span>导出完整答题记录</div>
+          <button onclick="window.exports=1">确定</button></div>
+          <style>.grade_check{display:inline-block;width:20px;height:20px}</style>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        task.scope_request = {'mode':'all','class_ids':[],'option_names':{o['id']:o['name'] for o in options}}
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, modal))
+        self.assertEqual(task.state['waiting_reason'], 'EXPORT_FORMAT')
+        self.assertEqual(task.state['last_error']['code'], 'ATTACHMENT_MISSING')
+        self.assertFalse(task.state.get('export_attempted'))
+        self.assertIsNone(await task.page.evaluate('window.exports'))
+
+    async def test_scope_supports_hidden_native_radio_and_ignores_format_choices(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>
+          <label><input hidden type=radio name=scope checked>导出本班级作业附件</label>
+          <label><input hidden type=radio name=scope>导出所有班级作业附件</label>
+          <label><input type=radio name=format checked>Word标准格式</label>
+          <label><input type=radio name=format>PDF格式</label>
+          <label><input hidden type=radio name=content checked>导出完整答题记录</label>
+          <label><input hidden type=radio name=content>导出提交附件</label></div>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        self.assertEqual(len(options), 2)
+        await task.adapter.apply_scope(modal, {'mode':'all'}, options)
+        self.assertTrue(await task.page.locator('input[name=scope]').nth(1).is_checked())
+        self.assertTrue(await task.page.locator('input[name=content]').nth(1).is_checked())
+        self.assertTrue(await task.page.locator('input[name=format]').first.is_checked())
+
+    async def test_scope_waits_for_site_state_and_preserves_confirmed_request(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>导出设置
+          <div class=export-range><span class=grade_check onclick="setTimeout(()=>this.classList.add('checked'),100)"></span>全部班级</div></div>
+          <style>.grade_check {display:inline-block;width:20px;height:20px}</style>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        await task.adapter.apply_scope(modal, {'mode':'all'}, options)
+        task.update(requested_scope={'mode':'all','option_names':{o['id']:o['name'] for o in options}})
+        restored = Task(self.manager, dict(task.state))
+        self.assertEqual(restored.scope_request['mode'], 'all')
+
+    async def test_scope_failure_explains_selection_without_requesting_target_again(self):
+        task = await self.bare_task()
+        await task.page.set_content('''<div role=dialog>导出设置
+          <div class=export-range><span class=grade_check></span>全部班级</div>
+          <button onclick="window.exports=(window.exports||0)+1">确定</button></div>
+          <style>.grade_check {display:inline-block;width:20px;height:20px}</style>''')
+        modal = task.page.locator('[role=dialog]')
+        options = await task.adapter.classes(modal)
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        task.scope_request = {'mode':'all','option_names':{o['id']:o['name'] for o in options}}
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, modal))
+        self.assertEqual(task.state['waiting_reason'], 'SCOPE_SELECTION')
+        self.assertIn('班级选择', task.state['message'])
+        self.assertEqual(task.state['last_error']['code'], 'SCOPE_MISMATCH')
+        self.assertFalse(task.state.get('export_attempted'))
+        self.assertIsNone(await task.page.evaluate('window.exports'))
+
+    async def test_scope_control_api_keeps_confirmation_and_rejects_unrelated_target_confirmation(self):
+        task = await self.bare_task()
+        task.wait_human('CLASS_SCOPE', '选择班级')
+        task.update(classes=[{'id':'class_0','name':'全部班级','all':True}])
+        self.manager.tasks[task.state['job_id']] = task
+        previous_manager = getattr(app.state, 'manager', None)
+        previous_token = getattr(app.state, 'token', None)
+        app.state.manager, app.state.token = self.manager, 'scope-fixture-token'
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://worker',
+                                        headers={'X-RPA-Token':'scope-fixture-token'}) as client:
+                path = '/tasks/' + task.state['job_id']
+                response = await client.post(path + '/class-scope', json={'mode':'all','class_ids':[]})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(task.state['requested_scope']['mode'], 'all')
+                task.wait_human('RECOVERY', '普通异常')
+                response = await client.post(path + '/confirm-target', json=task.state['target'])
+                self.assertEqual(response.status_code, 409)
+        finally:
+            app.state.manager, app.state.token = previous_manager, previous_token
+
+    async def test_restart_reuses_named_or_all_scope_but_not_generic_current_class(self):
+        task = await self.bare_task()
+        from unittest.mock import AsyncMock
+        for mode, name, reusable in [('all','全部班级',True), ('selected','导出本班级作业附件',False),
+                                     ('selected','班级A',True)]:
+            task.update(status='INTERRUPTED',requested_scope={
+                'mode':mode,'class_ids':[] if mode == 'all' else ['class_0'],
+                'option_names':{'class_0':name}})
+            self.manager.tasks[task.state['job_id']] = task
+            with patch.object(Task, 'run', AsyncMock()):
+                restarted = self.manager.start(task.state['job_id'], task.state['target'], restart=True)
+                await restarted.runner
+            self.assertEqual(restarted.scope_request is not None, reusable)
 
     async def human_input_task(self):
         task = await self.bare_task()
@@ -390,8 +615,80 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.state['status'], 'INTERRUPTED')
         self.assertEqual(restored.state['files'][0]['export_ref'], 'r1')
 
+    async def test_export_rows_ignore_hidden_history_and_reject_same_named_duplicates(self):
+        task = await self.bare_task()
+        row = '<tr><td>班级A-第一次作业 10-15 17:55 导出中</td></tr>'
+        await task.page.set_content(f'<div id=downloadcenter><table>{row}</table></div>'
+                                    f'<div class=downloadCenter hidden><table>{row}</table></div>')
+        rows = await task.adapter.export_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]['ambiguous'])
+        await task.page.locator('#downloadcenter tbody').evaluate(
+            "e=>e.insertAdjacentHTML('beforeend', '<tr><td>班级A-第一次作业 10-15 17:59 导出成功</td></tr>')")
+        rows = await task.adapter.export_rows()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(r['ambiguous'] for r in rows))
+        self.assertEqual(task.adapter.export_locators, {})
+
+    async def test_bound_exports_survive_time_changes_and_download_ready_class_first(self):
+        task = await self.bare_task()
+        zip_path = Path(self.temp.name) / 'export.zip'
+        with zipfile.ZipFile(zip_path, 'w') as archive:
+            archive.writestr('20260001-test/report.txt', 'student answer')
+        downloads = []
+        html = '''<div id=downloadcenter><table><tbody>
+          <tr id=first><td>班级2CS20510501-第一次作业(附件)</td><td class=meta>10-15 17:55 导出中</td>
+            <td><a class=download_ic href=/download/first>下载</a></td></tr>
+          <tr id=second><td>班级2CS20510502-第一次作业(附件)</td><td class=meta>10-15 17:58 导出成功</td>
+            <td><a class=download_ic href=/download/second>下载</a></td></tr>
+          </tbody></table></div>'''
+        # These IDs are only for fixture access, not platform record identities.
+        html = html.replace('tr id=first', 'tr data-fixture=first').replace('tr id=second', 'tr data-fixture=second')
+        async def route(request):
+            if '/download/' in request.request.url:
+                name = request.request.url.rsplit('/', 1)[-1]
+                downloads.append(name)
+                await request.fulfill(body=zip_path.read_bytes(), content_type='application/zip',
+                                      headers={'Content-Disposition': f'attachment; filename={name}.zip'})
+            else:
+                await request.fulfill(body=html, content_type='text/html; charset=utf-8')
+        await task.page.route('**/*', route)
+        await task.page.goto('https://mooc1.chaoxing.com/course')
+        exports = []
+        for class_name in ('2CS20510501', '2CS20510502'):
+            text = f'班级{class_name}-第一次作业(附件)\n\n10-15 17:55 导出中'
+            old_identity = re.sub(r'重新下载|导出中|等待|导出成功|下载|失败|处理中|已完成|重新导出|\s+', '', text)
+            exports.append({'ref': hashlib.sha256(old_identity.encode()).hexdigest()[:24],
+                            'text': text, 'status': 'PENDING'})
+        task.update(exports=exports, export_attempted=True, export_baseline=[],
+                    export_started_at=time.time(), stage='WAIT_EXPORT',
+                    class_scope={'mode': 'all', 'classes': []})
+        task.gate.set()
+        await task.process_exports()
+        self.assertEqual(downloads, ['second'])
+        self.assertEqual(task.state['files'][0]['export_ref'], exports[1]['ref'])
+        self.assertEqual(task.state['files'][0]['status'], 'VERIFIED')
+        self.assertIn('17:58', task.state['exports'][1]['text'])
+        self.assertEqual(task.state['exports'][1]['status'], 'READY')
+        self.assertTrue(any('正在校验压缩包' in e['message'] for e in task.state['events']))
+        await task.process_exports()
+        self.assertEqual(task.state['status'], 'RUNNING')
+        self.assertEqual(task.state['control_mode'], 'AUTO')
+        self.assertIn('等待平台打包 1 个附件，已下载校验 1/2 个', task.state['message'])
+        await task.page.locator('[data-fixture=first] .meta').evaluate("e=>e.innerText='10-15 17:59 导出成功'")
+        await task.process_exports()
+        await task.process_exports()
+        self.assertEqual(task.state['status'], 'SUCCEEDED', task.state)
+        self.assertEqual(downloads, ['second', 'first'])
+        self.assertEqual({f['export_ref'] for f in task.state['files']}, {e['ref'] for e in exports})
+        for file in task.state['files']:
+            self.assertEqual(verify_zip(file['path'])['status'], 'VERIFIED')
+
     async def test_agent_navigation_login_scope_export_and_real_download(self):
         await self.fixture_flow()
+
+    async def test_custom_export_widgets_complete_without_repeated_confirmation(self):
+        await self.fixture_flow(custom=True)
 
     async def test_manual_export_is_detected_and_never_submitted_twice(self):
         await self.fixture_flow(manual=True)
@@ -431,6 +728,21 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): await task.apply_action(payload)
         self.assertIsNone(await task.page.evaluate('window.hits'))
 
+    async def test_readonly_label_cannot_disguise_a_form_submission(self):
+        task = await self.bare_task()
+        await task.page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8',
+            body='<form method=post><h2>第一次作业</h2><button aria-label="查看提交" onclick="window.submitted=true">查看</button></form>'))
+        await task.page.goto('https://learning.xidian.edu.cn/portal')
+        task.gate.set()
+        obs = await task.observe()
+        entry = next(e for e in obs['observation']['elements'] if e['name']=='查看提交')
+        payload = {'action_id':obs['observation_id'],'observation_id':obs['observation_id'],
+                   'epoch':obs['epoch'],'revision':obs['revision'],
+                   'action':{'tool':'click','element_ref':entry['ref']}}
+        receipt = await task.apply_action(payload)
+        self.assertEqual(receipt['outcome'], 'unknown')
+        self.assertIsNone(await task.page.evaluate('window.submitted'))
+
     async def test_uncertain_action_is_persisted_and_never_replayed(self):
         task, payload = await self.observed_task()
         from unittest.mock import AsyncMock
@@ -438,9 +750,49 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await task.apply_action(payload))['outcome'], 'unknown')
             self.assertEqual((await task.apply_action(payload))['outcome'], 'unknown')
             self.assertEqual(execute.await_count, 1)
-        self.assertEqual(task.state['control_mode'], 'HUMAN')
+        self.assertEqual(task.state['control_mode'], 'AUTO')
+        self.assertEqual(task.state['navigation_failures'], 1)
+        self.assertEqual(task.state['last_error']['code'], 'BROWSER_TIMEOUT')
         journal = (self.manager.root / (task.state['job_id'] + '.json')).read_text()
         self.assertNotIn('uncertain', journal)
+
+    async def test_navigation_recovery_is_bounded_and_logs_no_raw_exception(self):
+        task, payload = await self.observed_task()
+        from unittest.mock import AsyncMock
+        with patch.object(task, 'execute', AsyncMock(side_effect=TimeoutError('https://portal/?token=private-secret'))) as execute:
+            for i in range(3):
+                if i:
+                    obs = await task.observe()
+                    payload = {'action_id':obs['observation_id'],'observation_id':obs['observation_id'],
+                               'epoch':obs['epoch'],'revision':obs['revision'],'action':payload['action']}
+                receipt = await task.apply_action(payload)
+                self.assertEqual(receipt['outcome'], 'unknown')
+                self.assertEqual(task.state['control_mode'], 'HUMAN' if i == 2 else 'AUTO')
+            self.assertEqual(execute.await_count, 3)
+        self.assertEqual(task.state['waiting_reason'], 'NAVIGATION')
+        self.assertNotIn('private-secret', (self.manager.root / (task.state['job_id'] + '.json')).read_text())
+
+    async def test_decision_service_failure_retries_before_human_handoff(self):
+        task, _ = await self.observed_task()
+        for i in range(3):
+            await task.decision_failed({'epoch':task.state['control_epoch']})
+            self.assertEqual(task.state['control_mode'], 'HUMAN' if i == 2 else 'AUTO')
+        self.assertEqual(task.state['waiting_reason'], 'AGENT_UNAVAILABLE')
+
+    async def test_same_named_navigation_with_page_progress_does_not_request_confirmation(self):
+        task = await self.bare_task()
+        await task.page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8',
+            body="""<h1>第0页</h1><button onclick="window.n=(window.n||0)+1;document.querySelector('h1').innerText='第'+window.n+'页'">下一页</button>"""))
+        await task.page.goto('https://learning.xidian.edu.cn/portal')
+        task.gate.set()
+        for _ in range(4):
+            obs = await task.observe()
+            ref = next(e['ref'] for e in obs['observation']['elements'] if e['name']=='下一页')
+            await task.apply_action({'action_id':obs['observation_id'],'observation_id':obs['observation_id'],
+                                    'revision':obs['revision'],'epoch':obs['epoch'],
+                                    'action':{'tool':'click','element_ref':ref}})
+        self.assertEqual(task.state['control_mode'], 'AUTO')
+        self.assertEqual(await task.page.locator('h1').inner_text(), '第4页')
 
     async def test_stalled_transfer_is_cancelled(self):
         class StalledDownload:
@@ -453,7 +805,7 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
             await save_download(download, self.temp.name, 'stalled', progress=lambda: 0, stall_seconds=.05)
         self.assertTrue(download.cancelled)
 
-    async def fixture_flow(self, manual=False):
+    async def fixture_flow(self, manual=False, custom=False):
         export_count = 0
         zip_path = Path(self.temp.name) / 'fixture.zip'
         with zipfile.ZipFile(zip_path, 'w') as archive: archive.writestr('20260001-test/report.txt', 'student answer')
@@ -464,6 +816,18 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
           <label class=export-range><input type=checkbox>班级B</label><label class="export-range all"><input type=checkbox>所有班级</label>
           <a class=confirmDown onclick="fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=task-a><td>第一次作业 班级A 导出成功 <a class=download_ic href=/download>下载</a></td></tr></tbody></table>'">确定</a></div>
           <div id=downloadcenter></div>'''
+        if custom:
+            course_html = course_html.replace(
+                '<label class=export-range><input type=checkbox>班级A</label>',
+                """<div class=export-range><span class=grade_check onclick="setTimeout(()=>this.parentElement.classList.add('checked'),100)"></span>班级A</div>""")
+            course_html = course_html.replace(
+                '<label class=export-range><input type=checkbox>班级B</label>',
+                '<div class=export-range><span class=grade_check></span>班级B</div>')
+            course_html = course_html.replace(
+                '<label class="export-range all"><input type=checkbox>所有班级</label>',
+                '<div class="export-range all"><span class=grade_check></span>所有班级</div>'
+                """<div class=out><span class=grade_check onclick="this.parentElement.classList.add('checked')"></span>导出提交附件</div>"""
+                '<style>.grade_check{display:inline-block;width:20px;height:20px}</style>')
         async def fixture_route(task, route):
             nonlocal export_count
             url = route.request.url
@@ -534,6 +898,8 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
             await wait_for(lambda: task.state['status'] in ('SUCCEEDED','FAILED','PARTIAL_SUCCESS'))
             self.assertEqual(task.state['status'], 'SUCCEEDED', task.state)
             self.assertEqual(export_count, 1)
+            self.assertEqual(sum(e['message'] == '请在面板中明确选择要导出的班级，或选择全部班级'
+                                 for e in task.state['events']), 1)
             self.assertEqual(task.state['files'][0]['status'], 'VERIFIED')
             self.assertEqual(task.state['files'][0]['class_name'], '班级A')
             self.assertTrue(Path(task.state['files'][0]['path']).exists())

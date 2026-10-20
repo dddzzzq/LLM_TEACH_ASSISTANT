@@ -20,17 +20,19 @@ import (
 	"grading-gateway/internal/agent/catalog"
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/materials"
 	"grading-gateway/internal/models"
 )
 
 var PublishFetch func(string) error
-var PublishGrade func(string, uint, string) error
 var dispatchMu sync.Mutex
 
 type Target struct {
 	CourseName     string `json:"course_name"`
 	AssignmentName string `json:"assignment_name"`
 	Term           string `json:"term,omitempty"`
+	AfterDownload  string `json:"after_download,omitempty"`
+	OutputRoot     string `json:"output_root,omitempty"`
 }
 
 func Create(ctx context.Context, userID uint, target Target) (*models.RPAJob, error) {
@@ -39,11 +41,24 @@ func Create(ctx context.Context, userID uint, target Target) (*models.RPAJob, er
 
 func CreateWithKey(ctx context.Context, userID uint, target Target, requestKey string) (*models.RPAJob, error) {
 	target.CourseName, target.AssignmentName = strings.TrimSpace(target.CourseName), strings.TrimSpace(target.AssignmentName)
+	if target.AfterDownload == "" {
+		target.AfterDownload = "extract"
+	}
+	if target.AfterDownload != "download" && target.AfterDownload != "extract" && target.AfterDownload != "grade" {
+		return nil, fmt.Errorf("after_download 仅支持 download、extract 或 grade")
+	}
+	if target.OutputRoot != "" {
+		normalized, err := materials.Default().ValidateOutputRoot(target.OutputRoot)
+		if err != nil {
+			return nil, err
+		}
+		target.OutputRoot = normalized
+	}
 	if userID == 0 || target.CourseName == "" || target.AssignmentName == "" || len([]rune(target.CourseName)) > 255 || len([]rune(target.AssignmentName)) > 255 || len([]rune(target.Term)) > 255 {
 		return nil, fmt.Errorf("请提供有效的课程、作业名称和登录用户")
 	}
 	job := &models.RPAJob{ID: uuid.NewString(), UserID: userID, CourseName: target.CourseName,
-		AssignmentName: target.AssignmentName, Term: target.Term, Status: "QUEUED", Stage: "OPEN_PORTAL", Message: "任务已创建，等待打开登录浏览器"}
+		AssignmentName: target.AssignmentName, Term: target.Term, AfterDownload: target.AfterDownload, OutputRoot: target.OutputRoot, Status: "QUEUED", Stage: "OPEN_PORTAL", Message: "任务已创建，等待打开登录浏览器"}
 	if len(requestKey) > 128 {
 		return nil, fmt.Errorf("请求幂等键过长")
 	}
@@ -54,7 +69,7 @@ func CreateWithKey(ctx context.Context, userID uint, target Target, requestKey s
 		var prior models.RPAJob
 		err := database.DB.WithContext(ctx).First(&prior, "id = ?", job.ID).Error
 		if err == nil {
-			if prior.UserID != userID || prior.CourseName != target.CourseName || prior.AssignmentName != target.AssignmentName || prior.Term != target.Term {
+			if prior.UserID != userID || prior.CourseName != target.CourseName || prior.AssignmentName != target.AssignmentName || prior.Term != target.Term || prior.AfterDownload != target.AfterDownload || prior.OutputRoot != target.OutputRoot {
 				return nil, fmt.Errorf("同一请求键不能用于不同下载目标")
 			}
 			return &prior, nil
@@ -83,7 +98,7 @@ func CreateWithKey(ctx context.Context, userID uint, target Target, requestKey s
 			if err := tx.First(&prior, "id = ?", job.ID).Error; err != nil {
 				return err
 			}
-			if prior.UserID != userID || prior.CourseName != target.CourseName || prior.AssignmentName != target.AssignmentName || prior.Term != target.Term {
+			if prior.UserID != userID || prior.CourseName != target.CourseName || prior.AssignmentName != target.AssignmentName || prior.Term != target.Term || prior.AfterDownload != target.AfterDownload || prior.OutputRoot != target.OutputRoot {
 				return fmt.Errorf("同一请求键不能用于不同下载目标")
 			}
 			*job = prior
@@ -128,7 +143,7 @@ func Start(ctx context.Context, jobID string, restart bool) error {
 		_ = json.Unmarshal([]byte(job.StateJSON), &checkpoint)
 	}
 	b, err := WorkerRequest(ctx, "POST", "/tasks/"+jobID, map[string]any{
-		"target": Target{job.CourseName, job.AssignmentName, job.Term}, "restart": restart, "checkpoint": checkpoint})
+		"target": Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term}, "restart": restart, "checkpoint": checkpoint})
 	if err != nil {
 		return err
 	}
@@ -145,7 +160,8 @@ func CancelQueued(ctx context.Context, job *models.RPAJob) error {
 		return err
 	}
 	_ = database.DB.Model(&models.AsyncJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": "CANCELLED", "message": "用户取消任务"}).Error
-	_ = database.DB.Model(&models.RPAFile{}).Where("job_id = ? AND grading_status IN ?", job.ID, []string{"WAITING_RUBRIC", "READY"}).Update("grading_status", "CANCELLED").Error
+	_ = database.DB.Model(&models.RPAFile{}).Where("job_id = ? AND grading_job_id = ''", job.ID).Update("grading_status", "CANCELLED").Error
+	stopPendingMaterials(job.ID)
 	_, _ = WorkerRequest(ctx, "POST", "/tasks/"+job.ID+"/cancel", nil)
 	return nil
 }
@@ -172,22 +188,33 @@ func SaveState(jobID string, raw []byte) error {
 		return nil
 	}
 	if state.Status == "CANCELLED" {
-		_ = database.DB.Model(&models.RPAFile{}).Where("job_id = ? AND grading_status IN ?", jobID, []string{"WAITING_RUBRIC", "READY"}).Update("grading_status", "CANCELLED").Error
+		_ = database.DB.Model(&models.RPAFile{}).Where("job_id = ? AND grading_job_id = ''", jobID).Update("grading_status", "CANCELLED").Error
+		stopPendingMaterials(jobID)
 	}
 	_ = database.DB.Model(&models.AsyncJob{}).Where("id = ?", jobID).Updates(map[string]any{"status": state.Status, "message": state.Message}).Error
 	_ = cache.SetJobStatus(context.Background(), jobID, state.Status, state.Message)
 	return nil
 }
 
+func stopPendingMaterials(jobID string) {
+	var ids []string
+	database.DB.Model(&models.MaterialBatch{}).Where("source_job_id = ? AND grading_job_id = ''", jobID).Pluck("id", &ids)
+	if len(ids) == 0 {
+		return
+	}
+	database.DB.Model(&models.MaterialBatch{}).Where("id IN ? AND grading_job_id = ''", ids).Updates(map[string]any{"status": "CANCELLED", "auto_grade": false, "grading_state": "CANCELLED", "message": "下载流程已取消，已保存文件保留"})
+	database.DB.Model(&models.AsyncJob{}).Where("id IN ?", ids).Updates(map[string]any{"status": "CANCELLED", "message": "下载流程已取消"})
+}
+
 func Detail(job *models.RPAJob) map[string]any {
 	state := map[string]any{}
 	_ = json.Unmarshal([]byte(job.StateJSON), &state)
 	state["job_id"], state["status"], state["stage"], state["message"] = job.ID, job.Status, job.Stage, job.Message
-	state["target"] = Target{job.CourseName, job.AssignmentName, job.Term}
+	state["target"] = Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term, AfterDownload: job.AfterDownload, OutputRoot: job.OutputRoot}
 	var files []models.RPAFile
 	database.DB.Where("job_id = ?", job.ID).Find(&files)
 	for i := range files {
-		if files[i].GradingJobID != "" && files[i].GradingStatus == "PUBLISHED" {
+		if files[i].GradingJobID != "" {
 			var grading models.AsyncJob
 			if database.DB.First(&grading, "id = ?", files[i].GradingJobID).Error == nil {
 				files[i].GradingStatus = string(grading.Status)
@@ -195,6 +222,9 @@ func Detail(job *models.RPAJob) map[string]any {
 		}
 	}
 	state["grading_files"] = files
+	var batches []models.MaterialBatch
+	database.DB.Where("source_job_id = ? AND owner_id = ?", job.ID, job.UserID).Order("created_at DESC").Find(&batches)
+	state["material_batches"] = batches
 	return state
 }
 
@@ -235,7 +265,7 @@ func importFiles(job models.RPAJob) error {
 			}
 		}
 		file := models.RPAFile{ID: hex.EncodeToString(id[:]), JobID: job.ID, ExportRef: f.ExportRef, ClassName: className,
-			Path: f.Path, SHA256: f.SHA256, Size: f.Size, GradingStatus: "WAITING_RUBRIC", Message: "等待匹配作业及评分标准"}
+			Path: f.Path, SHA256: f.SHA256, Size: f.Size, GradingStatus: "DOWNLOADED", Message: "附件已下载，尚未提交批改"}
 		if err := database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&file).Error; err != nil {
 			return err
 		}
@@ -244,14 +274,14 @@ func importFiles(job models.RPAJob) error {
 }
 
 func dispatchFile(file models.RPAFile) error {
-	return database.DB.Transaction(func(tx *gorm.DB) error {
+	var job models.RPAJob
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&file, "id = ?", file.ID).Error; err != nil {
 			return err
 		}
-		if file.GradingStatus != "WAITING_RUBRIC" && file.GradingStatus != "READY" {
+		if file.GradingStatus == "CANCELLED" || file.GradingJobID != "" {
 			return nil
 		}
-		var job models.RPAJob
 		if err := tx.First(&job, "id = ?", file.JobID).Error; err != nil {
 			return err
 		}
@@ -272,20 +302,27 @@ func dispatchFile(file models.RPAFile) error {
 			return err
 		}
 		file.AssignmentID = assignment.ID
-		if !validRubric(assignment) {
-			file.Message = "请在作业管理中补齐题目要求和 JSON 评分标准，系统将自动继续批改"
-			return tx.Save(&file).Error
+		file.GradingStatus, file.Message = "DOWNLOADED", "附件已下载，可整理材料或主动发起批改"
+		if job.AfterDownload == "grade" && !validRubric(assignment) {
+			file.GradingStatus, file.Message = "WAITING_RUBRIC", "已按要求准备后续批改，等待补齐题目与评分标准"
 		}
-		file.GradingJobID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("rpa-grade:"+file.ID)).String()
-		grading := models.AsyncJob{ID: file.GradingJobID, JobType: models.JobTypeHomework, ReferenceID: job.ID,
-			Status: models.JobStatusPending, Message: "官网下载完成，等待批改"}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&grading).Error; err != nil {
-			return err
-		}
-		// Commit durable dispatch intent before sending; a later retry reuses the same grading ID.
-		file.GradingStatus, file.Message = "READY", "等待投递批改队列"
 		return tx.Save(&file).Error
 	})
+	if err != nil {
+		return err
+	}
+	if file.GradingJobID != "" || file.GradingStatus == "CANCELLED" || job.ID == "" || job.Status == "CANCELLED" {
+		return nil
+	}
+	if file.MaterialBatchID == "" && (job.AfterDownload == "extract" || job.AfterDownload == "grade") && file.ClassName != "" {
+		batch, err := materials.Default().Create(context.Background(), materials.Actor{UserID: job.UserID, Role: "teacher"}, materials.Request{SourceJobID: job.ID, SourceFileID: file.ID, AssignmentID: file.AssignmentID, OutputRoot: job.OutputRoot, AutoGrade: job.AfterDownload == "grade"}, "rpa-materials:"+file.ID)
+		if err != nil {
+			database.DB.Model(&file).Update("message", err.Error())
+			return err
+		}
+		return database.DB.Model(&file).Update("material_batch_id", batch.ID).Error
+	}
+	return nil
 }
 
 func syncJobs(ctx context.Context) {
@@ -323,18 +360,10 @@ func syncJobs(ctx context.Context) {
 		}
 	}
 	var files []models.RPAFile
-	database.DB.Where("grading_status IN ?", []string{"WAITING_RUBRIC", "READY"}).Find(&files)
+	database.DB.Where("grading_status IN ? AND grading_job_id = ''", []string{"DOWNLOADED", "WAITING_RUBRIC", "READY"}).Find(&files)
 	for _, file := range files {
 		if err := dispatchFile(file); err != nil {
 			continue
-		}
-		if err := database.DB.First(&file, "id = ?", file.ID).Error; err != nil {
-			continue
-		}
-		if file.GradingStatus == "READY" && PublishGrade != nil {
-			if err := PublishGrade(file.GradingJobID, file.AssignmentID, file.Path); err == nil {
-				database.DB.Model(&file).Updates(map[string]any{"grading_status": "PUBLISHED", "message": "已投递批改队列"})
-			}
 		}
 	}
 }

@@ -69,31 +69,8 @@ PY
 }
 start() {
   local name="$1" port="$2" cwd="$3" limit="$4"; shift 4
-  if port_open "$port"; then
-    echo "$name：端口 $port 已在监听，复用现有服务"
-    return
-  fi
-  # start_new_session detaches children; close the startup lock in the child.
-  "$PYTHON" - "$name" "$cwd" "$@" 9>&- <<'PY'
-import os, subprocess, sys
-from pathlib import Path
-name, cwd, *cmd = sys.argv[1:]
-runtime = Path(os.environ['RUNTIME_DIR'])
-with (runtime / (name + '.log')).open('ab') as log:
-    p = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log,
-                         stderr=subprocess.STDOUT, start_new_session=True)
-(runtime / (name + '.pid')).write_text(str(p.pid))
-PY
-  local deadline=$((SECONDS + limit)) pid
-  pid="$(cat "$RUNTIME_DIR/$name.pid")"
-  until port_open "$port"; do
-    if ! kill -0 "$pid" 2>/dev/null || (( SECONDS >= deadline )); then
-      echo "$name 未就绪，请查看 $RUNTIME_DIR/$name.log" >&2
-      return 1
-    fi
-    sleep 2
-  done
-  echo "$name：已就绪（端口 $port）"
+  "$PYTHON" "$ROOT/scripts/service_process.py" start "$name" \
+    --port "$port" --cwd "$cwd" --timeout "$limit" -- "$@" 9>&-
 }
 start_system_service() {
   if [[ $EUID == 0 ]]; then service "$1" start; else sudo -n service "$1" start; fi
@@ -144,6 +121,15 @@ start backend 8000 "$ROOT/backend-go" 90 "$RUNTIME_DIR/grading-gateway"
 # Protected route must respond with 401 when called without authentication.
 [[ "$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/profile)" == 401 ]]
 start frontend 6006 "$ROOT/vue-grading-frontend" 60 node node_modules/vite/bin/vite.js --host "${FRONTEND_HOST:-0.0.0.0}" --port 6006 --strictPort
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6006/ >/dev/null
+# Vite can open its socket before the first dependency scan finishes on /mnt/d.
+# Wait for an HTTP response, so cold startup does not report a false failure.
+frontend_deadline=$((SECONDS + 90))
+until curl --fail --silent --show-error --max-time 10 http://127.0.0.1:6006/ >/dev/null 2>"$RUNTIME_DIR/frontend-health.log"; do
+  if (( SECONDS >= frontend_deadline )); then
+    echo "frontend HTTP 未就绪，请查看 $RUNTIME_DIR/frontend.log 和 frontend-health.log" >&2
+    exit 1
+  fi
+  sleep 2
+done
 printf '\n系统已启动：http://127.0.0.1:6006\n日志目录：%s\n' "$RUNTIME_DIR"
 if [[ -n "${AutoDLService6006URL:-}" ]]; then printf 'AutoDL 入口：%s\n' "$AutoDLService6006URL"; fi

@@ -44,6 +44,8 @@ test-results/
 !/docs/go-eino-python-architecture-design.md
 !/docs/go-eino-python-implementation.md
 !/docs/rpa-implementation.md
+!/docs/homework-materials-workflow.md
+!/docs/logbook.md
 *.test
 *.out
 

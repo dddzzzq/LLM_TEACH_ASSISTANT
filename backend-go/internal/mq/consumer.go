@@ -217,9 +217,10 @@ func handleHomeworkTask(ctx context.Context, message []byte) error {
 		log.Printf("[Grading Consumer] ❌ 消息反序列化失败: %v", err)
 		return fmt.Errorf("failed to unmarshal homework task: %w", err)
 	}
+	taskLog := log.New(log.Writer(), fmt.Sprintf("[task job=%s] ", task.JobID), log.LstdFlags)
 	var existing models.AsyncJob
 	if database.DB.First(&existing, "id = ?", task.JobID).Error == nil &&
-		(existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed) {
+		(existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed || existing.Status == models.JobStatusCancelled) {
 		return nil // Durable terminal status prevents replay after the Redis lease expires.
 	}
 
@@ -229,75 +230,75 @@ func handleHomeworkTask(ctx context.Context, message []byte) error {
 		lockKey := "lock:job:" + task.JobID
 		acquired, err := redisClient.SetNX(ctx, lockKey, 1, 30*time.Minute).Result()
 		if err != nil {
-			log.Printf("ERROR: Failed to acquire redis lock for homework task %s: %v", task.JobID, err)
+			taskLog.Printf("ERROR: Failed to acquire redis lock for homework task %s: %v", task.JobID, err)
 			return err
 		}
 		if !acquired {
-			log.Printf("INFO: Task %s is already being processed or completed. Skipping.", task.JobID)
+			taskLog.Printf("INFO: Task %s is already being processed or completed. Skipping.", task.JobID)
 			return nil
 		}
 	}
 
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("[Grading Consumer] 🚀 开始处理作业批改任务")
-	log.Printf("[Grading Consumer] �� 任务信息:")
-	log.Printf("[Grading Consumer]    - Job ID: %s", task.JobID)
-	log.Printf("[Grading Consumer]    - Assignment ID: %d", task.AssignmentID)
-	log.Printf("[Grading Consumer]    - Zip Path: %s", task.ZipPath)
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("[Grading Consumer] 🚀 开始处理作业批改任务")
+	taskLog.Printf("[Grading Consumer] �� 任务信息:")
+	taskLog.Printf("[Grading Consumer]    - Job ID: %s", task.JobID)
+	taskLog.Printf("[Grading Consumer]    - Assignment ID: %d", task.AssignmentID)
+	taskLog.Printf("[Grading Consumer]    - Zip Path: %s", task.ZipPath)
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	// 1. 更新 MySQL AsyncJob 状态为 PROCESSING（先数据库）
-	log.Printf("[Grading Consumer] 📋 步骤 1/4: 更新MySQL任务状态为PROCESSING...")
+	taskLog.Printf("[Grading Consumer] 📋 步骤 1/4: 更新MySQL任务状态为PROCESSING...")
 	if err := updateAsyncJobStatus(task.JobID, models.JobStatusProcessing, "开始处理作业批改"); err != nil {
-		log.Printf("[Grading Consumer] ⚠️  更新MySQL状态失败: %v", err)
+		taskLog.Printf("[Grading Consumer] ⚠️  更新MySQL状态失败: %v", err)
 	} else {
-		log.Printf("[Grading Consumer] ✅ MySQL任务状态已更新为 PROCESSING")
+		taskLog.Printf("[Grading Consumer] ✅ MySQL任务状态已更新为 PROCESSING")
 	}
 
 	// 2. 更新 Redis 状态为 PROCESSING（后缓存）
-	log.Printf("[Grading Consumer] 📋 步骤 2/4: 更新Redis缓存状态为PROCESSING...")
+	taskLog.Printf("[Grading Consumer] 📋 步骤 2/4: 更新Redis缓存状态为PROCESSING...")
 	if err := cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusProcessing), "开始处理作业批改"); err != nil {
-		log.Printf("[Grading Consumer] ⚠️  更新Redis状态失败: %v", err)
+		taskLog.Printf("[Grading Consumer] ⚠️  更新Redis状态失败: %v", err)
 	} else {
-		log.Printf("[Grading Consumer] ✅ Redis缓存状态已更新为 PROCESSING")
+		taskLog.Printf("[Grading Consumer] ✅ Redis缓存状态已更新为 PROCESSING")
 	}
 
 	// 3. 调用 tools.ProcessPipeline 函数
-	log.Printf("[Grading Consumer] 📋 步骤 3/4: 调用批改流水线处理作业...")
-	log.Printf("[Grading Consumer] 🔄 正在调用 ProcessPipeline 接口...")
+	taskLog.Printf("[Grading Consumer] 📋 步骤 3/4: 调用批改流水线处理作业...")
+	taskLog.Printf("[Grading Consumer] 🔄 正在调用 ProcessPipeline 接口...")
 
 	startTime := time.Now()
 	defer func() {
 		elapsed := time.Since(startTime)
-		log.Printf("[Grading Consumer] ⏱️  批改任务总耗时: %v", elapsed)
+		taskLog.Printf("[Grading Consumer] ⏱️  批改任务总耗时: %v", elapsed)
 	}()
 
 	// 捕获 panic
 	defer func() {
 		if r := recover(); r != nil {
 			errMsg := fmt.Sprintf("Panic in ProcessPipeline: %v", r)
-			log.Printf("[Grading Consumer] ❌ PANIC: %s", errMsg)
+			taskLog.Printf("[Grading Consumer] ❌ PANIC: %s", errMsg)
 			cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusFailed), errMsg)
 			updateAsyncJobStatus(task.JobID, models.JobStatusFailed, errMsg)
 		}
 	}()
 
-	if err := tools.ProcessPipeline(fmt.Sprintf("%d", task.AssignmentID), task.ZipPath); err != nil {
+	if err := tools.ProcessPipelineForJob(fmt.Sprintf("%d", task.AssignmentID), task.ZipPath, existing); err != nil {
 		updateAsyncJobStatus(task.JobID, models.JobStatusFailed, err.Error())
 		cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusFailed), err.Error())
 		return nil
 	}
 
-	log.Printf("[Grading Consumer] ✅ 批改流水线执行完成")
+	taskLog.Printf("[Grading Consumer] ✅ 批改流水线执行完成")
 
 	// 4. 处理完成，更新状态为 SUCCESS
-	log.Printf("[Grading Consumer] 📋 步骤 4/4: 更新任务状态为SUCCESS...")
+	taskLog.Printf("[Grading Consumer] 📋 步骤 4/4: 更新任务状态为SUCCESS...")
 	updateAsyncJobStatus(task.JobID, models.JobStatusSuccess, "作业主批改完成，成绩池化在后台执行")
 	cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusSuccess), "作业主批改完成，成绩池化在后台执行")
 
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("[Grading Consumer] 🎉 作业批改任务处理完成")
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("[Grading Consumer] 🎉 作业批改任务处理完成")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	return nil
 }
@@ -308,8 +309,9 @@ func handleExamTask(ctx context.Context, message []byte) error {
 		return fmt.Errorf("failed to unmarshal exam task: %w", err)
 	}
 
+	taskLog := log.New(log.Writer(), fmt.Sprintf("[task job=%s] ", task.JobID), log.LstdFlags)
 	var existing models.AsyncJob
-	if database.DB.First(&existing, "id = ?", task.JobID).Error == nil && (existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed) {
+	if database.DB.First(&existing, "id = ?", task.JobID).Error == nil && (existing.Status == models.JobStatusSuccess || existing.Status == models.JobStatusFailed || existing.Status == models.JobStatusCancelled) {
 		return nil
 	}
 
@@ -319,22 +321,22 @@ func handleExamTask(ctx context.Context, message []byte) error {
 		lockKey := "lock:job:" + task.JobID
 		acquired, err := redisClient.SetNX(ctx, lockKey, 1, 30*time.Minute).Result()
 		if err != nil {
-			log.Printf("ERROR: Failed to acquire redis lock for exam task %s: %v", task.JobID, err)
+			taskLog.Printf("ERROR: Failed to acquire redis lock for exam task %s: %v", task.JobID, err)
 			return err
 		}
 		if !acquired {
-			log.Printf("INFO: Task %s is already being processed or completed. Skipping.", task.JobID)
+			taskLog.Printf("INFO: Task %s is already being processed or completed. Skipping.", task.JobID)
 			return nil
 		}
 	}
 
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("[Grading Consumer] 🚀 开始处理试卷批改任务")
-	log.Printf("[Grading Consumer] 📋 任务信息:")
-	log.Printf("[Grading Consumer]    - Job ID: %s", task.JobID)
-	log.Printf("[Grading Consumer]    - Exam ID: %s", task.ExamID)
-	log.Printf("[Grading Consumer]    - Student ID: %s", task.StudentID)
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("[Grading Consumer] 🚀 开始处理试卷批改任务")
+	taskLog.Printf("[Grading Consumer] 📋 任务信息:")
+	taskLog.Printf("[Grading Consumer]    - Job ID: %s", task.JobID)
+	taskLog.Printf("[Grading Consumer]    - Exam ID: %s", task.ExamID)
+	taskLog.Printf("[Grading Consumer]    - Student ID: %s", task.StudentID)
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	// 1. 更新 MySQL AsyncJob 状态为 PROCESSING
 	updateAsyncJobStatus(task.JobID, models.JobStatusProcessing, "开始处理试卷批改")
@@ -344,14 +346,14 @@ func handleExamTask(ctx context.Context, message []byte) error {
 	// 3. 调用 tools.ProcessExamSubmission 函数
 	startTime := time.Now()
 	defer func() {
-		log.Printf("[Grading Consumer] ⏱️  试卷批改任务总耗时: %v", time.Since(startTime))
+		taskLog.Printf("[Grading Consumer] ⏱️  试卷批改任务总耗时: %v", time.Since(startTime))
 	}()
 
 	// 捕获 panic
 	defer func() {
 		if r := recover(); r != nil {
 			errMsg := fmt.Sprintf("Panic in ProcessExamSubmission: %v", r)
-			log.Printf("[Grading Consumer] ❌ PANIC: %s", errMsg)
+			taskLog.Printf("[Grading Consumer] ❌ PANIC: %s", errMsg)
 			cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusFailed), errMsg)
 			updateAsyncJobStatus(task.JobID, models.JobStatusFailed, errMsg)
 		}
@@ -367,9 +369,9 @@ func handleExamTask(ctx context.Context, message []byte) error {
 	updateAsyncJobStatus(task.JobID, models.JobStatusSuccess, "试卷批改完成")
 	cache.SetJobStatus(ctx, task.JobID, string(models.JobStatusSuccess), "试卷批改完成")
 
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("[Grading Consumer] 🎉 试卷批改任务处理完成")
-	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	taskLog.Printf("[Grading Consumer] 🎉 试卷批改任务处理完成")
+	taskLog.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	return nil
 }
@@ -406,9 +408,12 @@ func updateAsyncJobStatus(jobID string, status models.AsyncJobStatus, message st
 	job.Message = message
 	job.UpdatedAt = time.Now()
 
-	if err := database.DB.Save(&job).Error; err != nil {
+	if err := database.DB.Model(&models.AsyncJob{}).Where("id = ? AND status <> ?", jobID, models.JobStatusCancelled).Updates(map[string]any{"status": status, "message": message, "updated_at": job.UpdatedAt}).Error; err != nil {
 		log.Printf("[Grading Consumer] ❌ 更新AsyncJob记录失败: %v", err)
 		return err
+	}
+	if job.MaterialBatchID != "" {
+		database.DB.Model(&models.MaterialBatch{}).Where("id = ? AND grading_job_id = ?", job.MaterialBatchID, jobID).Update("grading_state", string(status))
 	}
 
 	log.Printf("[Grading Consumer] ✅ AsyncJob状态已更新")

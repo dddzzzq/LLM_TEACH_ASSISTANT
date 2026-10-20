@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm"
 	"grading-gateway/internal/cache"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/materials"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/mq"
 )
@@ -36,15 +37,20 @@ func (a Actor) Check() error {
 }
 
 type Request struct {
-	Kind         string   `json:"kind"`
-	ResourceID   string   `json:"resource_id"`
-	FilePath     string   `json:"file_path,omitempty"`
-	StudentID    string   `json:"student_id,omitempty"`
-	ImagePaths   []string `json:"image_paths,omitempty"`
-	SkillName    string   `json:"-"`
-	SkillVersion string   `json:"-"`
+	BatchID       string   `json:"batch_id,omitempty"`
+	DirectoryPath string   `json:"directory_path,omitempty"`
+	OutputRoot    string   `json:"output_root,omitempty"`
+	AllowPartial  bool     `json:"allow_partial,omitempty"`
+	Kind          string   `json:"kind"`
+	ResourceID    string   `json:"resource_id"`
+	FilePath      string   `json:"file_path,omitempty"`
+	StudentID     string   `json:"student_id,omitempty"`
+	ImagePaths    []string `json:"image_paths,omitempty"`
+	SkillName     string   `json:"-"`
+	SkillVersion  string   `json:"-"`
 }
 type Result struct {
+	BatchID   string                `json:"batch_id,omitempty"`
 	Outcome   string                `json:"outcome"`
 	JobID     string                `json:"job_id,omitempty"`
 	JobType   string                `json:"job_type,omitempty"`
@@ -218,9 +224,30 @@ func CheckFiles(r Request) ([]string, error) {
 	return nil, nil
 }
 func (s Service) Submit(ctx context.Context, actor Actor, r Request, requestID string) (Result, error) {
+	if r.Kind == "homework" && r.BatchID != "" {
+		return SubmitBatch(ctx, actor, r)
+	}
 	checked, err := s.Check(ctx, actor, r.Kind, r.ResourceID)
 	if err != nil || checked.Outcome == "needs_input" {
 		return checked, err
+	}
+	if r.Kind == "homework" && r.DirectoryPath != "" {
+		path, err := materials.NormalizePath(r.DirectoryPath)
+		if err != nil {
+			return Result{}, err
+		}
+		var existing models.MaterialBatch
+		if database.DB.WithContext(ctx).Where("owner_id = ? AND manifest_path = ?", actor.UserID, filepath.Join(path, "manifest.json")).First(&existing).Error == nil {
+			r.BatchID = existing.ID
+			r.DirectoryPath = ""
+			return SubmitBatch(ctx, actor, r)
+		}
+		id, _ := ResourceID(r.ResourceID)
+		batch, err := materials.Default().Create(ctx, materials.Actor{UserID: actor.UserID, Role: actor.Role}, materials.Request{SourcePath: r.DirectoryPath, AssignmentID: id, OutputRoot: r.OutputRoot, AutoGrade: true}, requestID)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Outcome: "accepted", JobID: batch.ID, JobType: "homework_materials", BatchID: batch.ID, Status: models.JobStatusPending, Message: "材料整理已受理，完成后按本次明确要求继续批改", ResultURL: "/assignments/" + r.ResourceID}, nil
 	}
 	missing, err := CheckFiles(r)
 	if err != nil {
@@ -286,7 +313,7 @@ func receipt(job models.AsyncJob) Result {
 	if job.JobType == models.JobTypeExam {
 		url = "/exams/" + job.ReferenceID
 	}
-	return Result{Outcome: outcome, JobID: job.ID, JobType: string(job.JobType), Status: job.Status, Message: job.Message, ResultURL: url}
+	return Result{Outcome: outcome, JobID: job.ID, JobType: string(job.JobType), Status: job.Status, Message: job.Message, ResultURL: url, BatchID: job.MaterialBatchID}
 }
 func (s Service) Status(ctx context.Context, actor Actor, id string) (Result, error) {
 	if err := actor.Check(); err != nil {
@@ -297,7 +324,7 @@ func (s Service) Status(ctx context.Context, actor Actor, id string) (Result, er
 		return Result{}, fmt.Errorf("批改任务不存在或不属于当前用户")
 	}
 	result := receipt(job)
-	if job.JobType == models.JobTypeHomework && job.Status == models.JobStatusSuccess {
+	if job.JobType == models.JobTypeHomework && job.Status == models.JobStatusSuccess && job.MaterialBatchID == "" {
 		result.Message += "；成绩池化可能仍在后台执行，请以作业页面为准"
 	}
 	return result, nil

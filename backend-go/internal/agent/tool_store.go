@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -226,6 +227,13 @@ func EnsureRPATools(ctx context.Context) {
 		if _, legacy := properties["password"]; legacy {
 			database.DB.Model(&row).Updates(map[string]any{"schema_json": tool.Schema(), "description": tool.Description(), "allowed_roles": roles})
 		}
+		if _, updated := properties["after_download"]; !updated && (tool.Name() == "fetch_homework" || tool.Name() == "fetch_and_grade_homework") {
+			patch := map[string]any{"schema_json": tool.Schema()}
+			if strings.Contains(row.Description, "附件校验后按现有配置自动批改") {
+				patch["description"] = tool.Description()
+			}
+			database.DB.Model(&row).Updates(patch)
+		}
 	}
 	InvalidateToolsCache(ctx)
 }
@@ -234,6 +242,11 @@ func EnsureRPATools(ctx context.Context) {
 func EnsureGradingTools(ctx context.Context) {
 	if database.DB == nil {
 		return
+	}
+	for _, op := range []string{"prepare", "get", "cancel"} {
+		tool := &MaterialTool{Operation: op}
+		row := models.ToolDefinition{Name: tool.Name(), ImplKey: tool.Name(), Description: tool.Description(), SchemaJSON: tool.Schema(), Enabled: true, AllowedRoles: `["teacher","admin"]`}
+		database.DB.Where("name = ?", tool.Name()).FirstOrCreate(&row)
 	}
 	for _, op := range []string{"inspect", "submit", "status"} {
 		tool := &GradingTool{Operation: op}

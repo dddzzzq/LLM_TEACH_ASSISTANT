@@ -56,3 +56,25 @@ func TestPageAgentCannotSkipSkillOrSmuggleExtraActionParameters(t *testing.T) {
 		})
 	}
 }
+
+func TestPageInformationAndFullSkillReachDecisionModel(t *testing.T) {
+	doc := catalog.Document{Name: "fetch-homework", Description: "nav", Instructions: "完整流程：课程、作业、导出"}
+	input := json.RawMessage(`{"observation":{"pages":[{"title":"课程空间"}],"frames":[{"frame_id":"p0f1","headings":[{"text":"第一次作业"}]}],"elements":[{"ref":"p0f1e0","role":"button","name":"查看提交","context_labels":["第一次作业"]}],"coverage":{"truncated":false}}}`)
+	round := 0
+	_, err := Decide(context.Background(), input, doc, []byte(fixtureContract), func(_ context.Context, messages []map[string]interface{}, _ []map[string]interface{}) (*modelclient.LLMResponse, error) {
+		round++
+		if round == 1 {
+			return modelResponse("load_skill", `{"skill":"fetch-homework"}`), nil
+		}
+		payload, _ := json.Marshal(messages)
+		for _, wanted := range []string{"课程空间", "p0f1", "context_labels", "coverage", doc.Instructions, "先整体读取"} {
+			if !strings.Contains(string(payload), wanted) {
+				t.Fatalf("decision model is missing %s", wanted)
+			}
+		}
+		return modelResponse("click", `{"element_ref":"p0f1e0"}`), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

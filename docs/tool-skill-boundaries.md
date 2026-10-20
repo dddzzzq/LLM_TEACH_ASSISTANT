@@ -4,9 +4,9 @@
 
 | 概念 | 定义 | 实现位置 |
 | --- | --- | --- |
-| Agent | 根据目标、观察和工具结果作出决策 | Go 对话入口；Python `DownloadAgent` |
+| Agent | 根据目标、观察和工具结果作出决策 | Go 对话入口；Go/Eino `portal-browser` |
 | Tool | 代码注册的可执行能力，提供名称、描述、参数协议和执行器 | Go `internal/agent/tools.go`、`tool_*.go`；Python `app/rpa/tools.py` |
-| Skill | 提供某类任务的操作知识、判断依据和协作方式 | `skills/{fetch-homework,grade-homework,grade-exam}/SKILL.md` |
+| Skill | 提供某类任务的操作知识、判断依据和协作方式 | `skills/{download-homework,fetch-homework,grade-homework,grade-exam}/SKILL.md` |
 | 工作流与控制器 | 推进业务状态，核验范围、控制权、导出关联和下载结果 | RPA 控制器、Go 批改流水线 |
 
 Skill 中提到一个动作不会注册该动作，也不会赋予身份、权限或任务控制权。工具的执行边界始终由代码校验。
@@ -27,7 +27,7 @@ Go 的 `internal/tools/` 目前保留原有业务实现（批改流水线、解�
 
 ## 浏览器动作与导航知识
 
-`app/rpa/tools.py` 定义浏览器动作的名称和参数类型，生成模型可见的动作协议，并供 `DownloadAgent` 和 `Task.execute` 校验输出。未知动作、缺少参数、额外参数及类型错误在操作浏览器之前拒绝。
+`app/rpa/tools.py` 定义浏览器动作的名称和参数类型，生成模型可见的动作协议，并供 Go 页面 Agent 和 `Task.execute` 校验输出。未知动作、缺少参数、额外参数及类型错误在操作浏览器之前拒绝。
 
 `SKILL.md` 只解释如何定位课程和作业、如何消歧、何时请用户协助，以及导航阶段的完成依据。动作参数格式和运行时约束由代码提供。
 
@@ -39,7 +39,7 @@ Schema 校验之后，`Task` / `PortalAdapter` 继续检查观察引用、页面
 
 `grade-homework` 和 `grade-exam` 规定目标消歧、配置补齐、材料来源、提交及结果解释。`inspect_grading_target`、`start_grading_job`、`get_grading_job` 执行对应操作。`load_skill` 是主助手内部的只读加载工具，不属于数据库中的业务工具配置。
 
-主助手最多执行八轮模型调用，保留原生 assistant/tool 消息；提交批改之前强制要求模型已在前一轮收到相应 Skill 正文。聊天工具、旧 `trigger_async_pipeline` 和网页上传均使用 `internal/grading` 校验并创建持久任务，再交给 Kafka。RPA 仍保留原有独立 outbox 和任务恢复机制。
+主助手最多执行八轮模型调用，保留原生 assistant/tool 消息；提交批改之前强制要求模型已在前一轮收到相应 Skill 正文。`fetch_homework(after_download=grade)` 还要求此前已加载下载与批改两个 Skill。网页上传和官网下载先生成独立材料批次，默认不批改；`extract_homework_files` 可单独整理目录或附件。只有明确请求批改才通过 `internal/grading` 提交持久任务。见 [材料工作流](homework-materials-workflow.md)。
 
 详见 [批改 Skill 实现与边界](grading-skills.md)。
 
@@ -52,7 +52,7 @@ Schema 校验之后，`Task` / `PortalAdapter` 继续检查观察引用、页面
 - `ToolDefinition.TableName()` 继续使用 `skill_definitions`，不重命名或复制数据库表。
 - Redis 继续使用原策略缓存键，新旧接口刷新同一份缓存。
 - `skill_compat.go` 中保留已弃用 Go 类型和函数别名，新业务代码使用 Tool 命名。
-- `fetch_homework`、`fetch_and_grade_homework` 及其他模型可调用名称保持兼容；两个下载入口均在附件核验、评分配置齐备后继续原有批改流程。
+- `fetch_homework`、`fetch_and_grade_homework` 及其他模型可调用名称保持兼容；两个下载入口均在附件核验后按 after_download 指定范围执行，默认仅整理，不启动批改。
 
 旧数据库 Schema 不再决定模型收到的参数协议。如曾通过管理页定制 Schema，需要将参数变更实现到对应工具代码。已有启用状态、允许角色和描述覆盖继续使用。
 

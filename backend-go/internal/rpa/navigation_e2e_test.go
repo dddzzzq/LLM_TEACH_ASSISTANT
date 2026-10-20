@@ -19,6 +19,12 @@ import (
 )
 
 func TestEinoThroughPythonWorkerDownloadsVerifiedArchive(t *testing.T) {
+	for _, variant := range []string{"legacy", "semantic", "custom", "nested", "portal-export"} {
+		t.Run(variant, func(t *testing.T) { testBrowserDownload(t, variant) })
+	}
+}
+
+func testBrowserDownload(t *testing.T, variant string) {
 	python := os.Getenv("RPA_BROWSER_PYTHON")
 	if python == "" {
 		t.Skip("set RPA_BROWSER_PYTHON to run real Go/Eino/Python/Chromium integration")
@@ -45,6 +51,7 @@ func TestEinoThroughPythonWorkerDownloadsVerifiedArchive(t *testing.T) {
 	cmd := exec.CommandContext(ctx, python, "tests/fixtures/browser_worker_server.py")
 	cmd.Dir = filepath.Join(root, "ai_engine_python")
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+cmd.Dir, "RPA_FIXTURE_PORT="+strconv.Itoa(port), "RUNTIME_DIR="+dir, "RPA_DOWNLOAD_DIR="+filepath.Join(dir, "downloads"), "RPA_PROXY_URL=", "DEEPSEEK_API_KEY=", "PAGE_AGENT_API_KEY=")
+	cmd.Env = append(cmd.Env, "RPA_FIXTURE_VARIANT="+variant)
 	log, err := os.Create(filepath.Join(dir, "worker.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +101,7 @@ func TestEinoThroughPythonWorkerDownloadsVerifiedArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	decisions := 0
+	scopeConfirmations := 0
 	decide := func(ctx context.Context, input json.RawMessage, doc catalog.Document, contract json.RawMessage) (json.RawMessage, error) {
 		decisions++
 		round := 0
@@ -120,6 +128,12 @@ func TestEinoThroughPythonWorkerDownloadsVerifiedArchive(t *testing.T) {
 					wanted := "操作系统"
 					if view.Stage != "LOCATE_COURSE" {
 						wanted = "批阅"
+					}
+					if variant == "semantic" {
+						wanted = "进入课程"
+						if view.Stage != "LOCATE_COURSE" {
+							wanted = "查看提交"
+						}
 					}
 					for _, e := range view.Observation.Elements {
 						if e.Name == wanted {
@@ -175,7 +189,15 @@ func TestEinoThroughPythonWorkerDownloadsVerifiedArchive(t *testing.T) {
 			case "LOGIN":
 				_, err = WorkerRequest(ctx, "POST", "/fixture/"+id+"/login", nil)
 			case "CLASS_SCOPE":
-				_, err = WorkerRequest(ctx, "POST", "/tasks/"+id+"/class-scope", map[string]any{"mode": "selected", "class_ids": []string{"class_0"}})
+				scopeConfirmations++
+				if scopeConfirmations > 1 {
+					t.Fatal("class scope requested again after explicit confirmation")
+				}
+				scope := map[string]any{"mode": "selected", "class_ids": []string{"class_0"}}
+				if variant == "portal-export" {
+					scope = map[string]any{"mode": "all", "class_ids": []string{}}
+				}
+				_, err = WorkerRequest(ctx, "POST", "/tasks/"+id+"/class-scope", scope)
 			default:
 				t.Fatalf("unexpected human handoff: %s", raw)
 			}

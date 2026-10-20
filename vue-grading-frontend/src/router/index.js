@@ -14,6 +14,8 @@ import StudentReportView from '../views/StudentReportView.vue'
 import AIAssistantView from '../views/AIAssistantView.vue'
 import LoginView from '../views/LoginView.vue'
 import ToolsAdminView from '../views/ToolsAdminView.vue'
+import LogsView from '../views/LogsView.vue'
+import MaterialsView from '../views/MaterialsView.vue'
 
 // 路由守卫：检查用户是否已认证
 const requireAuth = (to, from, next) => {
@@ -50,7 +52,7 @@ const checkRolePermission = (allowedRoles) => {
       return
     }
 
-    // 教师和管理员可以访问所有功能
+    // 按页面声明的角色放行
     if (allowedRoles.includes(userRole)) {
       next()
     } else {
@@ -195,6 +197,12 @@ const router = createRouter({
       beforeEnter: checkRolePermission(['teacher', 'admin'])
     },
     
+    // 作业材料与管理员日志查阅
+    {path:'/materials',name:'materials',component:MaterialsView,beforeEnter:checkRolePermission(['teacher','admin'])},
+    {
+      path: '/logs', name: 'logs', component: LogsView,
+      beforeEnter: checkRolePermission(['admin'])
+    },
     // 404页面
     {
       path: '/:pathMatch(.*)*',
