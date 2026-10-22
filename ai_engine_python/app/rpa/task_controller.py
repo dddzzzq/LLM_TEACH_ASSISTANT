@@ -12,7 +12,9 @@ from urllib.parse import urlsplit
 
 from .tools import validate_action
 from .errors import RpaIssue
+from .target_confirmation import TargetConfirmation, SEMESTER
 from .download_manager import save_download
+from .browser_startup import BrowserStartup, StartupPaused
 from .portal_adapter import PortalAdapter, TARGET_URL, FORBIDDEN, EXPORT_CONFIRM, match_new_exports, reconcile_exports
 
 
@@ -52,6 +54,10 @@ class Task:
         self.pointer_owner = self.pointer_page = None
         self.navigation_marker = None
         self.stagnant_actions = 0
+        self.target_confirmation = TargetConfirmation(self)
+        self.startup_pending = False
+        self.startup_wake = asyncio.Event()
+        self.startup_operation = None
 
     def update(self, **fields):
         self.state.update(fields, updated_at=time.time(), state_version=self.state.get('state_version', 0) + 1)
@@ -120,6 +126,8 @@ class Task:
                         else '正在核验官网登录状态。如已完成登录，请点击“交还自动化”继续。')
 
     async def run(self):
+        startup_phase = 'browser_launch'
+        self.startup_pending = True
         try:
             proxy = self.manager.proxy
             browser_downloads = self.manager.download_root / self.state['job_id'] / '.browser'
@@ -127,6 +135,7 @@ class Task:
             self.browser = await self.manager.playwright.chromium.launch(headless=True,
                 args=['--no-sandbox', '--disable-dev-shm-usage'], proxy={'server': proxy} if proxy else None,
                 downloads_path=str(browser_downloads))
+            startup_phase = 'browser_context'
             self.context = await self.browser.new_context(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
             await self.context.route('**/*', self.route)
             await self.context.expose_binding('__rpa_manual_export', self.manual_export_submitted)
@@ -146,13 +155,8 @@ class Task:
                 'behavior':'allowAndName', 'browserContextId':target_info['targetInfo']['browserContextId'],
                 'downloadPath':str(browser_downloads), 'eventsEnabled':True})
             self.adapter = PortalAdapter(self.context, self.state['target'])
-            async with self.lock:
-                await self.page.goto(TARGET_URL, wait_until='domcontentloaded', timeout=30000)
-                login = self.page.locator('.denglu')
-                if await login.count() and await login.is_visible():
-                    await login.click(timeout=10000)
-            self.update(stage='AUTHENTICATE')
-            self.wait_human('LOGIN', '请在任务浏览器中完成账号、密码及验证码，然后交还自动化')
+            startup_phase = 'login_navigation'
+            await self.open_login()
             errors = 0
             while True:
                 await self.gate.wait()
@@ -197,16 +201,47 @@ class Task:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self.record_failure(exc, 'startup:' + startup_phase if self.startup_pending else 'task_run')
             self.update(status='FAILED', control_mode='HUMAN', error_code=type(exc).__name__)
             self.event('浏览器任务启动或执行失败，请检查网络及 Worker 配置')
         finally:
+            if self.startup_operation:
+                self.startup_operation.cancel()
+                await asyncio.gather(self.startup_operation, return_exceptions=True)
             if self.browser:
                 await self.browser.close()
             self.browser = self.context = self.page = None
 
+    async def open_login(self):
+        # Navigation has its own cancellable operation. Do not hold the frame/input
+        # lock over network waits; pause cancels it before handing control over.
+        while self.startup_pending:
+            self.startup_wake.clear()
+            ready = None
+            self.startup_operation = asyncio.create_task(BrowserStartup(self).open_login())
+            try:
+                ready = await self.startup_operation
+            except StartupPaused:
+                pass
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
+                if self.state['control_mode'] == 'AUTO':
+                    raise
+            finally:
+                self.startup_operation = None
+            if ready:
+                self.startup_pending = False
+                self.update(stage='AUTHENTICATE', error_code=None, last_error=None, auth_status=ready)
+                self.wait_human('LOGIN_COMPLETE' if ready == 'AUTHENTICATED' else 'LOGIN',
+                                '官网登录已完成，请交还自动化继续' if ready == 'AUTHENTICATED' else
+                                '登录页已就绪，请完成账号、密码及验证码，然后交还自动化')
+                return
+            await self.startup_wake.wait()
+
     def automatic(self):
         return (self.state['status'] == 'RUNNING' and self.state['control_mode'] == 'AUTO'
-                and self.gate.is_set() and self.adapter is not None)
+                and self.gate.is_set() and self.adapter is not None and not self.startup_pending)
 
     async def observation_fingerprint(self, view):
         # Full URLs stay inside the Worker; query strings may contain authentication tokens.
@@ -220,6 +255,7 @@ class Task:
             if await self.adapter.login_required():
                 self.wait_human('LOGIN', '官网需要重新验证身份，请完成登录')
                 return {'ready': False, 'state': self.state}
+            self.adapter.active_page = self.page
             await self.adapter.reconcile()
             if await self.adapter.export_area():
                 return {'ready': False, 'state': self.state}
@@ -238,7 +274,8 @@ class Task:
             return {'ready': True, 'observation_id': self.observation['id'],
                     'revision': self.observation['revision'], 'epoch': epoch,
                     'target': self.state['target'], 'stage': stage,
-                    'observation': view, 'recent_actions': self.recent[-5:], 'state': self.state}
+                    'observation': view,
+                    'recent_actions': self.recent[-5:], 'state': self.state}
 
     async def apply_action(self, payload):
         action = validate_action(payload.get('action'))
@@ -260,6 +297,7 @@ class Task:
                     or payload.get('observation_id') != current['id']
                     or payload.get('revision') != current['revision']):
                 raise ValueError('观察或控制权已变化，请重新观察')
+            self.adapter.active_page = self.page
             view = await self.adapter.observe()
             if await self.observation_fingerprint(view) != current['fingerprint']:
                 self.observation = None
@@ -349,8 +387,15 @@ class Task:
     async def execute(self, decision):
         validate_action(decision)
         tool = decision['tool']
+        if tool == 'request_target_confirmation':
+            await self.target_confirmation.propose(decision)
+            self.recent.append(dict(decision))
+            return
         if tool == 'request_human':
-            self.wait_human('AGENT_REQUEST', str(decision.get('reason', '请检查当前页面'))[:180])
+            reason = str(decision.get('reason', '请检查当前页面'))[:180]
+            waiting_reason = ('COURSE_OR_TERM' if self.state.get('stage') == 'LOCATE_COURSE'
+                              and '课程' in reason and '学期' in reason else 'AGENT_REQUEST')
+            self.wait_human(waiting_reason, reason)
             return
         if tool == 'open_export_settings':
             self.page = await self.adapter.open_export()
@@ -377,6 +422,12 @@ class Task:
             review_entry = re.fullmatch(r'(查看|浏览)(?:学生)?提交(?:记录|详情|列表|情况|附件)?', item['name'].strip())
             if EXPORT_CONFIRM.search(item['name']) and not review_entry:
                 raise ValueError('提交动作必须由任务控制器核验')
+            if (item.get('semester_kind') or SEMESTER.fullmatch(item['name'].strip()) or
+                    re.fullmatch(r'(?:选择|切换|搜索)?学期', item['name'].strip())):
+                self.wait_human('COURSE_OR_TERM',
+                    f'请确认课程名“{self.state["target"]["course_name"]}”或学期。'
+                    '如需切换学期，请在任务浏览器中手动操作，完成后点击“交还自动化”继续。')
+                return
             if tool == 'fill':
                 if not any(x in (item['name'] + item['context']).lower() for x in ('搜索', 'search', '查找')):
                     raise ValueError('自动填写只允许搜索字段')
@@ -385,15 +436,27 @@ class Task:
                 old_course, old_assignment = self.adapter.course_confirmed, self.adapter.assignment_confirmed
                 await self.adapter.record_navigation(loc, item, page)
                 old_pages = set(self.context.pages)
+                popup = asyncio.get_running_loop().create_future()
+                def opened(new_page):
+                    if not popup.done():popup.set_result(new_page)
+                self.context.on('page',opened)
                 try:
                     await loc.click(timeout=8000)
+                    if item.get('opens_new_page'):
+                        try:await asyncio.wait_for(asyncio.shield(popup),2.5)
+                        except asyncio.TimeoutError:pass
+                    else:
+                        await asyncio.sleep(.2)
                 except Exception:
                     self.adapter.course_confirmed, self.adapter.assignment_confirmed = old_course, old_assignment
                     raise
-                await asyncio.sleep(0.2)
+                finally:
+                    self.context.remove_listener('page',opened)
+                    if not popup.done():popup.cancel()
                 new_pages = [p for p in self.context.pages if p not in old_pages]
                 if new_pages:
                     self.page = new_pages[-1]
+                    self.event('已进入新打开的页面 page='+str(self.context.pages.index(self.page)))
         self.recent.append({k: v for k, v in decision.items() if k != 'value'})
 
     async def prepare_export(self, area):
@@ -502,15 +565,12 @@ class Task:
             if ready:
                 export = ready[0]
                 ref = export['ref']
-                page, loc = self.adapter.export_locators[export['row_ref']]
+                page, _ = self.adapter.export_locators[export['row_ref']]
                 self.page = page
-                button = loc.locator('a.download_ic').first
-                if not await button.count():
-                    button = loc.get_by_text('下载', exact=True).first
                 self.update(stage='DOWNLOAD', download_progress=None, last_error=None)
                 self.event(f'正在下载已导出的附件（已校验 {len(completed)}/{len(exports)}，仍在打包 {len(pending)}）')
                 async with page.expect_download(timeout=30000) as info:
-                    await button.click(timeout=8000)
+                    await self.adapter.click_export_download(export['row_ref'])
                 download = await info.value
             else:
                 if missing:
@@ -559,6 +619,9 @@ class Task:
             raise ValueError('任务已结束')
         self.gate.clear()
         self.update(control_mode='PAUSING', control_epoch=self.state['control_epoch'] + 1)
+        if self.startup_operation:
+            self.startup_operation.cancel()
+            await asyncio.gather(self.startup_operation, return_exceptions=True)
         async with self.lock:
             await self._release_pointer_locked()
             self.wait_human('USER_TAKEOVER', '已暂停，用户可以操作浏览器')
@@ -567,6 +630,17 @@ class Task:
         if self.state['status'] in TERMINAL or self.state['control_mode'] != 'HUMAN':
             raise ValueError('当前任务不能交还自动化')
         async with self.lock:
+            if self.state['status'] in TERMINAL or self.state['control_mode'] != 'HUMAN':
+                raise ValueError('当前任务不能交还自动化')
+            if self.startup_pending:
+                await self._release_pointer_locked()
+                self.update(control_mode='AUTO', status='RUNNING', waiting_reason='',
+                            control_epoch=self.state['control_epoch'] + 1)
+                self.event('正在重新核验并加载官网登录页')
+                self.startup_wake.set()
+                return
+            if self.state.get('target_resolution'):
+                raise ValueError('请先在弹窗确认候选项或修改名称，确认后会自动继续')
             if not self.adapter or not await self.adapter.authenticated():
                 raise ValueError('请先在浏览器中完成登录并返回教学平台')
             if self.state.get('waiting_reason') == 'CLASS_SCOPE' and not self.scope_request:
@@ -576,6 +650,20 @@ class Task:
                 rows = await self.adapter.export_rows()
                 if not rows:
                     raise ValueError('请先打开下载中心并确认本次导出记录')
+            if self.state.get('waiting_reason') == 'COURSE_OR_TERM' and not self.state.get('export_attempted'):
+                # Returning control confirms the teacher's current page. Read
+                # its semester only; never open a menu or select an option.
+                self.adapter.active_page = self.page
+                view = await self.adapter.observe()
+                terms = {e.get('selected_option') or e['name'] for e in view['elements']
+                         if SEMESTER.fullmatch(e.get('selected_option', '')) or
+                         (e.get('semester_kind') == 'trigger' and SEMESTER.fullmatch(e['name']))}
+                if len(terms) == 1 and self.state['target'].get('term') != next(iter(terms)):
+                    self.state.setdefault('requested_target', dict(self.state['target']))
+                    target = {**self.state['target'], 'term': next(iter(terms))}
+                    self.update(target=target)
+                    self.adapter.target = target
+                    self.event('教师已确认当前页面学期：' + target['term'])
             await self._release_pointer_locked()
             self.update(control_mode='AUTO', status='RUNNING', waiting_reason='', auth_status='AUTHENTICATED',
                         stage='LOCATE_COURSE' if self.state['stage'] == 'AUTHENTICATE' else self.state['stage'],

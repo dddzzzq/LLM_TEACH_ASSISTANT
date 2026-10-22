@@ -5,7 +5,8 @@ from urllib.parse import urljoin, urlsplit
 
 CONTROLS = ('a,button,input:not([type=hidden]):not([type=password]),select,summary,'
             '[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],'
-            '[role=combobox],[role=treeitem],[onclick],[tabindex]:not([tabindex="-1"]),.grade_check')
+            '[role=combobox],[role=treeitem],[role=option],li,dd,[onclick],[tabindex]:not([tabindex="-1"]),.grade_check,'
+            r':is(div,span,p):text-matches("^\\s*[0-9]{4}\\s*[-—–/]\\s*[0-9]{4}\\s*第[一二三123]学期\\s*$")')
 HEADINGS = 'h1,h2,h3,h4,h5,h6,[role=heading]'
 EXPORT_LABEL = r'^导出(?:作业|提交)?附件(?:\s*[（(].*[）)])?$'
 MAX_ELEMENTS = 400
@@ -44,6 +45,18 @@ FRAME_SNAPSHOT = r'''els => {
       [e.getAttribute('name'), e.id, e.getAttribute('autocomplete'), e.getAttribute('placeholder'),
        e.getAttribute('aria-label')].join(' '));
   const text = e => clean(e.innerText || e.textContent);
+  const term = /^\d{4}\s*[-—–/]\s*\d{4}\s*第[一二三123]学期$/;
+  const menus = new Map();
+  const menuFor = e => {
+    const option = e.closest('li,dd,[role=option]');
+    if (option && term.test(text(option))) return {option,root:option.closest('ul,dl,[role=listbox]')||option.parentElement};
+    // Custom selects may render plain div/span/p options without ARIA roles.
+    for(let node=e,depth=0;node?.parentElement && depth<3;node=node.parentElement,depth++) {
+      const siblings=[...node.parentElement.children].filter(c=>visible(c)&&term.test(text(c)));
+      if(siblings.length>1 && siblings.includes(node)) return {option:node,root:node.parentElement};
+    }
+    return null;
+  };
   const name = e => {
     const labelled = (e.getAttribute('aria-labelledby') || '').split(/\s+/)
       .map(id => e.getRootNode().getElementById?.(id) || document.getElementById(id)).filter(Boolean).map(text).join(' ');
@@ -131,15 +144,29 @@ FRAME_SNAPSHOT = r'''els => {
       ({checkbox:'checkbox',radio:'radio',search:'searchbox',button:'button',submit:'button',image:'button'}[e.type]||'textbox') :
       ({A:'link',BUTTON:'button',SELECT:'combobox',SUMMARY:'button'}[e.tagName]||'');
     const label = name(e);
+    const menu = term.test(text(e)) ? menuFor(e) : null;
+    if(menu && menu.option!==e) return []; // One reference per actual option, not its nested caption.
+    if(menu && !menus.has(menu.root)) menus.set(menu.root,menus.size);
+    const termOptions = menu ? [...menu.root.querySelectorAll('li,dd,[role=option],div,span,p')]
+      .filter(c=>visible(c)&&term.test(text(c))&&menuFor(c)?.option===c&&menuFor(c)?.root===menu.root) : [];
+    // Expose select labels as page evidence for the model, never option values.
+    const options = e.matches('select') ? [...e.options].map(o=>clean(o.textContent)).slice(0,100) : null;
+    const selected = e.matches('select') ? clean(e.selectedOptions[0]?.textContent) :
+      (e.matches('input[readonly]') && term.test(e.value) ? clean(e.value) : '');
     const item = {i,tag:e.tagName.toLowerCase(),type:e.getAttribute('type')||'',
       role:e.getAttribute('role')||nativeRole,
-      name:label,context:group ? String(group.innerText || '').trim().slice(0,280) : '',
+      name:label||selected,context:group ? String(group.innerText || '').trim().slice(0,280) : '',
+      ...(options ? {options,selected_option:selected} : selected ? {selected_option:selected} : {}),
+      ...(options ? {disabled_options:[...e.options].filter(o=>o.disabled).map(o=>clean(o.textContent))} : {}),
+      ...(menu ? {semester_kind:'option',semester_menu:menus.get(menu.root),semester_index:termOptions.indexOf(e)+1,
+        semester_option_count:termOptions.length} : term.test(selected||label) ? {semester_kind:'trigger'} : {}),
+      opens_new_page:e.getAttribute('target')==='_blank'||/\bwindow\.open\s*\(/.test(e.getAttribute('onclick')||''),
       submits_form:!!e.form && ['submit','image','reset'].includes(e.type),
       search_submit:!!e.form && e.form.method.toLowerCase()==='get' && /^(搜索|查找|search)$/i.test(label),
       context_labels:[...new Set(labels)],context_id:group ? groups.get(group) : null,
       record_id:record ? records.get(record) : null,
       href:e.matches('a') ? e.getAttribute('href')||'' : '',
-      disabled:!!e.disabled || e.getAttribute('aria-disabled')==='true',
+      disabled:!!e.disabled || e.getAttribute('aria-disabled')==='true'||e.classList.contains('disabled')||e.classList.contains('is-disabled'),
       in_viewport:box.bottom>0 && box.right>0 && box.top<innerHeight && box.left<innerWidth};
     return item.name || item.context ? [item] : [];
   });
@@ -156,14 +183,16 @@ FRAME_SNAPSHOT = r'''els => {
 }'''
 
 
-async def inventory(context, target):
+async def inventory(context, target, active_page=None):
     pages, frames, candidates = [], [], []
     names = {target['course_name'], target['assignment_name']}
     for pi, page in enumerate(context.pages):
         if page.is_closed():
             continue
         pages.append({'page_id': str(pi), 'url': public_url(page.url),
-                      'title': (await page.title())[:120], 'frame_count': len(page.frames)})
+                      'title': (await page.title())[:120], 'frame_count': len(page.frames), 'active':page is active_page})
+        if active_page is not None and page is not active_page:
+            continue  # Keep tab summaries; do not mix old portal controls into the current course page.
         for fi, frame in enumerate(page.frames):
             # Detached/loading frames should invalidate this observation, rather
             # than silently expose a partial inventory as complete.
@@ -183,13 +212,17 @@ async def inventory(context, target):
                 item['context_id'] = f'{frame_id}c{group}' if group is not None else ''
                 record = item['record_id']
                 item['record_id'] = f'{frame_id}r{record}' if record is not None else ''
+                if 'semester_menu' in item:
+                    item['semester_menu'] = f'{frame_id}m{item["semester_menu"]}'
                 ref = f'{frame_id}e{idx}'
                 candidates.append(({'ref':ref,'page_id':str(pi),'frame_id':frame_id,**item}, page, controls.nth(idx)))
     def priority(candidate):
         item = candidate[0]
-        if names.intersection([item['name'], *item['context_labels']]): return 0
-        if item['in_viewport'] and re_navigation(item['name']): return 1
-        return 2 if item['in_viewport'] else 3
+        if item.get('semester_kind')=='option' and item['in_viewport']: return 0
+        if item.get('semester_kind')=='trigger' and item['in_viewport']: return 1
+        if names.intersection([item['name'], *item['context_labels']]): return 2
+        if item['in_viewport'] and re_navigation(item['name']): return 3
+        return 4 if item['in_viewport'] else 5
     chosen = []
     size = len(json.dumps({'pages':pages,'frames':frames}, ensure_ascii=False))
     for candidate in sorted(candidates, key=priority):
@@ -212,9 +245,11 @@ async def inventory(context, target):
                          'term_matches':[group for group,matched in groups.items() if matched][:2]}
     refs = {item['ref']:(page,loc,item) for item,page,loc in chosen}
     return {'pages':pages,'frames':frames,'elements':[item for item,_,_ in chosen],
+            'active_page_id':str(context.pages.index(active_page)) if active_page in context.pages else None,
             'target_candidates':targets,
             'coverage':{'total_elements':len(candidates),'included_elements':len(chosen),
                         'truncated':len(chosen)<len(candidates),
+                        'scope':'active_page' if active_page is not None else 'all_pages',
                         'snapshot_char_budget':MAX_SNAPSHOT_CHARS,
                         'landmarks_truncated':any(f['landmark_count']>len(f['landmarks']) for f in frames),
                         'headings_truncated':any(f['heading_count']>len(f['headings']) for f in frames)}}, refs

@@ -15,6 +15,7 @@ class BrowserToolContractTests(unittest.TestCase):
             {'tool': 'switch_page', 'page_id': '1'},
             {'tool': 'open_export_settings'},
             {'tool': 'request_human', 'reason': '同名课程需要选择'},
+            {'tool':'request_target_confirmation','kind':'assignment','element_ref':'p0f0e1','actual_name':'作业一','term':'','reason':'数字写法不同'},
         ]
         schemas = json.loads(tool_instructions())['oneOf']
         by_name = {s['properties']['tool']['enum'][0]: s for s in schemas}
@@ -29,7 +30,8 @@ class BrowserToolContractTests(unittest.TestCase):
                        {'tool': 'click', 'element_ref': ' '},
                        {'tool': 'scroll', 'delta_y': True},
                        {'tool': 'switch_page', 'page_id': '-1'},
-                       {'tool': 'open_export_settings', 'classes': 'all'}]:
+                       {'tool': 'open_export_settings', 'classes': 'all'},
+                       {'tool':'select_semester','element_ref':'p0f0e2','term':'2025-2026第二学期','purpose':'fallback'}]:
             with self.subTest(action=action), self.assertRaises(ValueError):
                 validate_action(action)
 

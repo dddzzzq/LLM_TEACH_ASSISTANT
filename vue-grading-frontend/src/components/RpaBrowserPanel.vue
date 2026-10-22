@@ -14,7 +14,7 @@
       @keydown="keyDown" @pointerdown.prevent="pointerDown" @pointermove="pointerMove"
       @pointerup.prevent="pointerUp" @pointercancel="releaseDrag" @lostpointercapture="releaseDrag" @wheel.prevent="wheel">
       <img v-if="frame" :src="'data:image/jpeg;base64,' + frame.image" alt="官网浏览器实时画面" draggable="false" class="w-full block" />
-      <p v-else class="p-8 text-center text-sm text-slate-500">{{ frameError || '正在连接浏览器…' }}</p>
+      <p v-else class="p-8 text-center text-sm text-slate-500">{{ frameError || (job.stage === 'OPEN_PORTAL' ? job.message : '正在连接浏览器…') }}</p>
     </div>
     <form v-if="human" class="p-3 border-t flex gap-2 bg-white" @submit.prevent="sendText">
       <input v-model="inputText" type="password" autocomplete="off" placeholder="可在这里输入中文、密码或验证码，再填写到网页当前输入框"

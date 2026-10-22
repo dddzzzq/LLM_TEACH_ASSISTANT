@@ -94,6 +94,8 @@ class Manager:
                  'session_started_at': time.time(),
                  'state_version': old.get('state_version', 0) + 1,
                  'auth_status': 'UNKNOWN', 'waiting_reason': '',
+                 'error_code': None, 'last_error': None, 'startup_attempt': 0, 'startup_result': None,
+                 'target_resolution':None, 'semester_lookup':{},
                  'message': '正在启动任务浏览器', 'files': [f for f in old.get('files', []) if f['status'] == 'VERIFIED'], 'exports': old.get('exports', [])}
         scope = state.get('requested_scope') or {}
         if scope.get('mode') == 'selected' and any(
@@ -186,7 +188,9 @@ def task_for(request, job_id):
 @app.get('/health')
 async def health():
     return {'ok': True, 'protocol_version': 'browser.v1', 'decision_driver': 'go-eino',
-            'browser_stream': 'browser.stream.v1'}
+            'browser_stream': 'browser.stream.v1','target_resolution':'target.model-confirm.v1',
+            'semester_selection':'manual','download_activation':'download.bound-control.v1',
+            'browser_startup':'bounded-retry.v1'}
 
 
 @app.get('/capabilities')
@@ -232,6 +236,9 @@ async def control(job_id: str, action: str, request: Request):
         await task.pause()
     elif action == 'resume':
         await task.resume()
+    elif action == 'resolve-target':
+        async with task.lock:
+            return await task.target_confirmation.resolve(await request.json())
     elif action == 'cancel':
         await task.cancel()
     elif action == 'input':

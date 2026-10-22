@@ -16,18 +16,19 @@ var ErrRequirementsChanged = errors.New("附件已开始批改、已取消或尚
 var ErrInvalidRequirements = errors.New("请填写题目要求和非空 JSON 对象形式的评分标准")
 
 type AttentionNotice struct {
-	Key             string `json:"key"`
-	Kind            string `json:"kind"`
-	JobID           string `json:"job_id"`
-	FileID          string `json:"file_id,omitempty"`
-	AssignmentID    uint   `json:"assignment_id,omitempty"`
-	CourseName      string `json:"course_name"`
-	AssignmentName  string `json:"assignment_name"`
-	ClassName       string `json:"class_name,omitempty"`
-	Reason          string `json:"reason,omitempty"`
-	Message         string `json:"message"`
-	QuestionMissing bool   `json:"question_missing,omitempty"`
-	RubricMissing   bool   `json:"rubric_missing,omitempty"`
+	Key              string          `json:"key"`
+	Kind             string          `json:"kind"`
+	JobID            string          `json:"job_id"`
+	FileID           string          `json:"file_id,omitempty"`
+	AssignmentID     uint            `json:"assignment_id,omitempty"`
+	CourseName       string          `json:"course_name"`
+	AssignmentName   string          `json:"assignment_name"`
+	ClassName        string          `json:"class_name,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+	Message          string          `json:"message"`
+	QuestionMissing  bool            `json:"question_missing,omitempty"`
+	RubricMissing    bool            `json:"rubric_missing,omitempty"`
+	TargetResolution json.RawMessage `json:"target_resolution,omitempty"`
 }
 
 func missingRequirements(a models.Assignment) (bool, bool) {
@@ -75,14 +76,18 @@ func Attention(userID uint) ([]AttentionNotice, error) {
 	for _, job := range jobs {
 		base := AttentionNotice{JobID: job.ID, CourseName: job.CourseName, AssignmentName: job.AssignmentName}
 		var state struct {
-			ControlMode   string `json:"control_mode"`
-			WaitingReason string `json:"waiting_reason"`
-			ControlEpoch  int64  `json:"control_epoch"`
+			ControlMode      string          `json:"control_mode"`
+			WaitingReason    string          `json:"waiting_reason"`
+			ControlEpoch     int64           `json:"control_epoch"`
+			TargetResolution json.RawMessage `json:"target_resolution"`
 		}
 		_ = json.Unmarshal([]byte(job.StateJSON), &state)
 		if job.Status == "WAITING_USER" && state.ControlMode == "HUMAN" && state.WaitingReason != "USER_TAKEOVER" {
 			n := base
 			n.Kind, n.Reason, n.Message = "human", state.WaitingReason, job.Message
+			if len(state.TargetResolution) > 0 && string(state.TargetResolution) != "null" {
+				n.Kind, n.TargetResolution = "target", state.TargetResolution
+			}
 			n.Key = fmt.Sprintf("%s:human:%s:%d", job.ID, state.WaitingReason, state.ControlEpoch)
 			notices = append(notices, n)
 		}

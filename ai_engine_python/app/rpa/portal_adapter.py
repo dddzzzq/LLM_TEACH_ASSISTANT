@@ -86,6 +86,9 @@ class PortalAdapter:
         self.course_pages = set()
         self.assignment_pages = set()
         self.target_candidates = {}
+        self.approved_targets = {}
+        self.last_view = {}
+        self.active_page = None
 
     async def login_required(self):
         for page in self.context.pages:
@@ -111,12 +114,13 @@ class PortalAdapter:
         return False
 
     async def observe(self):
-        view, self.refs = await inventory(self.context, self.target)
+        view, self.refs = await inventory(self.context, self.target, active_page=self.active_page)
         self.target_candidates = view['target_candidates']
         export_entry = await self.export_entry()
-        return {**view, 'target_evidence': {'course_confirmed':self.course_confirmed,
+        self.last_view = {**view, 'target_evidence': {'course_confirmed':self.course_confirmed,
                                           'assignment_confirmed':self.assignment_confirmed},
                 'can_open_export': bool(self.assignment_confirmed and export_entry)}
+        return self.last_view
 
     async def export_entry(self):
         candidates = []
@@ -171,14 +175,17 @@ class PortalAdapter:
         return page
 
     async def record_navigation(self, locator, item, page):
+        from .target_confirmation import proof
         course = self.target['course_name']
         assignment = self.target['assignment_name']
+        def approved(kind, title):
+            return self.approved_targets.get(kind,{}).get('id') == proof(page,item,title)
         def matches(info, title):
             return info['name'] == title or title in info.get('context_labels', [])
         if matches(item, course):
             evidence = self.target_candidates.get('course', {})
             group = item.get('record_id') or item.get('context_id') or item.get('ref')
-            if evidence.get('group_count', 0) > 1 and evidence.get('term_matches') != [group]:
+            if evidence.get('group_count', 0) > 1 and evidence.get('term_matches') != [group] and not approved('course',course):
                 raise RpaIssue('TARGET_AMBIGUOUS', '存在同名课程，需要人工选择或提供学期',
                                {'kind':'course', **evidence})
             self.course_confirmed = True
@@ -186,7 +193,7 @@ class PortalAdapter:
         if self.course_confirmed and matches(item, assignment):
             if item['name'] == assignment or re.search('批阅|评阅|查看提交|查看作业|作业详情', item['name']):
                 evidence = self.target_candidates.get('assignment', {})
-                if evidence.get('group_count', 0) > 1:
+                if evidence.get('group_count', 0) > 1 and not approved('assignment',assignment):
                     raise RpaIssue('TARGET_AMBIGUOUS', '存在多个同名作业，需要人工核对',
                                    {'kind':'assignment', **evidence})
                 self.assignment_confirmed = True
@@ -402,6 +409,47 @@ class PortalAdapter:
             if row['ambiguous']:
                 self.export_locators.pop(row['ref'], None)
         return rows
+
+    async def click_export_download(self, row_ref):
+        """Activate only a uniquely bound download control, independent of overlays."""
+        entry = self.export_locators.get(row_ref)
+        if not entry:
+            raise RpaIssue('DOWNLOAD_RECORD_MISSING', '下载记录已变化或不唯一，请重新核对下载中心')
+        _, locator = entry
+        # Pin actual DOM nodes. A positional locator must not silently move to
+        # another export if the platform inserts or reorders records mid-action.
+        row = await locator.element_handle(timeout=2000)
+        if not row or not await row.is_visible():
+            raise RpaIssue('DOWNLOAD_RECORD_MISSING', '已关联的下载记录不再可见，请重新核对下载中心')
+        buttons = await row.query_selector_all('a.download_ic,a[download]')
+        if not buttons:
+            controls = await row.query_selector_all('a,button,[role=button],[role=link],[onclick]')
+            for control in controls:
+                if (await control.inner_text()).strip() in {'下载', '重新下载'}:
+                    buttons.append(control)
+        buttons = [button for button in buttons if await button.is_visible()]
+        if len(buttons) != 1:
+            raise RpaIssue('DOWNLOAD_CONTROL_AMBIGUOUS', '已关联记录内未找到唯一的下载按钮，请检查下载中心')
+        current = await row.evaluate('''e => ({text:(e.innerText||'').trim(),
+            platform_id:e.getAttribute('data-id')||e.getAttribute('data-taskid')||e.id||''})''')
+        if fingerprint(current) != row_ref or re.search('失败|错误|已过期', current['text']) or not re.search('导出成功|已完成', current['text']):
+            raise RpaIssue('DOWNLOAD_RECORD_CHANGED', '导出记录或完成状态已变化，请重新核对后下载')
+        # This is a controller-owned, already-associated download, never JS from
+        # the page Agent. DOM activation preserves the site's click handler and
+        # browser download event, without a floating download panel intercepting
+        # a coordinate click. Do not force-click coordinates or replay on timeout.
+        activated = await buttons[0].evaluate('''(button,{row,text,platform_id}) => {
+            if(!row.isConnected || !button.isConnected || !row.contains(button) ||
+               (row.innerText||'').trim()!==text ||
+               (row.getAttribute('data-id')||row.getAttribute('data-taskid')||row.id||'')!==platform_id ||
+               !button.getClientRects().length || getComputedStyle(button).visibility==='hidden' ||
+               button.closest('[hidden],[aria-hidden=true],[aria-disabled=true],[inert],.disabled,.is-disabled') ||
+               button.disabled) return false;
+            button.click();
+            return true;
+        }''', {'row':row, **current})
+        if not activated:
+            raise RpaIssue('DOWNLOAD_CONTROL_UNAVAILABLE', '下载按钮当前不可用，请等待平台更新后重试')
 
     async def export_center_visible(self):
         for page in self.context.pages:

@@ -37,7 +37,7 @@ playwright-report/
 test-results/
 /backend-go/grading-gateway
 /backend-go/test_build
-/docs/*
+docs/
 !/docs/tool-skill-boundaries.md
 !/docs/grading-skills.md
 !/docs/tool-skill-management-design.md

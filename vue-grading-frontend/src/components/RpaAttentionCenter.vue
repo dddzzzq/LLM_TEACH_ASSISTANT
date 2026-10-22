@@ -24,6 +24,7 @@
         <p class="text-xs text-slate-500">请填写非空 JSON 对象。已有内容会保留，可在此补充或修改。</p>
       </form>
     </template>
+    <RpaTargetResolver v-else-if="current.kind === 'target' && current.target_resolution" :key="current.target_resolution.id" :resolution="current.target_resolution" :busy="saving" @resolve="resolveTarget" />
     <template v-else>
       <p class="notice-message">{{ current.message || '任务需要你检查当前页面并继续处理。' }}</p>
       <p class="mt-4 text-sm text-slate-600">{{ guidance }}</p>
@@ -33,7 +34,8 @@
     <template #footer>
       <button type="button" class="secondary-button" :disabled="saving" @click="dismiss">稍后处理</button>
       <button v-if="current.kind === 'rubric'" type="submit" form="rpa-requirements-form" class="primary-button" :disabled="loading || saving || !loaded">{{ saving ? '正在保存…' : '保存评分配置' }}</button>
-      <button v-else type="button" class="primary-button" @click="handleInConsole">打开控制台处理</button>
+      <button v-else-if="current.reason === 'BROWSER_STARTUP'" type="button" class="primary-button" :disabled="saving" @click="reloadLogin">{{ saving ? '正在请求…' : '重新加载登录页' }}</button>
+      <button v-else-if="current.kind !== 'target'" type="button" class="primary-button" @click="handleInConsole">打开控制台处理</button>
     </template>
   </AppModal>
 </template>
@@ -43,6 +45,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import authApi from '../services/authApi'
 import AppModal from './AppModal.vue'
+import RpaTargetResolver from './RpaTargetResolver.vue'
 
 const router = useRouter(), api = authApi.getClient()
 const notices = ref([]), current = ref(null), question = ref(''), rubric = ref('')
@@ -54,10 +57,12 @@ const storageKey = `rpa-attention-seen-${user?.user_id || user?.id || ''}`
 let seen = new Set(), timer, successTimer, inFlight = false, disposed = false
 const drafts = new Map()
 try { seen = new Set(JSON.parse(sessionStorage.getItem(storageKey) || '[]')) } catch { /* Storage can be unavailable. */ }
-const title = computed(() => current.value?.kind === 'rubric' ? '请补充题目与评分标准' : current.value?.kind === 'class' ? '请核对附件班级' : '作业抓取需要人工处理')
+const title = computed(() => current.value?.reason === 'COURSE_OR_TERM' ? '请确认课程名或学期' : current.value?.kind === 'target' ? (current.value.reason === 'TARGET_NOT_FOUND' ? '请核查课程或作业名称' : '请确认找到的课程或作业') : current.value?.kind === 'rubric' ? '请补充题目与评分标准' : current.value?.kind === 'class' ? '请核对附件班级' : '作业抓取需要人工处理')
 const missingText = computed(() => [current.value?.question_missing && '题目要求', current.value?.rubric_missing && '评分标准'].filter(Boolean).join('和') || '题目要求和评分标准')
 const guidance = computed(() => {
   const reason = current.value?.reason
+  if (reason === 'BROWSER_STARTUP') return '系统已尝试恢复连接。点击“重新加载登录页”可在当前任务中重试，无需重新创建抓取任务。'
+  if (reason === 'COURSE_OR_TERM') return '请核对课程名和当前学期。如需切换学期，请在任务浏览器中手动操作，完成后点击“交还自动化”。'
   if (reason === 'LOGIN') return '请在任务浏览器中完成登录和验证，再点击“交还自动化”。'
   if (reason === 'LOGIN_COMPLETE') return '官网登录已完成，请打开控制台，点击“交还自动化”继续。'
   if (['CLASS_SCOPE', 'SCOPE_SELECTION'].includes(reason)) return '请在控制台核对导出班级范围，确认后继续。'
@@ -138,6 +143,38 @@ async function handleInConsole() {
   await router.push({ name: 'ai-assistant', query: { task: id } })
   await nextTick()
   window.dispatchEvent(new CustomEvent('rpa-open-console', { detail: { jobId: id } }))
+}
+async function reloadLogin() {
+  if (saving.value || current.value?.reason !== 'BROWSER_STARTUP') return
+  const notice = current.value
+  saving.value = true; error.value = ''
+  try {
+    await api.post(`/api/rpa/jobs/${notice.job_id}/resume`)
+    seen.add(notice.key); remember()
+    current.value = null
+    notices.value = notices.value.filter(n => n.key !== notice.key)
+    await router.push({ name: 'ai-assistant', query: { task: notice.job_id } })
+    await nextTick()
+    window.dispatchEvent(new CustomEvent('rpa-open-console', { detail: { jobId: notice.job_id } }))
+  } catch (e) { error.value = e.response?.data?.error || '重新加载未完成，请重试。' }
+  finally { saving.value = false }
+  await refresh()
+}
+async function resolveTarget(payload) {
+  if (saving.value || current.value?.kind !== 'target') return
+  const notice = current.value
+  saving.value = true; error.value = ''
+  try {
+    await api.post(`/api/rpa/jobs/${notice.job_id}/resolve-target`, payload)
+    seen.add(notice.key); remember()
+    current.value = null
+    notices.value = notices.value.filter(n => n.key !== notice.key)
+    success.value = '已保存确认，正在继续查找和拉取。'
+    clearTimeout(successTimer); successTimer = setTimeout(() => { success.value = '' }, 8000)
+    window.dispatchEvent(new CustomEvent('rpa-target-resolved', {detail:{jobId:notice.job_id}}))
+  } catch (e) { error.value = e.response?.data?.error || '确认未完成，请重试。' }
+  finally { saving.value = false }
+  await refresh()
 }
 async function openRequested(event) {
   if (!allowed) return

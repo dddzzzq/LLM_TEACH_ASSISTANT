@@ -141,6 +141,26 @@ func Start(ctx context.Context, jobID string, restart bool) error {
 	var checkpoint map[string]any
 	if restart {
 		_ = json.Unmarshal([]byte(job.StateJSON), &checkpoint)
+		// An explicit new browser session may use the current read-only navigation
+		// contract. Export checkpoints retain their Skill and all action receipts.
+		var snapshot NavigationSnapshot
+		_ = json.Unmarshal([]byte(job.NavigationJSON), &snapshot)
+		if exported, _ := checkpoint["export_attempted"].(bool); !exported || snapshot.Skill.Name == "" {
+			skills, err := catalog.Default("portal-browser")
+			if err != nil {
+				return err
+			}
+			doc := skills["fetch-homework"]
+			if doc.Name != "fetch-homework" || doc.Instructions == "" {
+				return fmt.Errorf("缺少课程导航 Skill")
+			}
+			snapshot.Skill = doc
+		}
+		snapshot.Protocol, snapshot.ActionSchema = "browser.v1", nil
+		raw, _ := json.Marshal(snapshot)
+		if err := database.DB.Model(&models.RPAJob{}).Where("id = ? AND status IN ?", job.ID, []string{"INTERRUPTED", "FAILED", "PARTIAL_SUCCESS"}).UpdateColumn("navigation_json", string(raw)).Error; err != nil {
+			return err
+		}
 	}
 	b, err := WorkerRequest(ctx, "POST", "/tasks/"+jobID, map[string]any{
 		"target": Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term}, "restart": restart, "checkpoint": checkpoint})
@@ -168,10 +188,11 @@ func CancelQueued(ctx context.Context, job *models.RPAJob) error {
 
 func SaveState(jobID string, raw []byte) error {
 	var state struct {
-		Status       string `json:"status"`
-		Stage        string `json:"stage"`
-		Message      string `json:"message"`
-		StateVersion int64  `json:"state_version"`
+		Status       string  `json:"status"`
+		Stage        string  `json:"stage"`
+		Message      string  `json:"message"`
+		StateVersion int64   `json:"state_version"`
+		Target       *Target `json:"target"`
 	}
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return err
@@ -179,8 +200,15 @@ func SaveState(jobID string, raw []byte) error {
 	if state.Status == "" {
 		return fmt.Errorf("Worker 返回了无效任务状态")
 	}
-	result := database.DB.Model(&models.RPAJob{}).Where("id = ? AND status <> ? AND state_version <= ?", jobID, "CANCELLED", state.StateVersion).Updates(map[string]any{
-		"status": state.Status, "stage": state.Stage, "message": state.Message, "state_json": string(raw), "state_version": state.StateVersion})
+	updates := map[string]any{"status": state.Status, "stage": state.Stage, "message": state.Message, "state_json": string(raw), "state_version": state.StateVersion}
+	if state.Target != nil {
+		if strings.TrimSpace(state.Target.CourseName) == "" || strings.TrimSpace(state.Target.AssignmentName) == "" || len([]rune(state.Target.CourseName)) > 255 || len([]rune(state.Target.AssignmentName)) > 255 || len([]rune(state.Target.Term)) > 255 {
+			return fmt.Errorf("Worker 返回了无效课程或作业名称")
+		}
+		// Accepted website names must drive material folders and local assignment matching.
+		updates["course_name"], updates["assignment_name"], updates["term"] = state.Target.CourseName, state.Target.AssignmentName, state.Target.Term
+	}
+	result := database.DB.Model(&models.RPAJob{}).Where("id = ? AND status <> ? AND state_version <= ?", jobID, "CANCELLED", state.StateVersion).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}

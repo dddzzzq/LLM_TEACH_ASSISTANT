@@ -82,7 +82,7 @@ func ControlRPAJob(c *gin.Context) {
 		c.JSON(200, gin.H{"ok": true})
 		return
 	}
-	allowed := map[string]bool{"pause": true, "resume": true, "cancel": true, "input": true, "class-scope": true, "bind-exports": true, "restart": true, "confirm-target": true}
+	allowed := map[string]bool{"pause": true, "resume": true, "cancel": true, "input": true, "class-scope": true, "bind-exports": true, "restart": true, "confirm-target": true, "resolve-target": true}
 	if !allowed[action] {
 		c.JSON(404, gin.H{"error": "未知操作"})
 		return
@@ -105,7 +105,7 @@ func ControlRPAJob(c *gin.Context) {
 		return
 	}
 	var payload any
-	if action == "input" || action == "class-scope" || action == "bind-exports" || action == "confirm-target" {
+	if action == "input" || action == "class-scope" || action == "bind-exports" || action == "confirm-target" || action == "resolve-target" {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
 		if err := json.NewDecoder(c.Request.Body).Decode(&payload); err != nil {
 			c.JSON(400, gin.H{"error": "操作参数无效"})

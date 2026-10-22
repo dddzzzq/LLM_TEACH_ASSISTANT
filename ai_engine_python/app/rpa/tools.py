@@ -20,6 +20,8 @@ BROWSER_TOOLS = {
     'switch_page': BrowserTool('切换到当前观察中的页面 ID', {'page_id': str}),
     'open_export_settings': BrowserTool('仅在 can_open_export 为 true 时打开已核验作业的导出设置', {}),
     'request_human': BrowserTool('暂停自动操作并说明需要用户处理的事项', {'reason': str}),
+    'request_target_confirmation': BrowserTool('仅在课程/作业列表由大模型判断近似名称后，请教师弹窗确认；不点击候选',
+        {'kind':str,'element_ref':str,'actual_name':str,'term':str,'reason':str}),
 }
 
 
@@ -47,7 +49,8 @@ def validate_action(action):
     for field, kind in tool.fields.items():
         if type(action[field]) is not kind:
             raise ValueError('浏览器动作参数类型无效')
-        if kind is str and field != 'value' and not action[field].strip():
+        optional_term = action['tool']=='request_target_confirmation' and field=='term'
+        if kind is str and field != 'value' and not optional_term and not action[field].strip():
             raise ValueError('浏览器动作引用或原因不能为空')
     if action['tool'] == 'switch_page' and not action['page_id'].isdecimal():
         raise ValueError('页面 ID 无效')

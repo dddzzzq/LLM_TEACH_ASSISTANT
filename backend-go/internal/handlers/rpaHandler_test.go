@@ -71,12 +71,13 @@ func TestIntegrationBrowserOwnershipAndRBAC(t *testing.T) {
 		{"student", "student", 501, 403}, {"owner", "teacher", 501, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, method := range []string{"GET", "POST"} {
-				endpoint := "/browser"
-				if method == "POST" {
-					endpoint = "/input"
-				}
-				req := httptest.NewRequest(method, "/api/rpa/jobs/"+job.ID+endpoint, strings.NewReader(`{"kind":"key","key":"Tab"}`))
+			for _, request := range []struct{ method, endpoint, body string }{
+				{"GET", "/browser", ""},
+				{"POST", "/input", `{"kind":"key","key":"Tab"}`},
+				{"POST", "/resolve-target", `{"resolution_id":"test","choice":"confirm","candidate_id":"candidate"}`},
+			} {
+				method := request.method
+				req := httptest.NewRequest(method, "/api/rpa/jobs/"+job.ID+request.endpoint, strings.NewReader(request.body))
 				if tc.user != 0 {
 					token, err := auth.GenerateAccessToken(tc.user, "test-user", tc.role, nil)
 					if err != nil {

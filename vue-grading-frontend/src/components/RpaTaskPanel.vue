@@ -29,13 +29,14 @@
       </div>
       <div class="flex flex-wrap gap-2 text-sm">
         <button v-if="!ended && job.control_mode !== 'HUMAN'" :disabled="busy || job.control_mode === 'PAUSING'" class="px-3 py-2 rounded border" @click="control('pause')">暂停并接管</button>
-        <button v-if="!ended && job.control_mode === 'HUMAN'" :disabled="busy" class="px-3 py-2 rounded bg-blue-600 text-white" @click="control('resume')">交还自动化</button>
+        <button v-if="!ended && job.control_mode === 'HUMAN' && !job.target_resolution" :disabled="busy" class="px-3 py-2 rounded bg-blue-600 text-white" @click="control('resume')">{{ job.waiting_reason === 'BROWSER_STARTUP' ? '重新加载登录页' : '交还自动化' }}</button>
         <button v-if="['INTERRUPTED','FAILED','PARTIAL_SUCCESS'].includes(job.status)" :disabled="busy" class="px-3 py-2 rounded border" @click="control('restart')">重新登录并重试，保留成功附件</button>
         <button v-if="!ended || job.status === 'INTERRUPTED'" :disabled="busy" class="px-3 py-2 rounded border text-red-700" @click="control('cancel')">取消任务</button>
         <button v-if="showBrowser" class="px-3 py-2 rounded border" @click="showBrowser = false">收起浏览器</button>
         <router-link v-if="canViewLogs" :to="{name:'logs',query:{task_id:job.job_id,period:'7d'}}" class="px-3 py-2 rounded border text-blue-700">查看任务日志</router-link>
       </div>
       <RpaClassSelector v-if="!ended && job.control_mode === 'HUMAN' && ['CLASS_SCOPE','SCOPE_SELECTION'].includes(job.waiting_reason)" :key="job.job_id + JSON.stringify(job.classes)" :classes="job.classes || []" :confirmed-scope="job.requested_scope" :busy="busy" @confirm="confirmScope" />
+      <RpaTargetResolver v-if="!ended && job.control_mode === 'HUMAN' && job.target_resolution" :key="job.target_resolution.id" :resolution="job.target_resolution" :busy="busy" @resolve="control('resolve-target', $event)" />
       <div v-if="!ended && job.control_mode === 'HUMAN' && !job.export_attempted && job.waiting_reason === 'TARGET_CONFIRMATION'" class="border rounded-lg p-3 text-sm">
         <label class="flex gap-2"><input v-model="targetConfirmed" type="checkbox" />我已核对当前官网页面属于“{{ job.target.course_name }} / {{ job.target.assignment_name }}”</label>
         <button :disabled="!targetConfirmed || busy" class="mt-2 text-blue-700 disabled:opacity-50" @click="confirmTarget">确认当前作业并继续</button>
@@ -69,6 +70,7 @@ import authApi from '../services/authApi'
 import RpaBrowserPanel from './RpaBrowserPanel.vue'
 import RpaClassSelector from './RpaClassSelector.vue'
 import MaterialBatchPanel from './MaterialBatchPanel.vue'
+import RpaTargetResolver from './RpaTargetResolver.vue'
 const props = defineProps({
   active: { type: Boolean, default: true },
   taskId: { type: String, default: '' },
