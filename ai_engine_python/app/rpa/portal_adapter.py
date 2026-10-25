@@ -3,6 +3,7 @@
 import hashlib
 import re
 import asyncio
+from urllib.parse import urlsplit
 from .errors import RpaIssue
 from .page_snapshot import HEADINGS, EXPORT_LABEL, inventory
 
@@ -143,18 +144,36 @@ class PortalAdapter:
     async def authenticated(self):
         if await self.login_required():
             return False
-        for page in self.context.pages:
+        pages = ([self.active_page] if self.active_page else []) + [
+            page for page in self.context.pages if page is not self.active_page
+        ]
+        for page in pages:
             if page.is_closed():
                 continue
-            if "learning.xidian.edu.cn" in page.url:
+            host = urlsplit(page.url).hostname or ""
+            if host == "learning.xidian.edu.cn":
                 if await page.get_by_text("个人空间", exact=True).count():
-                    return (
+                    authenticated = (
                         not await page.locator(".denglu").is_visible()
                         if await page.locator(".denglu").count()
                         else True
                     )
-            if "chaoxing.com" in page.url and await page.locator('a[title="作业"]').count():
-                return True
+                    if authenticated:
+                        self.active_page = page
+                        return True
+            # A saved browser may already be on the course list, including an
+            # embedded list. It need not revisit the public portal to be usable.
+            for frame in page.frames:
+                frame_host = urlsplit(frame.url).hostname or ""
+                if frame_host != "chaoxing.com" and not frame_host.endswith(
+                    (".chaoxing.com", ".chaoxing.com.cn")
+                ):
+                    continue
+                if await frame.locator(
+                    'a[title="作业"]:visible,[cname]:visible,.myde_course_item:visible,[data-courseid]:visible,[data-course-id]:visible,a[href*="courseid="]:visible'
+                ).count():
+                    self.active_page = page
+                    return True
         return False
 
     async def observe(self):

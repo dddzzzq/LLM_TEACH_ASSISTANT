@@ -304,13 +304,6 @@ class Task:
                             auth = await self.authentication_view()
                             if not auth["authenticated"]:
                                 continue
-                            if self.state.get("task_type") == "AUTH_BOOTSTRAP":
-                                self.update(
-                                    status="SUCCEEDED",
-                                    stage="DONE",
-                                    message="教务登录完成，正在准备目录同步",
-                                )
-                                return
                             if self.catalog_collection:
                                 continue  # The same page Agent navigates and reads each list.
                         if await self.prepare_captcha():
@@ -446,6 +439,12 @@ class Task:
             else:
                 self.verified_subject = self.portal_auth.credentials["username"]
                 self.portal_auth.identity_confirmed = True
+                if self.state.get("task_type") == "AUTH_BOOTSTRAP" and not self.catalog_collection:
+                    from .portal_catalog import CatalogCollection
+
+                    self.catalog_collection = CatalogCollection(self)
+                    self.update(stage="READING_CATALOG")
+                    self.event("教务身份已核验，继续使用当前浏览器同步课程与作业")
         auth["authenticated"] = authenticated
         return auth
 

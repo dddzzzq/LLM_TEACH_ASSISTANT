@@ -16,10 +16,11 @@ class StartupPaused(Exception):
 
 
 class BrowserStartup:
-    attempts = 3
+    attempts = 4
     attempt_timeout = 25
-    total_timeout = 90
-    retry_delays = (2, 4)
+    total_timeout = 420
+    retry_delays = (5, 15, 30)
+    cooldown_delays = (60,)
     ready_probe_timeout = 2
     transient = {
         "ERR_EMPTY_RESPONSE",
@@ -54,6 +55,11 @@ class BrowserStartup:
     async def ready(self):
         self.check_owner()
         task = self.task
+        task.adapter.active_page = task.page
+        if await task.adapter.authenticated():
+            self.check_owner()
+            task.page = task.adapter.active_page or task.page
+            return "AUTHENTICATED"
         # Query actual controls, not HTTP success or an empty document's readyState.
         for page in task.context.pages:
             if page.is_closed():
@@ -69,9 +75,6 @@ class BrowserStartup:
                         return "REQUIRED"
                 except Error:
                     continue  # Frame may be replaced by the login redirect.
-        if await task.adapter.authenticated():
-            self.check_owner()
-            return "AUTHENTICATED"
         return None
 
     async def probe(self):
@@ -86,16 +89,25 @@ class BrowserStartup:
             return ready
         self.check_owner()
         self.phase = "portal_load"
-        self.task.event("正在加载教学门户")
-        response = await self.task.page.goto(
-            TARGET_URL, wait_until="domcontentloaded", timeout=20000
+        login = self.task.page.locator(".denglu")
+        existing_portal = (
+            urlsplit(self.task.page.url).hostname == urlsplit(TARGET_URL).hostname
+            and await login.count() == 1
+            and await login.is_visible()
         )
-        self.check_owner()
-        self.http_status = response.status if response else None
-        if self.http_status and self.http_status >= 400:
-            raise RpaIssue(
-                "PORTAL_HTTP_ERROR", "教学门户暂未返回正常页面", {"http_status": self.http_status}
+        if not existing_portal:
+            self.task.event("正在加载教学门户")
+            response = await self.task.page.goto(
+                TARGET_URL, wait_until="domcontentloaded", timeout=20000
             )
+            self.check_owner()
+            self.http_status = response.status if response else None
+            if self.http_status and self.http_status >= 400:
+                raise RpaIssue(
+                    "PORTAL_HTTP_ERROR",
+                    "教学门户暂未返回正常页面",
+                    {"http_status": self.http_status},
+                )
         clicked = False
         while True:
             self.check_owner()
@@ -112,21 +124,56 @@ class BrowserStartup:
                     clicked = True
             await asyncio.sleep(0.2)
 
+    async def wait_retry(self, delay, deadline, kind, message):
+        """Keep the same page and notice recovery even while cooling down."""
+        end = min(time.monotonic() + delay, deadline)
+        self.task.update(
+            startup_retry_kind=kind, startup_retry_at=time.time() + max(0, end - time.monotonic())
+        )
+        self.task.event(message)
+        try:
+            while time.monotonic() < end:
+                self.check_owner()
+                remaining = end - time.monotonic()
+                try:
+                    ready = await asyncio.wait_for(self.probe(), max(0.001, remaining))
+                except TimeoutError:
+                    ready = None
+                if ready:
+                    return ready
+                await asyncio.sleep(min(1, max(0, end - time.monotonic())))
+            self.check_owner()
+            return None
+        finally:
+            self.task.update(startup_retry_kind="", startup_retry_at=None)
+
     async def open_login(self):
         task = self.task
         started = time.monotonic()
         deadline = started + self.total_timeout
-        for attempt in range(1, self.attempts + 1):
+        total_attempts = 0
+        rounds = len(self.cooldown_delays) + 1
+        for index in range(self.attempts * rounds):
+            if time.monotonic() >= deadline:
+                break
             self.check_owner()
+            round_index, attempt_index = divmod(index, self.attempts)
+            attempt = attempt_index + 1
+            total_attempts += 1
             self.phase, self.http_status = "portal_load", None
-            task.update(startup_attempt=attempt)
+            task.update(
+                startup_attempt=total_attempts,
+                startup_round=round_index + 1,
+                startup_attempt_in_round=attempt,
+                startup_max_attempts=self.attempts * rounds,
+            )
             attempt_started = time.monotonic()
             try:
                 async with asyncio.timeout(
                     min(self.attempt_timeout, max(0.01, deadline - time.monotonic()))
                 ):
                     ready = await self.navigate()
-                return self.succeeded(ready, attempt, started)
+                return self.succeeded(ready, total_attempts, started)
             except (StartupPaused, asyncio.CancelledError):
                 raise
             except Exception as exc:
@@ -139,7 +186,7 @@ class BrowserStartup:
                     else None
                 )
                 if ready:
-                    return self.succeeded(ready, attempt, started)
+                    return self.succeeded(ready, total_attempts, started)
                 codes = sorted(set(re.findall(r"net::(ERR_[A-Z_]+)", str(exc))))
                 retryable = (
                     type(exc).__name__ == "TimeoutError"
@@ -149,7 +196,9 @@ class BrowserStartup:
                 )
                 evidence = {
                     "phase": self.phase,
-                    "attempt": attempt,
+                    "attempt": total_attempts,
+                    "round": round_index + 1,
+                    "attempt_in_round": attempt,
                     "elapsed_ms": round((time.monotonic() - attempt_started) * 1000),
                     "host": urlsplit(
                         TARGET_URL if self.phase == "portal_load" else task.page.url
@@ -163,13 +212,30 @@ class BrowserStartup:
                     RpaIssue("BROWSER_STARTUP_FAILED", "官网登录页面暂未加载完成", evidence),
                     "startup:" + self.phase,
                 )
-                if not retryable or attempt == self.attempts or time.monotonic() >= deadline:
+                if (
+                    not retryable
+                    or index + 1 == self.attempts * rounds
+                    or time.monotonic() >= deadline
+                ):
                     break
-                delay = self.retry_delays[min(attempt - 1, len(self.retry_delays) - 1)]
+                cooldown = attempt == self.attempts
+                delay = (
+                    self.cooldown_delays[round_index]
+                    if cooldown
+                    else self.retry_delays[min(attempt - 1, len(self.retry_delays) - 1)]
+                )
                 if time.monotonic() + delay >= deadline:
                     break
-                task.event(f"官网连接暂未完成，正在准备第 {attempt + 1}/{self.attempts} 次加载")
-                await asyncio.sleep(delay)
+                message = (
+                    f"本轮官网连接未恢复，冷却 {delay:g} 秒后自动进行第 {round_index + 2}/{rounds} 轮；可随时暂停或取消"
+                    if cooldown
+                    else f"官网连接暂未完成，正在准备本轮第 {attempt + 1}/{self.attempts} 次加载（等待 {delay:g} 秒）"
+                )
+                ready = await self.wait_retry(
+                    delay, deadline, "cooldown" if cooldown else "backoff", message
+                )
+                if ready:
+                    return self.succeeded(ready, total_attempts, started)
         self.check_owner()
         task.wait_human(
             "BROWSER_STARTUP", "官网登录页加载失败，浏览器已保留。请点击“重新加载登录页”重试。"
@@ -180,7 +246,9 @@ class BrowserStartup:
         self.check_owner()
         elapsed = round(time.monotonic() - started, 2)
         self.task.update(
-            startup_result={"attempts": attempt, "elapsed_seconds": elapsed, "auth_status": ready}
+            startup_result={"attempts": attempt, "elapsed_seconds": elapsed, "auth_status": ready},
+            startup_retry_kind="",
+            startup_retry_at=None,
         )
         self.task.event(f"官网页面已就绪，本轮加载 {attempt} 次，耗时 {elapsed} 秒")
         return ready

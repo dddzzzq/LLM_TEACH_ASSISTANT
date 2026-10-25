@@ -56,6 +56,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
         }
         self.credentials = {"username": "teacher-test", "password": "synthetic-password"}
         self.sent_codes = 0
+        self.documents = []
         self.tasks = []
 
         async def credentials(ticket):
@@ -79,6 +80,8 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
 
     async def fixture(self, route):
         p = urlsplit(route.request.url)
+        if route.request.resource_type == "document":
+            self.documents.append((p.hostname, p.path))
         query = parse_qs(p.query)
         if p.hostname == "learning.xidian.edu.cn":
             trusted = "fixture_trusted=yes" in route.request.headers.get("cookie", "")
@@ -266,9 +269,20 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(auth.filled)
             self.assertIsNone(await page.evaluate("window.submitted"))
 
+    async def finish_fixture_catalog(self, task):
+        await self.action(task, "read_course_list")
+        for course in ("11:22", "12:23"):
+            await self.click(task, "同名课程", course.split(":")[0])
+            await self.click(task, "作业")
+            await self.action(task, "read_homework_list", course_id=course)
+            await self.action(task, "return_to_course_list")
+        await self.action(task, "finish_catalog")
+        await asyncio.wait_for(task.runner, 10)
+
     async def test_same_task_handles_credentials_mfa_trust_and_profile_reuse(self):
         task = self.start_task()
         obs = await self.ready(task)
+        context, page = task.context, task.page
         self.assertTrue(obs["observation"]["authentication"]["login_form"])
         await self.action(task, "fill_portal_credentials")
         await self.wait_auth(task, "otp_required")
@@ -285,14 +299,25 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.action(task, "submit_login_code")
         await self.wait_auth(task, "trust_prompt")
         await self.action(task, "apply_device_trust")
-        await asyncio.wait_for(task.runner, 10)
+        obs = await self.ready(task)
+        self.assertEqual(obs["stage"], "READING_CATALOG")
+        self.assertEqual(task.state["status"], "RUNNING")
+        self.assertIs(task.context, context)
+        self.assertIs(task.page, page)
+        login_count = self.documents.count(("ids.xidian.edu.cn", "/login"))
+        self.assertEqual(login_count, 1)
+        await self.finish_fixture_catalog(task)
         self.assertEqual(task.state["status"], "SUCCEEDED", task.state)
         self.assertEqual(task.portal_result()["verified_subject"], "teacher-test")
+        self.assertTrue(task.portal_result()["catalog"]["complete"])
+        self.assertEqual(self.documents.count(("ids.xidian.edu.cn", "/login")), login_count)
         journal = (task.manager.root / (task.state["job_id"] + ".json")).read_text()
         for secret in ["teacher-test", "synthetic-password", "123456", "a" * 64]:
             self.assertNotIn(secret, journal)
         task2 = self.start_task()
-        await asyncio.wait_for(task2.runner, 10)
+        obs = await self.ready(task2)
+        self.assertEqual(obs["stage"], "READING_CATALOG")
+        await self.finish_fixture_catalog(task2)
         self.assertEqual(task2.state["status"], "SUCCEEDED", task2.state)
         self.assertFalse(any(r["tool"] == "fill_portal_credentials" for r in task2.recent))
         with self.assertRaises(ValueError):
@@ -793,7 +818,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 task = manager.tasks[task_id]
                 self.tasks.append(task)
-                await asyncio.wait_for(task.runner, 10)
+                await self.finish_fixture_catalog(task)
                 public = (await client.get("/tasks/" + task_id)).json()
                 self.assertNotIn("verified_subject", public)
                 result = (await client.get("/tasks/" + task_id + "/portal-result")).json()

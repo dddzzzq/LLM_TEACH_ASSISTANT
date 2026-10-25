@@ -1,6 +1,6 @@
 # 教务自动化设计：复用现有 RPA Agent
 
-版本：V2.0 · 2026-10-24。以现有页面 Agent、任务浏览器和附件下载流程为基础，替代上一版独立认证浏览器与目录遍历设计。
+版本：V2.1 · 2026-10-25。以现有页面 Agent、任务浏览器和附件下载流程为基础，替代上一版独立认证浏览器与目录遍历设计。
 
 ## 设计范围
 
@@ -8,7 +8,7 @@
 
 账号密码由 Worker 内部读取并填入；页面 Agent 根据当前页面判断是否需要滑块、本人验证码、设备信任或进入课程页面。滑块复用当前已有实现。验证码由教师在任务浏览器填写，交还自动化后由 Agent 提交。账号、密码和验证码都不作为模型动作参数。
 
-首次认证及认证后目录采集都由同一页面 Agent 加载 `sync-teacher-portal` Skill，沿原来的“门户→个人空间→课程→作业”导航，获取本学期全部课程、班级和作业目录。读取工具只读取当前页面；每门课程（含明确无作业）读完后，Agent 调用原控制器的 `return_to_course_list` 返回已读取的课程列表，继续下一门。`collect-homework` 保留兼容。
+首次认证及随后的目录采集在同一个 `AUTH_BOOTSTRAP` 任务、同一浏览器中完成，由同一页面 Agent 加载 `sync-teacher-portal` Skill。已有课程页或登录页先核验复用，不重复进入门户。认证成功便继续采集，目录完整后由一次业务回执发布；已核验身份先保存，采集失败保留上次成功目录。单独更新课程使用 `CATALOG_SYNC`。读取工具只读取当前页面；每门课程（含明确无作业）读完后，Agent 调用原控制器的 `return_to_course_list` 返回已读取的课程列表，继续下一门。`collect-homework` 保留兼容。
 
 ## 复用关系
 
@@ -20,7 +20,7 @@
 | 手动输入、暂停与交还控制 | 原任务浏览器和 WebSocket |
 | 下载指定作业 | 原 `fetch-homework` Skill 与导出/下载控制器 |
 | 首次账号设置 | 普通 RPA 任务，`task_type=AUTH_BOOTSTRAP`，加载 `sync-teacher-portal` |
-| 获取课程作业目录 | 普通 RPA 任务，`task_type=CATALOG_SYNC`，加载 `sync-teacher-portal` |
+| 获取课程作业目录 | 首次连接延续原 AUTH_BOOTSTRAP；单独更新使用 CATALOG_SYNC，均加载 `sync-teacher-portal` |
 | 目录选择与结果保存 | 保留已有目录快照、选择界面与业务数据表 |
 
 `PortalOperation` 只保留设置页的业务状态和事件记录，其 ID 同时作为普通 RPA 任务 ID；不再拥有另一套浏览器控制器或页面决策流程。

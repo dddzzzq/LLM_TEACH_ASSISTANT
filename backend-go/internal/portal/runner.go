@@ -174,23 +174,28 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 		if terminal(op.Status) || c.ActiveOperationID != op.ID || c.CredentialVersion != op.CredentialVersion || c.ProfileGeneration != op.ProfileGeneration || state.StateVersion <= op.StateVersion {
 			return nil
 		}
-		if state.Status == "SUCCEEDED" {
-			if op.Type == "AUTH_BOOTSTRAP" {
-				creds, err := r.Service.credentials(ctx, c)
-				if err != nil {
-					return err
-				}
-				if state.VerifiedSubject != creds.Username {
-					return errors.New("identity mismatch")
-				}
-				c.Status = models.PortalConnectionReady
-				digest := sha256.Sum256([]byte(c.ID + "\x00" + state.VerifiedSubject))
-				c.VerifiedSubject = hex.EncodeToString(digest[:])
+		// New workers authenticate and collect in one live browser. Persist the
+		// verified identity before collection completes, without ending the job.
+		if op.Type == "AUTH_BOOTSTRAP" && (state.VerifiedSubject != "" || state.Status == "SUCCEEDED") {
+			creds, err := r.Service.credentials(ctx, c)
+			if err != nil {
+				return err
+			}
+			if state.VerifiedSubject != creds.Username {
+				return errors.New("identity mismatch")
+			}
+			c.Status = models.PortalConnectionReady
+			digest := sha256.Sum256([]byte(c.ID + "\x00" + state.VerifiedSubject))
+			c.VerifiedSubject = hex.EncodeToString(digest[:])
+			if c.LastAuthenticatedAt == nil || op.Stage != "READING_CATALOG" {
 				c.LastAuthenticatedAt = nowPtr()
-				if err = tx.Model(&c).Updates(map[string]any{"status": c.Status, "verified_subject": c.VerifiedSubject, "last_authenticated_at": c.LastAuthenticatedAt}).Error; err != nil {
-					return err
-				}
-			} else if op.Type == "CATALOG_SYNC" {
+			}
+			if err = tx.Model(&c).Updates(map[string]any{"status": c.Status, "verified_subject": c.VerifiedSubject, "last_authenticated_at": c.LastAuthenticatedAt}).Error; err != nil {
+				return err
+			}
+		}
+		if state.Status == "SUCCEEDED" {
+			if op.Type == "CATALOG_SYNC" || op.Type == "AUTH_BOOTSTRAP" && state.Catalog != nil {
 				if state.Catalog == nil {
 					return errors.New("missing catalog")
 				}
@@ -207,7 +212,8 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 			return err
 		}
 		if terminal(op.Status) {
-			if op.Type == "AUTH_BOOTSTRAP" && op.Status == "SUCCEEDED" {
+			if op.Type == "AUTH_BOOTSTRAP" && op.Status == "SUCCEEDED" && state.Catalog == nil {
+				// Compatibility for an older worker finishing authentication only.
 				next := newOperation(c, "CATALOG_SYNC")
 				if err := tx.Create(&next).Error; err != nil {
 					return err
@@ -218,7 +224,7 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 				}
 			} else {
 				c.ActiveOperationID = ""
-				if op.Type == "AUTH_BOOTSTRAP" || op.Status == "EXPIRED" {
+				if op.Type == "AUTH_BOOTSTRAP" && c.Status != models.PortalConnectionReady || op.Status == "EXPIRED" {
 					c.Status = models.PortalConnectionReauth
 				}
 			}

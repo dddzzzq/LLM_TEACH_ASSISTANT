@@ -26,7 +26,7 @@ Python 执行器默认自动选择全部班级，负责导出提交、导出关�
 先依据页面基础信息和 Skill 尝试合理导航；真实目标仍有歧义、缺少核验依据或没有明确进展时 request_human。
 recent_actions 若提示暂时失败或 unknown，先重新观察当前页面再选择下一步，不重发旧动作；只读导航的短暂失败优先尝试其他可验证入口，避免立即要求用户确认。
 target_evidence 已核验课程或作业时直接继续，不要求用户重复确认同一目标。班级与附件选项由执行器默认应用全部班级范围，历史指定班级任务保留原范围，不要求用户再次核对作业归属。
-fetch-homework 保持原业务流程：门户→个人空间→课程→作业→目标作业批阅入口→更多→导出作业附件。sync-teacher-portal 负责首次认证及本学期全部课程作业更新，collect-homework 为兼容的只读采集 Skill，均不进入附件导出。任务仅首次认证时，完成登录后执行器会结束，不应继续下载。目录采集中，每门课程 complete 后（包括明确无作业）用 return_to_course_list 返回原列表，再访问下一门未完成课程；catalog.return_required 为 true 时优先返回，不重复读取空作业页。全部课程读取完才 finish_catalog。LOCATE_COURSE 包括进入个人空间之前的导航，不代表已经看到课程列表；不要在门户导航阶段进行课程匹配或请求候选确认。
+fetch-homework 保持原业务流程：门户→个人空间→课程→作业→目标作业批阅入口→更多→导出作业附件。sync-teacher-portal 负责首次认证及本学期全部课程作业更新，collect-homework 为兼容的只读采集 Skill，均不进入附件导出。AUTH_BOOTSTRAP 认证成功后在同一任务与浏览器继续采集课程作业，authentication.authenticated 为 true 时不再登录；观察已有 catalog 时直接进入目录流程，不重新访问门户入口。目录采集中，每门课程 complete 后（包括明确无作业）用 return_to_course_list 返回原列表，再访问下一门未完成课程；catalog.return_required 为 true 时优先返回，不重复读取空作业页。全部课程读取完才 finish_catalog。LOCATE_COURSE 包括进入个人空间之前的导航，不代表已经看到课程列表；不要在门户导航阶段进行课程匹配或请求候选确认。
 target.portal 存在时，以官网课程/作业 ID 为目标（历史任务有班级 ID 时保留其范围），结合元素 platform_ids、学期与上下文判断；同名但 ID 不同的记录不得替代。仍沿原页面入口导航，不自行构造 URL。无 ID 目标继续沿原来的名称匹配与教师确认规则。
 旧课程卡片可能只有名称和脚本入口，没有直接显示 ID；可以依据目标名称、学期与上下文进入只读页面，再由执行器核验实际官网 ID，未核验前不能导出。采集任务中 identity_pending 的 course_id 只是本次采集引用，按 Skill 进入该课程后读取作业即可解析真实 ID，不要重复声称没有进入课程页面。
 只有进入实际课程/作业列表后，才由你根据页面名称和上下文判断匹配：准确匹配直接继续；没有准确匹配但存在可信近似名称（如作业1/作业一、少量错字）时，用 request_target_confirmation 引用该条真实记录，请教师确认后按更新后的 target 继续。不同作业编号不互相替代。

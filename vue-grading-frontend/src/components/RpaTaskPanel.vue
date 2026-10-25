@@ -97,7 +97,11 @@
               : '填写账号密码并提交登录后，出现滑块可点击“交还自动化”尝试验证；也可手动完成登录后继续。'
             : job.message
         }}</p
-        ><p class="mt-1 text-xs text-slate-500 break-all">任务 ID：{{ job.job_id }}</p>
+        ><p v-if="startupRetrySeconds !== null" class="mt-2 text-sm text-blue-700" role="status"
+          >{{ job.startup_retry_kind === 'cooldown' ? '连接冷却中' : '等待重试' }}：约
+          {{ startupRetrySeconds }} 秒后自动继续，可随时暂停或取消。</p
+        >
+        <p class="mt-1 text-xs text-slate-500 break-all">任务 ID：{{ job.job_id }}</p>
         <p
           v-if="job.stage === 'DOWNLOAD' && job.download_progress"
           class="mt-2 text-xs text-slate-600"
@@ -337,6 +341,12 @@ const selectedId = ref(''),
   error = ref(''),
   exportRefs = ref([]);
 const targetConfirmed = ref(false);
+const clock = ref(Date.now());
+const startupRetrySeconds = computed(() =>
+  !ended.value && job.value?.control_mode === 'AUTO' && job.value?.startup_retry_at
+    ? Math.max(0, Math.ceil(job.value.startup_retry_at - clock.value / 1000))
+    : null
+);
 const classNames = ref({});
 const api = authApi.getClient();
 const canViewLogs = computed(() => authApi.getCurrentUser()?.role === 'admin');
@@ -559,7 +569,10 @@ watch(
   { immediate: true }
 );
 onMounted(() => {
-  timer = setInterval(poll, 2000);
+  timer = setInterval(() => {
+    clock.value = Date.now();
+    poll();
+  }, 2000);
 });
 onBeforeUnmount(() => {
   clearInterval(timer);

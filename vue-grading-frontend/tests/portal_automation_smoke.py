@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -46,8 +47,12 @@ async def main():
             current = state["operation"]
             if path.endswith("/resume"):
                 state["status"] = "READY"; state["snapshot"] = "s2"
-                state["operation"] = {"id":"sync-second","type":"CATALOG_SYNC","status":"SUCCEEDED","message":"Catalog read complete"}
-            data = {"job_id":task_id,"task_type":current["type"],"status":"WAITING_USER" if current["status"]=="WAITING_OTP" else current["status"],"stage":"AUTHENTICATE" if current["type"]=="AUTH_BOOTSTRAP" else "DONE","control_mode":"HUMAN" if current["status"]=="WAITING_OTP" else "AUTO","control_epoch":1,"waiting_reason":"LOGIN_CODE","message":current["message"],"target":{"course_name":"Portal","assignment_name":"Authentication"},"grading_files":[],"material_batches":[]}
+                state["operation"] = {"id":"auth-first","type":"AUTH_BOOTSTRAP","status":"SUCCEEDED","message":"Catalog read complete"}
+            if path.endswith('/cancel'):
+                state['operation'] = {**current, 'status':'CANCELLED'}
+                current = state['operation']
+                state['status'] = 'READY'
+            data = {"startup_retry_kind": "cooldown" if current['id']=='cooldown-test' else '', "startup_retry_at": time.time()+60 if current['id']=='cooldown-test' else None, "job_id":task_id,"task_type":current["type"],"status":"WAITING_USER" if current["status"]=="WAITING_OTP" else current["status"],"stage":"AUTHENTICATE" if current["type"]=="AUTH_BOOTSTRAP" else "DONE","control_mode":"HUMAN" if current["status"]=="WAITING_OTP" else "AUTO","control_epoch":1,"waiting_reason":"LOGIN_CODE","message":current["message"],"target":{"course_name":"Portal","assignment_name":"Authentication"},"grading_files":[],"material_batches":[]}
         elif path == "/api/portal/catalog-syncs":
             state["snapshot"] = "s3"; state["operation"] = {"id":"sync-third","type":"CATALOG_SYNC","status":"SUCCEEDED","message":"目录已更新"}; data = {"operation_id":"sync-third"}; status = 202
         elif path == "/api/portal/courses": data = [{**course,"snapshot_id":state["snapshot"]} for course in courses]
@@ -106,6 +111,14 @@ async def main():
         assert not any('/grading/' in path for _,path,_,_ in calls),"Refreshing courses submitted grading"
         diagnostics=Path('/mnt/d/dzq/LLM_TEACH_ASSISTANT/.runtime/diagnostics');diagnostics.mkdir(parents=True,exist_ok=True)
         await page.screenshot(path=str(diagnostics/'portal-settings-desktop.png'),full_page=True)
+        state['operation'] = {'id':'cooldown-test','type':'AUTH_BOOTSTRAP','status':'RUNNING','message':'连接暂未恢复，正在冷却'}
+        await page.reload()
+        await expect(page.get_by_role('status').filter(has_text='连接冷却中')).to_be_visible()
+        await expect(page.get_by_role('button',name='暂停并接管',exact=True)).to_be_enabled()
+        await page.get_by_role('button',name='取消任务',exact=True).click()
+        await expect(page.get_by_role('status').filter(has_text='连接冷却中')).to_have_count(0)
+        assert any(path.endswith('/cooldown-test/cancel') for _,path,_,_ in calls)
+
         await page.evaluate("window.fixtureRouter.push('/grade-homework')")
         picker=page.get_by_role('region',name='官网课程和作业选择')
         await page.get_by_label("课程",exact=True).select_option('c1')
