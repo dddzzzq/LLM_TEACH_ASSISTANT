@@ -39,7 +39,7 @@ func TestIntegrationPreparedBatchGradingIsExplicitIdempotentAndRecoverable(t *te
 	root := t.TempDir()
 	t.Setenv("HOMEWORK_ALLOWED_ROOTS", root+"|"+os.TempDir())
 	t.Setenv("HOMEWORK_MATERIALS_ROOT", filepath.Join(root, "prepared"))
-	a := models.Assignment{CourseName: "测试课", ClassName: "A", TaskName: "第一次作业", Question: "编写程序", Rubric: `{"正确性":100}`}
+	a := models.Assignment{OwnerID: 8201, CourseName: "测试课", ClassName: "A", TaskName: "第一次作业", Question: "编写程序", Rubric: `{"正确性":100}`}
 	if err := db.Create(&a).Error; err != nil {
 		t.Fatal(err)
 	}

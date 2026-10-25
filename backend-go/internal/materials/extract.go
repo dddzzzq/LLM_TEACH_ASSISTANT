@@ -87,6 +87,9 @@ func (p *preparer) budgetError() error {
 }
 
 func ignoredPath(path string) bool {
+	if strings.HasPrefix(strings.ToLower(filepath.Base(path)), ".env") || protectedPath(path) {
+		return true
+	}
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
 		if ignored[strings.ToLower(part)] {
 			return true
@@ -140,6 +143,10 @@ func (p *preparer) copyFile(source, dest string) error {
 	return p.budgetError()
 }
 func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr error) {
+	if ignoredPath(path) {
+		p.manifest.FilteredEntries++
+		return nil
+	}
 	defer func() {
 		if visitErr != nil && id != "" {
 			p.incomplete[id] = true
@@ -170,7 +177,7 @@ func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr err
 				return nil
 			}
 			if d.IsDir() {
-				if ignored[strings.ToLower(d.Name())] || d.Name() == "original" || d.Name() == ".prepare" {
+				if ignoredPath(full) || d.Name() == "original" || d.Name() == ".prepare" {
 					p.manifest.FilteredEntries++
 					return filepath.SkipDir
 				}

@@ -31,9 +31,7 @@
 
       <!-- 总结报告 (移到顶部) -->
       <div class="p-5 md:p-7 surface">
-        <h1 class="page-title">
-          学生 {{ reportData.student_id }} 的试卷报告
-        </h1>
+        <h1 class="page-title"> 学生 {{ reportData.student_id }} 的试卷报告 </h1>
         <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="p-4 bg-gray-50 rounded-lg">
             <h2 class="text-sm font-medium text-gray-500 uppercase">试卷名称</h2>
@@ -43,9 +41,7 @@
             <h2 class="text-sm font-medium text-gray-500 uppercase">总得分</h2>
             <p
               class="text-lg font-bold"
-              :class="
-                getScoreColor(reportData.report.total_score.toFixed(1), examTotalScore)
-              "
+              :class="getScoreColor(reportData.report.total_score.toFixed(1), examTotalScore)"
             >
               {{ reportData.report.total_score.toFixed(1) }}
             </p>
@@ -68,11 +64,7 @@
       >
         <h2 class="text-lg font-bold text-gray-600 mb-4">未归类/其他图片</h2>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div
-            v-for="(img, idx) in unassignedImages"
-            :key="img.id"
-            class="relative group"
-          >
+          <div v-for="(img, idx) in unassignedImages" :key="img.id" class="relative group">
             <a :href="getImageUrl(img.image_path)" target="_blank">
               <img
                 :src="getImageUrl(img.image_path)"
@@ -102,18 +94,14 @@
               >
                 {{ answer.score.toFixed(1) }} /
                 {{
-                  answer.question.max_score !== null
-                    ? answer.question.max_score.toFixed(1)
-                    : "?"
+                  answer.question.max_score !== null ? answer.question.max_score.toFixed(1) : '?'
                 }}
               </span>
             </div>
 
             <!-- 题目内容 -->
             <details class="mt-2 text-sm">
-              <summary class="cursor-pointer text-gray-600">
-                查看题目、答案和评分标准
-              </summary>
+              <summary class="cursor-pointer text-gray-600"> 查看题目、答案和评分标准 </summary>
               <div class="mt-2 p-3 bg-gray-50 rounded-md space-y-2">
                 <p><strong>题目:</strong> {{ answer.question.question_text }}</p>
                 <p><strong>标准答案:</strong> {{ answer.question.standard_answer }}</p>
@@ -166,11 +154,7 @@
                         :href="getImageUrl(img.image_path)"
                         target="_blank"
                         class="block border rounded-md overflow-hidden shadow-sm hover:shadow-md transition bg-gray-200 flex items-center justify-center"
-                        :class="
-                          getImagesForQuestion(answer.question.id).length === 1
-                            ? ''
-                            : 'h-48'
-                        "
+                        :class="getImagesForQuestion(answer.question.id).length === 1 ? '' : 'h-48'"
                       >
                         <img
                           :src="getImageUrl(img.image_path)"
@@ -235,13 +219,9 @@
                   </svg>
                   学生答案 (OCR提取)
                 </h4>
-                <div
-                  class="bg-white rounded-lg border border-gray-200 p-4 shadow-sm flex-grow"
-                >
-                  <p
-                    class="text-gray-700 whitespace-pre-wrap text-sm leading-relaxed font-mono"
-                  >
-                    {{ answer.ocr_text || "未提取到文本内容..." }}
+                <div class="bg-white rounded-lg border border-gray-200 p-4 shadow-sm flex-grow">
+                  <p class="text-gray-700 whitespace-pre-wrap text-sm leading-relaxed font-mono">
+                    {{ answer.ocr_text || '未提取到文本内容...' }}
                   </p>
                 </div>
               </div>
@@ -279,9 +259,9 @@
   </div>
 </template>
 <script setup>
-import { ref, onMounted, computed } from "vue";
-import gradingApi from "../services/gradingApi";
-import Loader from "../components/Loader.vue";
+import { ref, onMounted, computed } from 'vue';
+import gradingApi from '../services/gradingApi';
+import Loader from '../components/Loader.vue';
 
 const props = defineProps({
   id: String, // exam_id
@@ -289,11 +269,11 @@ const props = defineProps({
 });
 
 const reportData = ref(null);
-const examName = ref("");
+const examName = ref('');
 const examTotalScore = ref(0);
 const isLoading = ref(true);
 const error = ref(null);
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 const sortedAnswers = computed(() => {
   if (!reportData.value || !reportData.value.answers) return [];
@@ -315,7 +295,7 @@ const getImagesForQuestion = (questionId) => {
 };
 
 const getImageUrl = (relativePath) => {
-  if (!relativePath) return "";
+  if (!relativePath) return '';
   return `${API_BASE_URL}${relativePath}`;
 };
 
@@ -323,29 +303,25 @@ const fetchReport = async () => {
   isLoading.value = true;
   error.value = null;
   try {
-    const reportResponse = await gradingApi.getStudentDetailedReport(
-      props.id,
-      props.studentExamId
-    );
+    const reportResponse = await gradingApi.getStudentDetailedReport(props.id, props.studentExamId);
     reportData.value = reportResponse.data;
     const examResponse = await gradingApi.getExamDetails(props.id);
     examName.value = examResponse.data.name;
     examTotalScore.value = examResponse.data.total_score || 100;
   } catch (e) {
-    console.error("无法加载报告:", e);
-    error.value = "无法加载学生报告详情。";
+    console.error('无法加载报告:', e);
+    error.value = '无法加载学生报告详情。';
   } finally {
     isLoading.value = false;
   }
 };
 
 const getScoreColor = (score, max_score) => {
-  if (max_score === null || max_score === undefined || max_score === 0)
-    return "text-gray-600";
+  if (max_score === null || max_score === undefined || max_score === 0) return 'text-gray-600';
   const ratio = score / max_score;
-  if (ratio >= 0.85) return "text-green-600";
-  if (ratio >= 0.6) return "text-yellow-600";
-  return "text-red-600";
+  if (ratio >= 0.85) return 'text-green-600';
+  if (ratio >= 0.6) return 'text-yellow-600';
+  return 'text-red-600';
 };
 
 onMounted(fetchReport);

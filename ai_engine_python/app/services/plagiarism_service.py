@@ -20,6 +20,7 @@ class PlagiarismService:
     修改后的抄袭检测服务，采用双模型策略。
     在每个学生提交的内容中分离文本和代码，并进行同类内容的交叉对比。
     """
+
     def __init__(self, text_model_name: str = None, code_model_name: str = None):
         """
         初始化服务。
@@ -33,44 +34,59 @@ class PlagiarismService:
         cache_dir = model_cache_dir()
 
         print(f"正在加载文本模型: {self.text_model_name}")
-        self.text_tokenizer = AutoTokenizer.from_pretrained(self.text_model_name, cache_dir=cache_dir)
-        self.text_model = AutoModel.from_pretrained(self.text_model_name, cache_dir=cache_dir).to(self.device)
+        self.text_tokenizer = AutoTokenizer.from_pretrained(
+            self.text_model_name, cache_dir=cache_dir
+        )
+        self.text_model = AutoModel.from_pretrained(self.text_model_name, cache_dir=cache_dir).to(
+            self.device
+        )
 
         print(f"正在加载代码模型: {self.code_model_name}")
-        self.code_tokenizer = AutoTokenizer.from_pretrained(self.code_model_name, cache_dir=cache_dir)
-        self.code_model = AutoModel.from_pretrained(self.code_model_name, cache_dir=cache_dir).to(self.device)
+        self.code_tokenizer = AutoTokenizer.from_pretrained(
+            self.code_model_name, cache_dir=cache_dir
+        )
+        self.code_model = AutoModel.from_pretrained(self.code_model_name, cache_dir=cache_dir).to(
+            self.device
+        )
 
     def _get_embedding(self, text: str, model_type: str) -> np.ndarray:
         """通用的调用模型得到嵌入的方法"""
         if not text:
             return np.zeros((1, 768))
-        tokenizer = self.text_tokenizer if model_type == 'text' else self.code_tokenizer
-        model = self.text_model if model_type == 'text' else self.code_model
-        inputs = tokenizer(text, padding=True, truncation=True, max_length=512, return_tensors="pt").to(self.device)
+        tokenizer = self.text_tokenizer if model_type == "text" else self.code_tokenizer
+        model = self.text_model if model_type == "text" else self.code_model
+        inputs = tokenizer(
+            text, padding=True, truncation=True, max_length=512, return_tensors="pt"
+        ).to(self.device)
         with torch.no_grad():
             outputs = model(**inputs)
             embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
         return embedding
 
-    def _separate_content_for_each_student(self, submissions: Dict[str, str]) -> Dict[str, Dict[str, str]]:
+    def _separate_content_for_each_student(
+        self, submissions: Dict[str, str]
+    ) -> Dict[str, Dict[str, str]]:
         """根据每个学生的内容，分离出文本和代码"""
         separated_data = {}
-        prose_extensions = ['.md', '.docx', '.pdf', '.doc']
+        prose_extensions = [".md", ".docx", ".pdf", ".doc"]
         for student_id, merged_content in submissions.items():
             prose_parts, code_parts = [], []
-            file_blocks = re.split(r'--- 文件开始: (.*?) ---', merged_content)
+            file_blocks = re.split(r"--- 文件开始: (.*?) ---", merged_content)
             if len(file_blocks) < 2:
                 prose_parts.append(merged_content)
             else:
                 for i in range(1, len(file_blocks), 2):
                     filename = file_blocks[i].strip()
-                    content = re.sub(r'--- 文件结束: (.*?) ---\n\n', '', file_blocks[i+1]).strip()
+                    content = re.sub(r"--- 文件结束: (.*?) ---\n\n", "", file_blocks[i + 1]).strip()
                     _, ext = os.path.splitext(filename)
                     if ext.lower() in prose_extensions:
                         prose_parts.append(content)
                     else:
                         code_parts.append(content)
-            separated_data[student_id] = {"text": "\n".join(prose_parts), "code": "\n".join(code_parts)}
+            separated_data[student_id] = {
+                "text": "\n".join(prose_parts),
+                "code": "\n".join(code_parts),
+            }
         return separated_data
 
     # def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]],
@@ -91,15 +107,17 @@ class PlagiarismService:
     #     return suspicious_pairs
 
     # 因为电脑内存限制，修改计算方式
-    def _find_suspicious_pairs(self, separated_data: Dict[str, Dict[str, str]],
-                                 content_type: str, threshold: float) -> Set[Tuple[str, str, float]]:
+    def _find_suspicious_pairs(
+        self, separated_data: Dict[str, Dict[str, str]], content_type: str, threshold: float
+    ) -> Set[Tuple[str, str, float]]:
         """
         根据语义相似度得到可疑抄袭片段
         对嵌入生成和比较都进行分批处理，优化内存
         """
         student_ids = list(separated_data.keys())
         num_students = len(student_ids)
-        if num_students < 2: return set()
+        if num_students < 2:
+            return set()
 
         contents = [separated_data[sid][content_type] for sid in student_ids]
         suspicious_pairs = set()
@@ -122,11 +140,15 @@ class PlagiarismService:
                 # 1. 批次内部比较
                 if len(batch1_indices) > 1:
                     for idx1_in_batch, idx2_in_batch in combinations(range(len(batch1_indices)), 2):
-                        score = cosine_similarity(batch1_embeddings[idx1_in_batch], batch1_embeddings[idx2_in_batch])[0, 0]
+                        score = cosine_similarity(
+                            batch1_embeddings[idx1_in_batch], batch1_embeddings[idx2_in_batch]
+                        )[0, 0]
                         if score >= threshold:
                             original_idx1 = batch1_indices[idx1_in_batch]
                             original_idx2 = batch1_indices[idx2_in_batch]
-                            pair = tuple(sorted((student_ids[original_idx1], student_ids[original_idx2])))
+                            pair = tuple(
+                                sorted((student_ids[original_idx1], student_ids[original_idx2]))
+                            )
                             suspicious_pairs.add((pair[0], pair[1], float(score)))
                         pbar.update(1)
 
@@ -136,15 +158,23 @@ class PlagiarismService:
                     batch2_indices = range(j, min(j + BATCH_SIZE, num_students))
                     batch2_contents = [contents[k] for k in batch2_indices]
                     # 只为第二个批次生成嵌入
-                    batch2_embeddings = [self._get_embedding(c, content_type) for c in batch2_contents]
+                    batch2_embeddings = [
+                        self._get_embedding(c, content_type) for c in batch2_contents
+                    ]
 
                     # 比较 batch1 和 batch2 的所有组合
-                    for idx1_in_batch, idx2_in_batch in product(range(len(batch1_indices)), range(len(batch2_indices))):
-                        score = cosine_similarity(batch1_embeddings[idx1_in_batch], batch2_embeddings[idx2_in_batch])[0, 0]
+                    for idx1_in_batch, idx2_in_batch in product(
+                        range(len(batch1_indices)), range(len(batch2_indices))
+                    ):
+                        score = cosine_similarity(
+                            batch1_embeddings[idx1_in_batch], batch2_embeddings[idx2_in_batch]
+                        )[0, 0]
                         if score >= threshold:
                             original_idx1 = batch1_indices[idx1_in_batch]
                             original_idx2 = batch2_indices[idx2_in_batch]
-                            pair = tuple(sorted((student_ids[original_idx1], student_ids[original_idx2])))
+                            pair = tuple(
+                                sorted((student_ids[original_idx1], student_ids[original_idx2]))
+                            )
                             suspicious_pairs.add((pair[0], pair[1], float(score)))
                         pbar.update(1)
 
@@ -164,14 +194,14 @@ class PlagiarismService:
         返回一个包含所有分析结果的结构化字典。
         """
         separated_data = self._separate_content_for_each_student(submissions)
-        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.90)
-        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.90)
+        suspicious_text_pairs = self._find_suspicious_pairs(separated_data, "text", 0.90)
+        suspicious_code_pairs = self._find_suspicious_pairs(separated_data, "code", 0.90)
         # suspicious_text_pairs = self._find_suspicious_pairs(separated_data, 'text', 0.95)
         # suspicious_code_pairs = self._find_suspicious_pairs(separated_data, 'code', 0.98)
         return {
             "suspicious_text_pairs": suspicious_text_pairs,
             "suspicious_code_pairs": suspicious_code_pairs,
-            "separated_contents": separated_data
+            "separated_contents": separated_data,
         }
 
 

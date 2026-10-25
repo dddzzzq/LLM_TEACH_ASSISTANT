@@ -101,7 +101,6 @@ func testBrowserDownload(t *testing.T, variant string) {
 		t.Fatal(err)
 	}
 	decisions := 0
-	scopeConfirmations := 0
 	decide := func(ctx context.Context, input json.RawMessage, doc catalog.Document, contract json.RawMessage) (json.RawMessage, error) {
 		decisions++
 		round := 0
@@ -189,15 +188,7 @@ func testBrowserDownload(t *testing.T, variant string) {
 			case "LOGIN":
 				_, err = WorkerRequest(ctx, "POST", "/fixture/"+id+"/login", nil)
 			case "CLASS_SCOPE":
-				scopeConfirmations++
-				if scopeConfirmations > 1 {
-					t.Fatal("class scope requested again after explicit confirmation")
-				}
-				scope := map[string]any{"mode": "selected", "class_ids": []string{"class_0"}}
-				if variant == "portal-export" {
-					scope = map[string]any{"mode": "all", "class_ids": []string{}}
-				}
-				_, err = WorkerRequest(ctx, "POST", "/tasks/"+id+"/class-scope", scope)
+				t.Fatalf("default all-class download requested teacher selection: %s", raw)
 			default:
 				t.Fatalf("unexpected human handoff: %s", raw)
 			}

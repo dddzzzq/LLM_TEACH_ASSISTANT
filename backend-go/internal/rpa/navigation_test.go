@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"grading-gateway/internal/agent/catalog"
+	"grading-gateway/internal/models"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,55 @@ import (
 type memoryJournal struct {
 	pending []byte
 	fail    bool
+}
+
+func TestPortalReturnToolMigrationAndSkillScope(t *testing.T) {
+	old := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`)
+	added := `{"type":"object","properties":{"tool":{"type":"string","enum":["return_to_course_list"]}},"required":["tool"],"additionalProperties":false}`
+	current := json.RawMessage(strings.TrimSuffix(string(old), "]}") + "," + added + "]}")
+	if !portalToolExtension(old, current) {
+		t.Fatal("known return tool extension rejected")
+	}
+	for _, incompatible := range []string{
+		strings.Replace(string(current), "element_ref", "new_ref", 1),
+		strings.Replace(string(current), "return_to_course_list", "goto", 1),
+		strings.Replace(string(current), `"additionalProperties":false`, `"additionalProperties":true`, 1),
+	} {
+		if portalToolExtension(old, json.RawMessage(incompatible)) {
+			t.Fatal("incompatible migration accepted")
+		}
+	}
+	for _, kind := range []string{"AUTH_BOOTSTRAP", "CATALOG_SYNC"} {
+		if pageSkill(models.RPAJob{TaskType: kind}) != "sync-teacher-portal" {
+			t.Fatal("portal job did not select combined skill")
+		}
+	}
+	if pageSkill(models.RPAJob{}) != "fetch-homework" || legacyPortalSkill(models.RPAJob{}, "collect-homework") {
+		t.Fatal("download skill scope changed")
+	}
+	if !legacyPortalSkill(models.RPAJob{TaskType: "CATALOG_SYNC"}, "collect-homework") ||
+		!legacyPortalSkill(models.RPAJob{TaskType: "AUTH_BOOTSTRAP"}, "fetch-homework") {
+		t.Fatal("known old portal skill rejected")
+	}
+}
+
+func TestSliderMigrationPreservesExistingActionContracts(t *testing.T) {
+	old := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`)
+	added := `{"type":"object","properties":{"tool":{"type":"string","enum":["solve_slider_captcha"]}},"required":["tool"],"additionalProperties":false}`
+	current := json.RawMessage(strings.TrimSuffix(string(old), "]}") + "," + added + "]}")
+	if !sliderToolExtension(old, current) {
+		t.Fatal("known additive extension rejected")
+	}
+	for _, incompatible := range []json.RawMessage{
+		old, current[:len(current)-1],
+		json.RawMessage(strings.Replace(string(current), "element_ref", "new_ref", 1)),
+		json.RawMessage(strings.Replace(string(current), "solve_slider_captcha", "run_python", 1)),
+		json.RawMessage(strings.Replace(string(current), `"additionalProperties":false`, `"additionalProperties":true`, 1)),
+	} {
+		if sliderToolExtension(old, incompatible) {
+			t.Fatalf("incompatible migration accepted: %s", incompatible)
+		}
+	}
 }
 
 func (j *memoryJournal) Pending() ([]byte, error) { return j.pending, nil }

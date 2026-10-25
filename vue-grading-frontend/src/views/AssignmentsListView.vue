@@ -1,11 +1,11 @@
 <template>
   <div>
     <div class="page-heading">
-      <div><h1 class="page-title">所有作业任务</h1><p class="page-description">集中管理课程作业，查看查重分析与智能评分结果。</p></div>
-      <router-link
-        to="/assignments/new"
-        class="primary-button"
+      <div
+        ><h1 class="page-title">所有作业任务</h1
+        ><p class="page-description">集中管理课程作业，查看查重分析与智能评分结果。</p></div
       >
+      <router-link to="/assignments/new" class="primary-button">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="h-5 w-5 mr-1"
@@ -57,13 +57,8 @@
       </div>
     </div>
 
-    <div
-      v-else-if="assignments.length === 0"
-      class="empty-state"
-    >
-      <div
-        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4"
-      >
+    <div v-else-if="assignments.length === 0" class="empty-state">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="h-8 w-8 text-gray-400"
@@ -98,9 +93,7 @@
                 >
                   {{ assignment.course_name }}
                 </span>
-                <span
-                  class="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-full"
-                >
+                <span class="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-full">
                   {{ assignment.class_name }}
                 </span>
               </div>
@@ -117,7 +110,7 @@
             >
           </div>
           <p class="text-gray-500 text-sm leading-relaxed line-clamp-3 mb-4 min-h-12">
-            {{ assignment.question || "无题目描述" }}
+            {{ assignment.question || '无题目描述' }}
           </p>
         </div>
 
@@ -168,10 +161,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import { RouterLink } from "vue-router";
-import gradingApi from "../services/gradingApi";
-import Loader from "../components/Loader.vue";
+import { ref, onMounted } from 'vue';
+import { RouterLink } from 'vue-router';
+import gradingApi from '../services/gradingApi';
+import Loader from '../components/Loader.vue';
 
 interface Assignment {
   id: number;
@@ -189,13 +182,13 @@ const fetchAssignments = async () => {
   isLoading.value = true;
   error.value = null;
   try {
-    console.log("开始获取作业列表..."); // 调试日志
+    console.log('开始获取作业列表...'); // 调试日志
     const response = await gradingApi.getAssignments();
-    console.log("API 响应数据:", response.data); // 调试日志
+    console.log('API 响应数据:', response.data); // 调试日志
     assignments.value = response.data;
   } catch (e: any) {
-    console.error("获取作业列表失败:", e); // 调试日志
-    error.value = e.message || "无法加载作业列表，请检查后端服务是否启动。";
+    console.error('获取作业列表失败:', e); // 调试日志
+    error.value = e.message || '无法加载作业列表，请检查后端服务是否启动。';
     // 如果是网络错误，通常 e.message 会是 "Network Error"
   } finally {
     isLoading.value = false;
@@ -203,12 +196,12 @@ const fetchAssignments = async () => {
 };
 
 const deleteAssignment = async (id: number, index: number) => {
-  if (confirm("确定要删除这个作业及其所有评分记录吗？\n此操作不可撤销。")) {
+  if (confirm('确定要删除这个作业及其所有评分记录吗？\n此操作不可撤销。')) {
     try {
       await gradingApi.deleteAssignment(id);
       assignments.value.splice(index, 1);
     } catch (e) {
-      alert("删除失败，请重试。");
+      alert('删除失败，请重试。');
       console.error(e);
     }
   }
@@ -217,8 +210,16 @@ const deleteAssignment = async (id: number, index: number) => {
 onMounted(fetchAssignments);
 </script>
 <style scoped>
-.assignment-card { transition: border-color 150ms; }
-.assignment-card:hover { border-color: #83c4b9; }
-.assignment-card .flex.items-center.gap-2 { flex-wrap: wrap; }
-.assignment-card h3 { overflow-wrap: anywhere; }
+.assignment-card {
+  transition: border-color 150ms;
+}
+.assignment-card:hover {
+  border-color: #83c4b9;
+}
+.assignment-card .flex.items-center.gap-2 {
+  flex-wrap: wrap;
+}
+.assignment-card h3 {
+  overflow-wrap: anywhere;
+}
 </style>

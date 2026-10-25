@@ -92,12 +92,12 @@ async def main():
             raise
         await expect(page.get_by_label('题目要求', exact=True)).to_have_value('已有题目要求')
         await page.get_by_label('评分标准（JSON）', exact=True).fill('not json')
-        await page.get_by_role('button', name='保存并继续批改', exact=True).click()
+        await page.get_by_role('button', name='保存评分配置', exact=True).click()
         await expect(page.get_by_role('alert')).to_contain_text('不是有效 JSON')
         assert not posts
         await page.get_by_label('题目要求', exact=True).fill('补充后的题目要求')
         await page.get_by_label('评分标准（JSON）', exact=True).fill('{"正确性": 60, "代码质量": 40}')
-        await page.get_by_role('button', name='保存并继续批改', exact=True).click()
+        await page.get_by_role('button', name='保存评分配置', exact=True).click()
         await expect(page.get_by_role('alert')).to_have_text('测试保存失败，稍后重试')
         await page.wait_for_timeout(5500)
         await expect(page.get_by_label('题目要求', exact=True)).to_have_value('补充后的题目要求')
@@ -141,7 +141,7 @@ async def main():
         await page.get_by_role('button', name='处理此项', exact=True).nth(1).click()
         await expect(page.get_by_label('题目要求', exact=True)).to_have_value('已有题目要求')
         await page.get_by_label('评分标准（JSON）', exact=True).fill('{}')
-        await page.get_by_role('button', name='保存并继续批改', exact=True).click()
+        await page.get_by_role('button', name='保存评分配置', exact=True).click()
         await expect(page.get_by_role('alert')).to_contain_text('非空 JSON 对象')
         assert len(posts) == 1
         await page.get_by_label('评分标准（JSON）', exact=True).fill('{"正确性":100}')
@@ -156,8 +156,8 @@ async def main():
             assert await page.evaluate("!!document.activeElement.closest('dialog')")
         await page.screenshot(path=str(out/'rpa-attention-mobile.png'))
         state['fail_save'] = False
-        await page.get_by_role('button', name='保存并继续批改', exact=True).click()
-        await expect(page.get_by_role('status')).to_have_text('题目与评分标准已保存，系统将自动继续批改。')
+        await page.get_by_role('button', name='保存评分配置', exact=True).click()
+        await expect(page.get_by_role('status')).to_have_text('题目与评分标准已保存；后续按本次已选择的处理范围执行。')
         assert len(posts) == 2 and posts[-1]['rubric'] == {'正确性':100}
         await expect(page.locator('dialog.app-modal')).to_have_count(0)
         await context.close()

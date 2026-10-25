@@ -16,7 +16,7 @@ func TestIntegrationAttentionAndSupplementRequirements(t *testing.T) {
 	integrationDB(t)
 	owner := uint(81001)
 	job := models.RPAJob{ID: uuid.NewString(), UserID: owner, CourseName: "提醒测试课程", AssignmentName: uuid.NewString(), Status: "PARTIAL_SUCCESS"}
-	a := models.Assignment{CourseName: job.CourseName, ClassName: "A", TaskName: job.AssignmentName}
+	a := models.Assignment{OwnerID: owner, CourseName: job.CourseName, ClassName: "A", TaskName: job.AssignmentName}
 	if err := database.DB.Create(&job).Error; err != nil {
 		t.Fatal(err)
 	}

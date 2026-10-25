@@ -88,7 +88,11 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
 
     // 如果是 401 错误且不是刷新 Token 的请求
-    if (error.response?.status === 401 && !originalRequest._retry && originalRequest.url !== '/api/refresh') {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      originalRequest.url !== '/api/refresh'
+    ) {
       if (isRefreshing) {
         // 如果已经在刷新 Token，将请求加入队列
         return new Promise((resolve, reject) => {
@@ -243,7 +247,7 @@ export default {
       get: (url, config) => apiClient.get(prefix + url, config),
       post: (url, data, config) => apiClient.post(prefix + url, data, config),
       put: (url, data, config) => apiClient.put(prefix + url, data, config),
-      delete: (url, config) => apiClient.delete(prefix + url, config)
+      delete: (url, config) => apiClient.delete(prefix + url, config),
     };
   },
 

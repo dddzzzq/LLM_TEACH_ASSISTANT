@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"encoding/json"
 	"grading-gateway/internal/agent"
 	"grading-gateway/internal/agent/catalog"
 	"grading-gateway/internal/agent/modelclient"
@@ -16,14 +15,12 @@ import (
 	"grading-gateway/internal/database"
 	"grading-gateway/internal/grading"
 	"grading-gateway/internal/grpcclient"
-	"grading-gateway/internal/handlers"
 	"grading-gateway/internal/logbook"
 	"grading-gateway/internal/materials"
-	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/mq"
+	"grading-gateway/internal/portal"
 	"grading-gateway/internal/rpa"
-
-	"github.com/gin-gonic/gin"
+	"grading-gateway/internal/server"
 )
 
 func main() {
@@ -52,6 +49,9 @@ func main() {
 	agent.EnsureDefaultToolsSeeded(context.Background())
 	agent.EnsureRPATools(context.Background())
 	agent.EnsureGradingTools(context.Background())
+	agent.EnsurePortalTools(context.Background())
+	// Install the credential/session hook before Kafka consumers can restore queued jobs.
+	portal.Start(context.Background(), database.DB)
 	rpa.PublishFetch = func(id string) error { return mq.PublishRPAFetchTask(mq.RPAFetchMessage{JobID: id}) }
 
 	// 3. 初始化 Kafka
@@ -93,141 +93,10 @@ func main() {
 	go materials.Default().Run(context.Background(), grading.ContinuePrepared)
 	go grading.RunMaterialOutbox(context.Background())
 
-	// 6. 初始化gin框架，定义初始根路由
-	router := gin.New()
-	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipQueryString: true,
-		Skip: func(c *gin.Context) bool {
-			return strings.HasPrefix(c.Request.URL.Path, "/api/logs/")
-		},
-	}), gin.Recovery())
+	// 6. 注册 HTTP 路由并启动服务。
+	router := server.NewRouter(database.DB, logService)
 
-	// 7. 配置CORS，使可跨域访问
-	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, Idempotency-Key")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
-	})
-
-	// 8. 创建处理器
-	authHandler := handlers.NewAuthHandler(database.DB)
-	sessionHandler := handlers.NewSessionHandler(database.DB)
-
-	// 9. 定义公开路由（不需要认证）
-	publicGroup := router.Group("/api")
-	{
-		// 认证相关路由
-		publicGroup.POST("/login", authHandler.Login)
-		publicGroup.POST("/refresh", authHandler.Refresh)
-		publicGroup.POST("/register", authHandler.Register)
-		// The WebSocket authenticates its first message before accessing a task.
-		publicGroup.GET("/rpa/jobs/:id/stream", handlers.RPABrowserStream)
-	}
-
-	// 10. 定义需要认证的路由组
-	protectedGroup := router.Group("/api")
-	protectedGroup.Use(middleware.AuthMiddleware())
-	{
-		// 用户个人信息
-		protectedGroup.GET("/profile", authHandler.Profile)
-		logGroup := protectedGroup.Group("/logs") // LogHandler centrally enforces admin-only access.
-		handlers.LogHandler{Service: logService}.Register(logGroup)
-		materialGroup := protectedGroup.Group("/materials", middleware.RBACMiddleware("teacher", "admin"))
-		materialGroup.GET("", handlers.ListMaterials)
-		materialGroup.POST("", handlers.CreateMaterials)
-		materialGroup.GET("/:id", handlers.GetMaterials)
-		materialGroup.POST("/:id/retry", handlers.RetryMaterials)
-		materialGroup.POST("/:id/grade", handlers.GradeMaterials)
-		materialGroup.POST("/:id/cancel", handlers.CancelMaterials)
-
-		// 会话管理
-		sessionGroup := protectedGroup.Group("/sessions")
-		{
-			sessionGroup.GET("", sessionHandler.GetUserSessions)
-			sessionGroup.POST("", sessionHandler.CreateSession)
-			sessionGroup.GET("/:session_id", sessionHandler.GetSessionInfo)
-			sessionGroup.GET("/:session_id/history", sessionHandler.GetSessionHistory)
-			sessionGroup.PUT("/:session_id", sessionHandler.UpdateSession)
-			sessionGroup.DELETE("/:session_id", sessionHandler.DeleteSession)
-		}
-
-		// Agent对话路由（需要认证）
-		protectedGroup.POST("/agent/chat", handlers.AgentChat)
-
-		rpaGroup := protectedGroup.Group("/rpa/jobs")
-		rpaGroup.Use(middleware.RBACMiddleware("teacher", "admin"))
-		{
-			rpaGroup.POST("", handlers.CreateRPAJob)
-			rpaGroup.GET("", handlers.ListRPAJobs)
-			rpaGroup.GET("/attention", handlers.GetRPAAttention)
-			rpaGroup.GET("/:id", handlers.GetRPAJob)
-			rpaGroup.GET("/:id/requirements", handlers.GetRPARequirements)
-			rpaGroup.GET("/:id/browser", handlers.RPABrowserFrame)
-			rpaGroup.POST("/:id/:action", handlers.ControlRPAJob)
-		}
-
-		// 异步任务状态查询路由
-		protectedGroup.GET("/jobs/:job_id", handlers.GetJobStatus)
-
-		// 工具配置（教师/管理员），保留旧 /skills 接口。
-		adminGroup := protectedGroup.Group("/admin")
-		adminGroup.Use(middleware.RBACMiddleware("teacher", "admin"))
-		{
-			handlers.RegisterToolAdminRoutes(adminGroup)
-		}
-	}
-
-	// 11. 原有业务路由
-	// 布置作业路由
-	assignmentGroup := router.Group("/assignments")
-	assignmentGroup.Use(middleware.AuthMiddleware())
-	{
-		assignmentGroup.POST("/", middleware.StudentAccessGuard(), handlers.CreateAssignment)                 // 创建作业路由
-		assignmentGroup.GET("/", handlers.GetAssignments)                                                     // 获取所有作业路由用于展示
-		assignmentGroup.GET("/:id", handlers.GetAssignment)                                                   // 获取单个作业路由
-		assignmentGroup.GET("/:id/results", handlers.GetAssignmentSubmissions)                                // 获取单个作业的所有提交
-		assignmentGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteAssignment)            // 删除作业路由
-		assignmentGroup.POST("/:id/submit", middleware.StudentAccessGuard(), handlers.UploadAssignment)       // 上传学生作业路由
-		assignmentGroup.DELETE("/:id/results", middleware.StudentAccessGuard(), handlers.ClearAllSubmissions) // 一键清空路由
-		assignmentGroup.GET("/:id/export", handlers.ExportAssignmentExcel)                                    // 导出路由
-	}
-
-	// 学生提交路由
-	submissionGroup := router.Group("/submissions")
-	submissionGroup.Use(middleware.AuthMiddleware())
-	{
-		submissionGroup.GET("/:id", handlers.GetSubmission)                                        // 获取学生作业情况
-		submissionGroup.PUT("/:id", middleware.StudentAccessGuard(), handlers.UpdateSubmission)    // 更新学生分数和评语路由
-		submissionGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteSubmission) // 删除单个学生作业路由
-	}
-
-	// 试卷主观题批改路由
-	examGroup := router.Group("/exams")
-	examGroup.Use(middleware.AuthMiddleware())
-	{
-		examGroup.POST("/", middleware.StudentAccessGuard(), handlers.CreateExam)                            // 步骤1：新建试卷
-		examGroup.GET("/", handlers.GetExams)                                                                // 列表
-		examGroup.GET("/:id", handlers.GetExam)                                                              // 详情(含题目)
-		examGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteExam)                       // 删除整个试卷
-		examGroup.POST("/:id/questions", middleware.StudentAccessGuard(), handlers.AddExamQuestion)          // 步骤2：添加考题
-		examGroup.POST("/:id/grade_submission", middleware.StudentAccessGuard(), handlers.UploadStudentExam) // 并发交卷核心接口
-		examGroup.GET("/:id/results", handlers.GetExamResultsSummary)                                        // 获取某次考试的所有人总分
-		examGroup.GET("/:id/results/:student_exam_id", handlers.GetStudentDetailedReport)                    // 获取某个人的详细试卷分析
-		examGroup.DELETE("/:id/results/:student_exam_id", middleware.StudentAccessGuard(), handlers.DeleteStudentExamResult)
-	}
-
-	// 静态资源服务
-	// 供前端渲染图片使用
-	router.Static("/uploads", "./uploads")
-
-	// 12. 启动监听在8000端口
+	// 默认监听 8000 端口，允许通过 BACKEND_ADDR 覆盖。
 	port := backendAddress()
 	log.Println("服务器启动，监听在端口", port)
 	if err := router.Run(port); err != nil {

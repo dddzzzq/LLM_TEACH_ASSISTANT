@@ -1,0 +1,6 @@
+api_version: teaching.skills/v1
+id: teaching/sync-teacher-portal
+version: 1.1.0
+entry: SKILL.md
+runtimes:
+  - portal-browser

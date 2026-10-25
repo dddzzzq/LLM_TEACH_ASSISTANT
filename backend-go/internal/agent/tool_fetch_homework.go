@@ -21,7 +21,7 @@ func (s *FetchAndGradeHomeworkTool) Name() string {
 	return "fetch_and_grade_homework"
 }
 func (s *FetchAndGradeHomeworkTool) Description() string {
-	return "创建独立的官网作业拉取任务。默认下载并按课程/作业整理到目录，不启动批改。after_download可选download、extract、grade；仅老师明确要求全流程批改时使用grade。禁止索取密码。"
+	return "创建独立的官网作业拉取任务，默认全部班级，无需班级选择。默认下载并按课程/作业整理到目录，不启动批改。after_download可选download、extract、grade；仅老师明确要求全流程批改时使用grade。禁止索取密码。"
 }
 func (s *FetchAndGradeHomeworkTool) Schema() string {
 	return `{"type":"object","properties":{"course_name":{"type":"string","description":"官网课程名称"},"assignment_name":{"type":"string","description":"官网作业名称"},"term":{"type":"string","description":"可选学期"},"after_download":{"type":"string","enum":["download","extract","grade"],"description":"默认extract，下载并解压后停止；download仅下载；grade须老师明确要求批改"},"output_root":{"type":"string","description":"老师指定的保存根目录，系统追加课程/作业/班级/批次"}},"required":["course_name","assignment_name"],"additionalProperties":false}`
@@ -39,7 +39,7 @@ func (s *FetchAndGradeHomeworkTool) ExecuteContext(ctx context.Context, args str
 		return "", err
 	}
 	result := map[string]any{"outcome": "accepted", "job_type": "rpa_fetch_homework", "job_id": job.ID, "status": job.Status, "stage": job.Stage,
-		"message": "请在任务浏览器完成登录及班级选择；后续仅执行本次选择的下载/整理/批改范围", "after_download": job.AfterDownload, "output_root": job.OutputRoot}
+		"message": "任务将默认处理该作业的全部班级，并按要求自动下载、整理或批改；登录状态与进度可在任务浏览器查看", "after_download": job.AfterDownload, "output_root": job.OutputRoot}
 	b, err := json.Marshal(result)
 	return string(b), err
 }

@@ -44,7 +44,7 @@ func (r *memoryRepo) Fail(_ context.Context, id, msg string) error {
 	return nil
 }
 func fixtureRepo() *memoryRepo {
-	return &memoryRepo{assignment: models.Assignment{ID: 1, Question: "编写程序", Rubric: `{"正确性":100}`}, exam: models.Exam{ID: 2, Questions: []models.ExamQuestion{{QuestionNumber: 1, QuestionText: "问题", StandardAnswer: "答案", Rubric: "标准", MaxScore: 10}}}, jobs: map[string]models.AsyncJob{}}
+	return &memoryRepo{assignment: models.Assignment{ID: 1, OwnerID: 7, Question: "编写程序", Rubric: `{"正确性":100}`}, exam: models.Exam{ID: 2, Questions: []models.ExamQuestion{{QuestionNumber: 1, QuestionText: "问题", StandardAnswer: "答案", Rubric: "标准", MaxScore: 10}}}, jobs: map[string]models.AsyncJob{}}
 }
 func fixtureZip(t *testing.T, name string) string {
 	t.Helper()

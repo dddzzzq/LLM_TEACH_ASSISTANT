@@ -26,13 +26,27 @@ import (
 
 var PublishFetch func(string) error
 var dispatchMu sync.Mutex
+var portalStarts sync.Map
+
+// Credential tickets are supplied by the portal broker, never stored in jobs or Kafka.
+var PortalSession func(context.Context, uint, string, string) (map[string]any, error)
+
+type PortalTarget struct {
+	CourseID    string `json:"course_id"`
+	HomeworkID  string `json:"homework_id"`
+	ClassID     string `json:"class_id"`
+	ClassName   string `json:"class_name"`
+	CourseURL   string `json:"course_url"`
+	HomeworkURL string `json:"homework_url"`
+}
 
 type Target struct {
-	CourseName     string `json:"course_name"`
-	AssignmentName string `json:"assignment_name"`
-	Term           string `json:"term,omitempty"`
-	AfterDownload  string `json:"after_download,omitempty"`
-	OutputRoot     string `json:"output_root,omitempty"`
+	Portal         *PortalTarget `json:"portal,omitempty"`
+	CourseName     string        `json:"course_name"`
+	AssignmentName string        `json:"assignment_name"`
+	Term           string        `json:"term,omitempty"`
+	AfterDownload  string        `json:"after_download,omitempty"`
+	OutputRoot     string        `json:"output_root,omitempty"`
 }
 
 func Create(ctx context.Context, userID uint, target Target) (*models.RPAJob, error) {
@@ -40,6 +54,9 @@ func Create(ctx context.Context, userID uint, target Target) (*models.RPAJob, er
 }
 
 func CreateWithKey(ctx context.Context, userID uint, target Target, requestKey string) (*models.RPAJob, error) {
+	if target.Portal != nil {
+		return nil, fmt.Errorf("官网目标请通过课程作业选择器创建")
+	}
 	target.CourseName, target.AssignmentName = strings.TrimSpace(target.CourseName), strings.TrimSpace(target.AssignmentName)
 	if target.AfterDownload == "" {
 		target.AfterDownload = "extract"
@@ -77,6 +94,15 @@ func CreateWithKey(ctx context.Context, userID uint, target Target, requestKey s
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}
+	}
+	var connection models.PortalConnection
+	if err := database.DB.WithContext(ctx).Where("owner_id = ? AND provider = ? AND status = ?", userID, "xidian", models.PortalConnectionReady).First(&connection).Error; err == nil {
+		if connection.ActiveOperationID != "" {
+			return nil, fmt.Errorf("教务账号正在认证或更新课程，请稍后启动下载")
+		}
+		job.PortalConnectionID, job.ProfileGeneration = connection.ID, connection.ProfileGeneration
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 	skills, err := catalog.Default("portal-browser")
 	if err != nil {
@@ -138,9 +164,26 @@ func Start(ctx context.Context, jobID string, restart bool) error {
 	if restart && job.Status != "INTERRUPTED" && job.Status != "FAILED" && job.Status != "PARTIAL_SUCCESS" {
 		return fmt.Errorf("只有中断或失败的任务可以重新启动")
 	}
+	if job.PortalConnectionID != "" {
+		// Saved profiles are exclusive. Reuse the existing queued-job retry rather
+		// than starting a second browser which would fail its profile file lock.
+		value, _ := portalStarts.LoadOrStore(job.PortalConnectionID, &sync.Mutex{})
+		lock := value.(*sync.Mutex)
+		lock.Lock()
+		defer lock.Unlock()
+		var active int64
+		if err := database.DB.WithContext(ctx).Model(&models.RPAJob{}).Where("portal_connection_id = ? AND id <> ? AND status IN ?", job.PortalConnectionID, job.ID, []string{"RUNNING", "WAITING_USER"}).Count(&active).Error; err != nil {
+			return err
+		}
+		if active > 0 {
+			return fmt.Errorf("教师专用浏览器正在处理另一个任务，当前任务继续排队")
+		}
+	}
 	var checkpoint map[string]any
 	if restart {
 		_ = json.Unmarshal([]byte(job.StateJSON), &checkpoint)
+	}
+	if restart && job.PortalWorkflowItemID == "" && job.TaskType == "" {
 		// An explicit new browser session may use the current read-only navigation
 		// contract. Export checkpoints retain their Skill and all action receipts.
 		var snapshot NavigationSnapshot
@@ -162,8 +205,35 @@ func Start(ctx context.Context, jobID string, restart bool) error {
 			return err
 		}
 	}
-	b, err := WorkerRequest(ctx, "POST", "/tasks/"+jobID, map[string]any{
-		"target": Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term}, "restart": restart, "checkpoint": checkpoint})
+	target := Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term}
+	body := map[string]any{"restart": restart, "checkpoint": checkpoint}
+	if job.PortalConnectionID != "" {
+		if PortalSession == nil {
+			return fmt.Errorf("教务会话服务未就绪")
+		}
+		capabilities, err := WorkerRequest(ctx, "GET", "/health", nil)
+		var health struct {
+			PortalAutomation string `json:"portal_automation"`
+		}
+		if err != nil || json.Unmarshal(capabilities, &health) != nil || health.PortalAutomation != "teacher.portal.agent.v2" {
+			return fmt.Errorf("请升级并重启支持页面 Agent 登录的 RPA Worker")
+		}
+		if job.PortalTargetJSON != "" {
+			var selected PortalTarget
+			if json.Unmarshal([]byte(job.PortalTargetJSON), &selected) != nil || selected.HomeworkID == "" {
+				return fmt.Errorf("官网目标检查点无效")
+			}
+			target.Portal = &selected
+		}
+		session, err := PortalSession(ctx, job.UserID, job.PortalConnectionID, job.ID)
+		if err != nil {
+			return err
+		}
+		body["portal_session"] = session
+	}
+	body["task_type"] = job.TaskType
+	body["target"] = target
+	b, err := WorkerRequest(ctx, "POST", "/tasks/"+jobID, body)
 	if err != nil {
 		return err
 	}
@@ -239,6 +309,9 @@ func Detail(job *models.RPAJob) map[string]any {
 	_ = json.Unmarshal([]byte(job.StateJSON), &state)
 	state["job_id"], state["status"], state["stage"], state["message"] = job.ID, job.Status, job.Stage, job.Message
 	state["target"] = Target{CourseName: job.CourseName, AssignmentName: job.AssignmentName, Term: job.Term, AfterDownload: job.AfterDownload, OutputRoot: job.OutputRoot}
+	state["task_type"] = job.TaskType
+	delete(state, "portal_catalog")
+	delete(state, "catalog_progress")
 	var files []models.RPAFile
 	database.DB.Where("job_id = ?", job.ID).Find(&files)
 	for i := range files {
@@ -259,6 +332,25 @@ func Detail(job *models.RPAJob) map[string]any {
 func validRubric(assignment models.Assignment) bool {
 	var rubric map[string]any
 	return strings.TrimSpace(assignment.Question) != "" && json.Unmarshal([]byte(assignment.Rubric), &rubric) == nil && len(rubric) > 0
+}
+
+// A missing class on a structured target means the selected homework as a
+// whole. Explicit historical class targets retain their original boundaries.
+func portalAllClasses(job models.RPAJob) bool {
+	var target PortalTarget
+	return job.PortalTargetJSON != "" && json.Unmarshal([]byte(job.PortalTargetJSON), &target) == nil && target.CourseID != "" && target.HomeworkID != "" && target.ClassID == ""
+}
+
+func allClassExport(job models.RPAJob) bool {
+	if portalAllClasses(job) {
+		return true
+	}
+	var state struct {
+		Scope struct {
+			Mode string `json:"mode"`
+		} `json:"class_scope"`
+	}
+	return json.Unmarshal([]byte(job.StateJSON), &state) == nil && state.Scope.Mode == "all"
 }
 
 func importFiles(job models.RPAJob) error {
@@ -292,6 +384,9 @@ func importFiles(job models.RPAJob) error {
 				className = ""
 			}
 		}
+		if portalAllClasses(job) || (className == "" && allClassExport(job)) {
+			className = "全部班级"
+		}
 		file := models.RPAFile{ID: hex.EncodeToString(id[:]), JobID: job.ID, ExportRef: f.ExportRef, ClassName: className,
 			Path: f.Path, SHA256: f.SHA256, Size: f.Size, GradingStatus: "DOWNLOADED", Message: "附件已下载，尚未提交批改"}
 		if err := database.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&file).Error; err != nil {
@@ -316,13 +411,27 @@ func dispatchFile(file models.RPAFile) error {
 		if job.Status == "CANCELLED" {
 			return tx.Model(&file).Update("grading_status", "CANCELLED").Error
 		}
+		if portalAllClasses(job) || (file.ClassName == "" && allClassExport(job)) {
+			file.ClassName = "全部班级"
+		}
 		if file.ClassName == "" {
 			return tx.Model(&file).Update("message", "无法确认附件班级，请核对官网导出文件命名").Error
 		}
 		var assignment models.Assignment
-		err := tx.Where("course_name = ? AND class_name = ? AND task_name = ?", job.CourseName, file.ClassName, job.AssignmentName).First(&assignment).Error
+		var err error
+		if job.AssignmentID != 0 {
+			err = tx.Where("id = ? AND owner_id = ?", job.AssignmentID, job.UserID).First(&assignment).Error
+			if err != nil {
+				return err
+			}
+			if assignment.ClassName != file.ClassName {
+				return fmt.Errorf("下载班级与选定班级不一致")
+			}
+		} else {
+			err = tx.Where("owner_id = ? AND course_name = ? AND class_name = ? AND task_name = ?", job.UserID, job.CourseName, file.ClassName, job.AssignmentName).First(&assignment).Error
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			assignment = models.Assignment{CourseName: job.CourseName, ClassName: file.ClassName, TaskName: job.AssignmentName}
+			assignment = models.Assignment{OwnerID: job.UserID, CourseName: job.CourseName, ClassName: file.ClassName, TaskName: job.AssignmentName}
 			if err := tx.Create(&assignment).Error; err != nil {
 				return err
 			}

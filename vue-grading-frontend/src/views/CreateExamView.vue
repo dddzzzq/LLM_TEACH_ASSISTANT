@@ -5,9 +5,7 @@
       <h1 class="mb-6 page-title">步骤 1: 新建试卷</h1>
       <form @submit.prevent="handleCreateExam">
         <div>
-          <label for="exam_name" class="block text-sm font-medium text-gray-700"
-            >试卷名称</label
-          >
+          <label for="exam_name" class="block text-sm font-medium text-gray-700">试卷名称</label>
           <input
             id="exam_name"
             v-model="examName"
@@ -33,9 +31,7 @@
 
     <!-- 步骤二：添加题目 -->
     <div v-if="step === 2" class="space-y-8">
-      <h1 class="page-title">
-        步骤 2: 为 "{{ examName }}" 添加题目
-      </h1>
+      <h1 class="page-title"> 步骤 2: 为 "{{ examName }}" 添加题目 </h1>
 
       <!-- 题目列表 -->
       <div v-if="questions.length > 0" class="form-surface bg-white rounded-xl">
@@ -57,17 +53,12 @@
       </div>
 
       <!-- 添加题目表单 -->
-      <form
-        @submit.prevent="handleAddQuestion"
-        class="form-surface space-y-6 bg-white rounded-xl"
-      >
+      <form @submit.prevent="handleAddQuestion" class="form-surface space-y-6 bg-white rounded-xl">
         <h2 class="text-xl font-semibold text-gray-700">添加新题目</h2>
 
         <div class="grid grid-cols-3 gap-4">
           <div class="col-span-2">
-            <label for="q_number" class="block text-sm font-medium text-gray-700"
-              >题号</label
-            >
+            <label for="q_number" class="block text-sm font-medium text-gray-700">题号</label>
             <input
               id="q_number"
               v-model.number="newQuestion.question_number"
@@ -93,9 +84,7 @@
         </div>
 
         <div>
-          <label for="q_text" class="block text-sm font-medium text-gray-700"
-            >题目内容</label
-          >
+          <label for="q_text" class="block text-sm font-medium text-gray-700">题目内容</label>
           <textarea
             id="q_text"
             v-model="newQuestion.question_text"
@@ -106,9 +95,7 @@
           ></textarea>
         </div>
         <div>
-          <label for="q_answer" class="block text-sm font-medium text-gray-700"
-            >标准答案</label
-          >
+          <label for="q_answer" class="block text-sm font-medium text-gray-700">标准答案</label>
           <textarea
             id="q_answer"
             v-model="newQuestion.standard_answer"
@@ -148,22 +135,22 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
-import { useRouter } from "vue-router";
-import gradingApi from "../services/gradingApi";
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import gradingApi from '../services/gradingApi';
 
 const router = useRouter();
 
 const step = ref(1);
-const examName = ref("");
+const examName = ref('');
 const createdExamId = ref(null);
 const questions = ref([]); // 已添加的题目列表
 
 const newQuestion = ref({
   question_number: 1,
-  question_text: "",
-  standard_answer: "",
-  rubric: "", // <--- 修改：默认为空字符串
+  question_text: '',
+  standard_answer: '',
+  rubric: '', // <--- 修改：默认为空字符串
   max_score: 10, // <--- 新增
 });
 
@@ -181,7 +168,7 @@ const handleCreateExam = async () => {
     step.value = 2; // 进入步骤二
   } catch (e) {
     console.error(e);
-    error.value = "创建试卷失败，请重试。";
+    error.value = '创建试卷失败，请重试。';
   } finally {
     isLoading.value = false;
   }
@@ -210,13 +197,13 @@ const handleAddQuestion = async () => {
 
     // 重置表单
     newQuestion.value.question_number += 1;
-    newQuestion.value.question_text = "";
-    newQuestion.value.standard_answer = "";
-    newQuestion.value.rubric = ""; // <--- 修改：重置为空字符串
+    newQuestion.value.question_text = '';
+    newQuestion.value.standard_answer = '';
+    newQuestion.value.rubric = ''; // <--- 修改：重置为空字符串
     newQuestion.value.max_score = 10; // <--- 新增：重置
   } catch (e) {
     console.error(e);
-    error.value = "添加题目失败，请重试。";
+    error.value = '添加题目失败，请重试。';
   } finally {
     isLoading.value = false;
   }
@@ -225,6 +212,6 @@ const handleAddQuestion = async () => {
 // 步骤二：完成创建
 const finishCreation = () => {
   // 跳转到新创建的试卷详情页
-  router.push({ name: "exam-detail", params: { id: createdExamId.value } });
+  router.push({ name: 'exam-detail', params: { id: createdExamId.value } });
 };
 </script>

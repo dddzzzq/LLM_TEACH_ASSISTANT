@@ -66,7 +66,7 @@ func Attention(userID uint) ([]AttentionNotice, error) {
 	assignments := map[uint]models.Assignment{}
 	if len(assignmentIDs) > 0 {
 		var rows []models.Assignment
-		if err := database.DB.Select("id", "question", "rubric").Where("id IN ?", assignmentIDs).Find(&rows).Error; err != nil {
+		if err := database.DB.Select("id", "question", "rubric").Where("id IN ? AND owner_id = ?", assignmentIDs, userID).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, row := range rows {
@@ -130,7 +130,7 @@ func FileRequirements(jobID, fileID string) (Requirements, error) {
 		return Requirements{}, ErrRequirementsChanged
 	}
 	var a models.Assignment
-	if err := database.DB.First(&a, file.AssignmentID).Error; err != nil {
+	if err := database.DB.Where("owner_id = (?)", database.DB.Model(&models.RPAJob{}).Select("user_id").Where("id = ?", jobID)).First(&a, file.AssignmentID).Error; err != nil {
 		return Requirements{}, err
 	}
 	out := Requirements{AssignmentID: a.ID, Question: a.Question, Rubric: map[string]any{}}
@@ -163,7 +163,7 @@ func SupplementRequirements(jobID, fileID, question string, rubric map[string]an
 		if err := tx.First(&a, file.AssignmentID).Error; err != nil {
 			return err
 		}
-		if a.CourseName != job.CourseName || a.TaskName != job.AssignmentName || a.ClassName != file.ClassName {
+		if a.OwnerID != job.UserID || a.CourseName != job.CourseName || a.TaskName != job.AssignmentName || a.ClassName != file.ClassName {
 			return ErrRequirementsChanged
 		}
 		return tx.Model(&a).Updates(map[string]any{"question": question, "rubric": string(encoded)}).Error

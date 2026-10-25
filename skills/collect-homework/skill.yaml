@@ -1,0 +1,6 @@
+api_version: teaching.skills/v1
+id: teaching/collect-homework
+version: 1.3.0
+entry: SKILL.md
+runtimes:
+  - portal-browser

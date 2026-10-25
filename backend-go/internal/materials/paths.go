@@ -61,6 +61,9 @@ func (s *Service) allowed(value string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("无法读取该路径或其父目录")
 	}
+	if protectedPath(path) {
+		return "", fmt.Errorf("认证状态、密钥与运行目录不能作为作业材料或输出位置")
+	}
 	for _, root := range s.AllowedRoots {
 		r, err := canonical(root)
 		if err == nil && beneath(r, path) {
@@ -68,6 +71,32 @@ func (s *Service) allowed(value string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("路径不在允许的作业目录内；请使用 D 盘作业目录或由管理员配置 HOMEWORK_ALLOWED_ROOTS")
+}
+
+func protectedPath(path string) bool {
+	root := os.Getenv("RUNTIME_DIR")
+	if root == "" {
+		root = filepath.Join("..", "..", "teaching-runtime")
+	}
+	if absolute, err := filepath.Abs(root); err == nil {
+		if resolved, err := canonical(absolute); err == nil && resolved == path {
+			return true
+		}
+	}
+	for _, name := range []string{"PORTAL_CREDENTIAL_KEY_FILE", "PORTAL_CREDENTIAL_SOCKET", "RPA_CONTROL_TOKEN_FILE"} {
+		if value := os.Getenv(name); value != "" {
+			if resolved, err := canonical(value); err == nil && resolved == path {
+				return true
+			}
+		}
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		switch strings.ToLower(part) {
+		case "portal-profiles", "portal-operations", ".portal-credential-key", ".rpa-control-token", "portal-credentials.sock":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) ValidateOutputRoot(value string) (string, error) {

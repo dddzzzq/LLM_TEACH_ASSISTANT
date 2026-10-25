@@ -1,20 +1,21 @@
-import { fileURLToPath, URL } from 'node:url'
+import { fileURLToPath, URL } from 'node:url';
 
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import path from 'path' // 导入 path 模块
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import path from 'path'; // 导入 path 模块
 
 const businessProxy = {
   target: 'http://127.0.0.1:8000',
   changeOrigin: true,
   bypass(req) {
     if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
-      return '/index.html'
+      return '/index.html';
     }
   },
-}
-const windowsMountedSource = Boolean(process.env.WSL_DISTRO_NAME) &&
-  fileURLToPath(new URL('.', import.meta.url)).startsWith('/mnt/')
+};
+const windowsMountedSource =
+  Boolean(process.env.WSL_DISTRO_NAME) &&
+  fileURLToPath(new URL('.', import.meta.url)).startsWith('/mnt/');
 
 export default defineConfig({
   plugins: [vue()],
@@ -41,11 +42,11 @@ export default defineConfig({
       '/submissions': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/exams': businessProxy,
       '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true },
-    }
+    },
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-    }
-  }
-})
+    },
+  },
+});

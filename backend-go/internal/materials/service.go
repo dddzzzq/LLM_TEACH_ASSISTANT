@@ -134,7 +134,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string
 	}
 	if r.AssignmentID != 0 {
 		var a models.Assignment
-		if err := s.DB.WithContext(ctx).First(&a, r.AssignmentID).Error; err != nil {
+		if err := s.DB.WithContext(ctx).Where("owner_id = ?", actor.UserID).First(&a, r.AssignmentID).Error; err != nil {
 			return batch, fmt.Errorf("作业不存在")
 		}
 		if r.SourceJobID != "" && (r.CourseName != a.CourseName || r.AssignmentName != a.TaskName || r.ClassName != a.ClassName) {
@@ -144,7 +144,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string
 	}
 	if r.AssignmentID == 0 && r.ClassName != "" {
 		var matches []models.Assignment
-		if err := s.DB.WithContext(ctx).Where("course_name = ? AND task_name = ? AND class_name = ?", r.CourseName, r.AssignmentName, r.ClassName).Limit(2).Find(&matches).Error; err != nil {
+		if err := s.DB.WithContext(ctx).Where("owner_id = ? AND course_name = ? AND task_name = ? AND class_name = ?", actor.UserID, r.CourseName, r.AssignmentName, r.ClassName).Limit(2).Find(&matches).Error; err != nil {
 			return batch, err
 		}
 		if len(matches) == 1 {

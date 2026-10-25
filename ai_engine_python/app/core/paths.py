@@ -1,4 +1,5 @@
 """Resolve deployment paths independently of the process working directory."""
+
 import os
 from pathlib import Path
 

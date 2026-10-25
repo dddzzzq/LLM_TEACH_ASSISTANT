@@ -37,7 +37,11 @@ playwright-report/
 test-results/
 /backend-go/grading-gateway
 /backend-go/test_build
-docs/
+*.test
+*.out
+
+# Keep reviewed design documents; local/generated documents stay untracked.
+/docs/*
 !/docs/tool-skill-boundaries.md
 !/docs/grading-skills.md
 !/docs/tool-skill-management-design.md
@@ -46,8 +50,9 @@ docs/
 !/docs/rpa-implementation.md
 !/docs/homework-materials-workflow.md
 !/docs/logbook.md
-*.test
-*.out
+!/docs/execution-records.md
+!/docs/teacher-portal-automation-design.md
+!/docs/teacher-portal-automation.md
 
 # Uploaded homework, exam data and runtime files
 uploads/
@@ -99,6 +104,10 @@ Makefile
 
 # Local browser control secret
 .rpa-control-token
+.portal-credential-key
+portal-credentials.sock
+portal-profiles/
+portal-operations/
 
 # Codex local tests and diagnostic scripts
 /codex-local/

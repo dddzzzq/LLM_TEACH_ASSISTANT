@@ -37,7 +37,7 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 			return Result{}, err
 		}
 		var a models.Assignment
-		if database.DB.WithContext(ctx).First(&a, id).Error != nil {
+		if database.DB.WithContext(ctx).Where("owner_id = ?", actor.UserID).First(&a, id).Error != nil {
 			return Result{}, fmt.Errorf("作业不存在")
 		}
 		if a.CourseName != batch.CourseName || a.TaskName != batch.AssignmentName || (batch.ClassName != "" && a.ClassName != batch.ClassName) {

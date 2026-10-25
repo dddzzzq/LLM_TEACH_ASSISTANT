@@ -4,16 +4,17 @@ import threading
 from typing import List, Dict, Any, Tuple
 
 # paddleocr在处理并发时候的报错处理
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['KMP_WARNINGS'] = '0'
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["KMP_WARNINGS"] = "0"
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class OCRService:
     _instance = None
-    _lock = threading.Lock() # 类级别的锁，确保多线程并发时 C++ 底层安全
+    _lock = threading.Lock()  # 类级别的锁，确保多线程并发时 C++ 底层安全
 
     def __new__(cls):
         if cls._instance is None:
@@ -28,18 +29,19 @@ class OCRService:
         try:
             # Paddle/ModelScope also imports Torch. On Windows loading Paddle
             # first can bind incompatible DLLs before Torch initializes them.
-            if os.name == 'nt':
+            if os.name == "nt":
                 import torch
             from paddleocr import PaddleOCR
             import logging as pd_logging
-            pd_logging.getLogger('ppocr').setLevel(pd_logging.ERROR)
+
+            pd_logging.getLogger("ppocr").setLevel(pd_logging.ERROR)
 
             self.ocr = PaddleOCR(
-                device=os.environ.get('OCR_DEVICE', 'cpu'),
+                device=os.environ.get("OCR_DEVICE", "cpu"),
                 use_doc_orientation_classify=True,
                 use_doc_unwarping=True,
                 use_textline_orientation=True,
-                lang='ch'
+                lang="ch",
             )
             logger.info("OCR 引擎加载成功")
         except Exception as e:
@@ -56,9 +58,9 @@ class OCRService:
                     return []
 
                 data_dict = result_pages[0]
-                texts = data_dict.get('rec_texts', [])
-                scores = data_dict.get('rec_scores', [])
-                polys = data_dict.get('rec_polys', [])
+                texts = data_dict.get("rec_texts", [])
+                scores = data_dict.get("rec_scores", [])
+                polys = data_dict.get("rec_polys", [])
 
                 if not (len(texts) == len(scores) == len(polys)):
                     min_len = min(len(texts), len(scores), len(polys))
@@ -78,7 +80,7 @@ class OCRService:
         """批量处理多张图片并拼接文本"""
         all_text = []
         for i, img_path in enumerate(image_path_list):
-            all_text.append(f"--- 图片 {i+1} 开始 ---")
+            all_text.append(f"--- 图片 {i + 1} 开始 ---")
 
             # 调用 process_image 时会自动触发排队锁
             results = self.process_image(img_path)
@@ -89,7 +91,7 @@ class OCRService:
                 for line in results:
                     text, confidence = line[1]
                     all_text.append(text)
-            all_text.append(f"--- 图片 {i+1} 结束 ---")
+            all_text.append(f"--- 图片 {i + 1} 结束 ---")
 
         return "\n".join(all_text)
 
@@ -100,5 +102,5 @@ except Exception as e:
     logger.error(f"创建 OCR 服务失败: {e}")
     ocr_service_instance = None
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logger.info("OCR 模块已加载")

@@ -43,9 +43,7 @@
             required
             @change="handleFileChange"
           />
-          <p v-if="fileName" class="mt-2 text-sm text-green-600">
-            已选择文件: {{ fileName }}
-          </p>
+          <p v-if="fileName" class="mt-2 text-sm text-green-600"> 已选择文件: {{ fileName }} </p>
           <button
             type="submit"
             :disabled="isSubmitting"
@@ -58,18 +56,28 @@
         <div
           v-if="submissionMessage"
           class="p-3 mt-4 rounded-md"
-          :class="
-            submissionError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-          "
+          :class="submissionError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'"
         >
           {{ submissionMessage }}
         </div>
-        <MaterialBatchPanel :assignment-id="props.id" :refresh-key="materialsVersion" @results="showBatchResults" />
+        <MaterialBatchPanel
+          :assignment-id="props.id"
+          :refresh-key="materialsVersion"
+          @results="showBatchResults"
+        />
       </div>
 
       <div class="p-5 md:p-7 surface">
         <div class="flex items-center justify-between mb-4">
-          <div><h2 class="text-2xl font-bold text-gray-800">评分结果</h2><p v-if="resultsBatchId" class="text-xs text-slate-500 mt-2">仅显示批次 {{ resultsBatchId }} <button class="text-blue-700 ml-2" @click="showBatchResults('')">查看全部批次</button></p></div>
+          <div
+            ><h2 class="text-2xl font-bold text-gray-800">评分结果</h2
+            ><p v-if="resultsBatchId" class="text-xs text-slate-500 mt-2"
+              >仅显示批次 {{ resultsBatchId }}
+              <button class="text-blue-700 ml-2" @click="showBatchResults('')"
+                >查看全部批次</button
+              ></p
+            ></div
+          >
           <div class="flex items-center gap-4">
             <button
               @click="exportResults"
@@ -104,40 +112,26 @@
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   学号 & 姓名
                 </th>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   分数
                 </th>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   查重报告
                 </th>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   AIGC检测
                 </th>
                 <!-- +++ 新增列 +++ -->
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   代码/文档匹配度
                 </th>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                   评语
                 </th>
-                <th
-                  class="px-6 py-3 text-xs font-medium text-right text-gray-500 uppercase"
-                >
+                <th class="px-6 py-3 text-xs font-medium text-right text-gray-500 uppercase">
                   操作
                 </th>
               </tr>
@@ -146,7 +140,10 @@
               <tr v-for="result in sortedResults" :key="result.id">
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                   <div class="flex items-center">
-                    <span>{{ result.student_id }}{{ result.student_name ? ' - ' + result.student_name : '' }}</span>
+                    <span
+                      >{{ result.student_id
+                      }}{{ result.student_name ? ' - ' + result.student_name : '' }}</span
+                    >
                     <svg
                       v-if="result.is_human_reviewed"
                       xmlns="http://www.w3.org/2000/svg"
@@ -174,7 +171,7 @@
                   "
                 >
                   {{
-                    (result.is_human_reviewed && typeof result.human_score === "number"
+                    (result.is_human_reviewed && typeof result.human_score === 'number'
                       ? result.human_score
                       : result.score
                     ).toFixed(1)
@@ -294,15 +291,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
-import { useRoute } from "vue-router";
-import gradingApi from "../services/gradingApi";
-import Loader from "../components/Loader.vue";
-import ReportModal from "../components/ReportModal.vue";
-import ReviewModal from "../components/ReviewModal.vue";
-import MaterialBatchPanel from "../components/MaterialBatchPanel.vue";
-const materialsVersion=ref(0);
-const resultsBatchId=ref('');
+import { ref, onMounted, computed } from 'vue';
+import { useRoute } from 'vue-router';
+import gradingApi from '../services/gradingApi';
+import Loader from '../components/Loader.vue';
+import ReportModal from '../components/ReportModal.vue';
+import ReviewModal from '../components/ReviewModal.vue';
+import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
+const materialsVersion = ref(0);
+const resultsBatchId = ref('');
 
 // --- 接口 ---
 interface CodeDocMatchReport {
@@ -355,39 +352,39 @@ const assignment = ref<Assignment | null>(null);
 const results = ref<SubmissionResult[]>([]);
 const selectedSubmission = ref<SubmissionResult | null>(null);
 const file = ref<File | null>(null);
-const fileName = ref("");
+const fileName = ref('');
 const isLoadingAssignment = ref(true);
 const isLoadingResults = ref(false);
 const isSubmitting = ref(false);
 const isModalVisible = ref(false);
 const error = ref<string | null>(null);
-const submissionMessage = ref("");
+const submissionMessage = ref('');
 const submissionError = ref(false);
-const reportType = ref("feedback");
+const reportType = ref('feedback');
 const isReviewModalVisible = ref(false);
 const submissionToReview = ref<SubmissionResult | null>(null);
 const isExporting = ref(false);
 
 const exportResults = async () => {
   if (results.value.length === 0) {
-    alert("没有可导出的评分结果");
+    alert('没有可导出的评分结果');
     return;
   }
   isExporting.value = true;
   try {
-    const response = await gradingApi.exportAssignment(props.id,resultsBatchId.value);
-    const blob = new Blob([response.data], { type: response.headers["content-type"] });
+    const response = await gradingApi.exportAssignment(props.id, resultsBatchId.value);
+    const blob = new Blob([response.data], { type: response.headers['content-type'] });
 
-    const contentDisposition = response.headers["content-disposition"];
-    let filename = `${assignment.value?.task_name || "assignment"}_results.xlsx`;
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = `${assignment.value?.task_name || 'assignment'}_results.xlsx`;
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
       if (filenameMatch && filenameMatch.length > 1) {
-        filename = decodeURIComponent(filenameMatch[1].replace(/['"]/g, ""));
+        filename = decodeURIComponent(filenameMatch[1].replace(/['"]/g, ''));
       }
     }
 
-    const link = document.createElement("a");
+    const link = document.createElement('a');
     link.href = window.URL.createObjectURL(blob);
     link.download = filename;
     document.body.appendChild(link);
@@ -396,11 +393,11 @@ const exportResults = async () => {
     window.URL.revokeObjectURL(link.href);
   } catch (e: any) {
     if (e.response && e.response.status === 404) {
-      alert("导出失败: 该作业没有任何评分结果。");
+      alert('导出失败: 该作业没有任何评分结果。');
     } else {
-      alert("导出失败，请检查网络或联系管理员。");
+      alert('导出失败，请检查网络或联系管理员。');
     }
-    console.error("导出时发生错误:", e);
+    console.error('导出时发生错误:', e);
   } finally {
     isExporting.value = false;
   }
@@ -408,8 +405,8 @@ const exportResults = async () => {
 
 const sortedResults = computed(() => {
   return [...results.value].sort((a, b) => {
-    const scoreA = typeof a.human_score === "number" ? a.human_score : a.score;
-    const scoreB = typeof b.human_score === "number" ? b.human_score : b.score;
+    const scoreA = typeof a.human_score === 'number' ? a.human_score : a.score;
+    const scoreB = typeof b.human_score === 'number' ? b.human_score : b.score;
     return scoreB - scoreA;
   });
 });
@@ -421,7 +418,7 @@ const fetchAssignmentDetails = async () => {
     assignment.value = response.data;
     results.value = response.data.submissions || [];
   } catch (e) {
-    error.value = "无法加载作业详情。";
+    error.value = '无法加载作业详情。';
     console.error(e);
   } finally {
     isLoadingAssignment.value = false;
@@ -431,35 +428,38 @@ const fetchAssignmentDetails = async () => {
 const fetchResults = async () => {
   isLoadingResults.value = true;
   try {
-    const response = await gradingApi.getResultsForAssignment(props.id,resultsBatchId.value);
+    const response = await gradingApi.getResultsForAssignment(props.id, resultsBatchId.value);
     // 添加 || []，防止 Go 后端返回 null 导致前端崩溃
     results.value = response.data || [];
   } catch (e) {
-    console.error("无法加载结果:", e);
+    console.error('无法加载结果:', e);
   } finally {
     isLoadingResults.value = false;
   }
 };
 
-const showBatchResults = async (batchId: string) => { resultsBatchId.value=batchId;await fetchResults(); };
+const showBatchResults = async (batchId: string) => {
+  resultsBatchId.value = batchId;
+  await fetchResults();
+};
 
 const submitBatchFile = async () => {
   if (!file.value) return;
   isSubmitting.value = true;
-  submissionMessage.value = "";
+  submissionMessage.value = '';
   submissionError.value = false;
   const formData = new FormData();
-  formData.append("batch_file", file.value);
+  formData.append('batch_file', file.value);
   try {
     const response = await gradingApi.submitBatch(props.id, formData);
     submissionMessage.value = response.data.message;
     materialsVersion.value++;
-    fileName.value = "";
+    fileName.value = '';
     file.value = null;
-    (document.getElementById("file-upload") as HTMLInputElement).value = "";
+    (document.getElementById('file-upload') as HTMLInputElement).value = '';
   } catch (e: any) {
     submissionError.value = true;
-    submissionMessage.value = e.response?.data?.detail || "提交失败。";
+    submissionMessage.value = e.response?.data?.detail || '提交失败。';
   } finally {
     isSubmitting.value = false;
   }
@@ -473,7 +473,7 @@ const deleteSingleResult = async (submissionId: number) => {
       await gradingApi.deleteSubmission(submissionId);
       results.value = results.value.filter((r) => r.id !== submissionId);
     } catch (e) {
-      alert("删除失败，请重试。");
+      alert('删除失败，请重试。');
       console.error(e);
     }
   }
@@ -486,7 +486,7 @@ const deleteAllResults = async () => {
       await gradingApi.deleteAllSubmissions(props.id);
       results.value = [];
     } catch (e) {
-      alert("清空失败，请重试。");
+      alert('清空失败，请重试。');
     }
   }
 };
@@ -527,15 +527,15 @@ const handleSaveReview = async (updatedData: {
     }
     isReviewModalVisible.value = false;
   } catch (e) {
-    alert("保存失败，请重试。");
+    alert('保存失败，请重试。');
     console.error(e);
   }
 };
 
 const getScoreColor = (score: number) => {
-  if (score >= 85) return "text-green-600";
-  if (score >= 60) return "text-yellow-600";
-  return "text-red-600";
+  if (score >= 85) return 'text-green-600';
+  if (score >= 60) return 'text-yellow-600';
+  return 'text-red-600';
 };
 
 const getMaxLlmScore = (reports?: PlagiarismReport[]): number => {
@@ -552,41 +552,41 @@ const formatPlagiarismSummary = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
   if (maxScore > 85) return `高度疑似 (${maxScore}分)`;
   if (maxScore > 70) return `中度疑似 (${maxScore}分)`;
-  return "无风险";
+  return '无风险';
 };
 
 const getPlagiarismSummaryClass = (reports?: PlagiarismReport[]): string => {
   const maxScore = getMaxLlmScore(reports);
-  if (maxScore >= 85) return "text-red-600";
-  if (maxScore >= 70) return "text-yellow-600";
-  return "text-green-600";
+  if (maxScore >= 85) return 'text-red-600';
+  if (maxScore >= 70) return 'text-yellow-600';
+  return 'text-green-600';
 };
 
 const formatAIGC = (report?: AIGCReport): string => {
-  if (!report) return "未检测";
+  if (!report) return '未检测';
   const probability = (report.ai_probability * 100).toFixed(1);
-  const source = report.detection_source ? ` (${report.detection_source})` : "";
+  const source = report.detection_source ? ` (${report.detection_source})` : '';
   return `${probability}% AI生成${source}`;
 };
 
 const getAIGCColor = (report?: AIGCReport): string => {
-  if (!report) return "text-gray-400";
+  if (!report) return 'text-gray-400';
   const probPercent = report.ai_probability * 100;
-  if (probPercent > 80) return "text-red-600";
-  if (probPercent > 50) return "text-yellow-600";
-  return "text-green-600";
+  if (probPercent > 80) return 'text-red-600';
+  if (probPercent > 50) return 'text-yellow-600';
+  return 'text-green-600';
 };
 
 const formatCodeDocMatch = (report?: CodeDocMatchReport): string => {
-  if (!report) return "未检测";
+  if (!report) return '未检测';
   return `${report.score}分`;
 };
 
 const getCodeDocMatchColor = (report?: CodeDocMatchReport): string => {
-  if (!report) return "text-gray-400";
-  if (report.score < 50) return "text-red-600";
-  if (report.score < 70) return "text-yellow-600";
-  return "text-green-600";
+  if (!report) return 'text-gray-400';
+  if (report.score < 50) return 'text-red-600';
+  if (report.score < 70) return 'text-yellow-600';
+  return 'text-green-600';
 };
 
 onMounted(fetchAssignmentDetails);

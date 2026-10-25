@@ -6,10 +6,7 @@
     <div
       class="relative w-full max-w-4xl max-h-[90vh] p-6 mx-4 bg-white rounded-lg shadow-xl overflow-y-auto"
     >
-      <button
-        @click="close"
-        class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-      >
+      <button @click="close" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="h-6 w-6"
@@ -36,11 +33,7 @@
 
       <div v-if="reportType === 'plagiarism'">
         <h2 class="text-2xl font-bold text-gray-800 mb-4">抄袭检测详细报告</h2>
-        <div
-          v-if="
-            !submission.plagiarism_reports || submission.plagiarism_reports.length === 0
-          "
-        >
+        <div v-if="!submission.plagiarism_reports || submission.plagiarism_reports.length === 0">
           <p class="text-gray-600">未发现与该学生相关的可疑抄袭记录。</p>
         </div>
         <div v-else class="space-y-6">
@@ -51,20 +44,16 @@
           >
             <h3 class="text-lg font-bold mb-2" :class="getReportHeaderClass(report)">
               与 {{ report.similar_to }} 的
-              {{ report.content_type === "code" ? "代码" : "文本" }} 相似度分析
+              {{ report.content_type === 'code' ? '代码' : '文本' }} 相似度分析
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div class="p-3 bg-gray-50 rounded">
                 <p class="text-sm text-gray-500">初步语义相似度</p>
-                <p class="text-xl font-bold">
-                  {{ (report.initial_score * 100).toFixed(1) }}%
-                </p>
+                <p class="text-xl font-bold"> {{ (report.initial_score * 100).toFixed(1) }}% </p>
               </div>
               <div class="p-3 bg-gray-50 rounded">
                 <p class="text-sm text-gray-500">LLM 综合评估分数</p>
-                <p class="text-xl font-bold">
-                  {{ report.llm_analysis.similarity_score }} / 100
-                </p>
+                <p class="text-xl font-bold"> {{ report.llm_analysis.similarity_score }} / 100 </p>
               </div>
               <!-- +++ 新增代码/文档匹配度得分展示 +++ -->
               <div class="p-3 bg-gray-50 rounded" v-if="submission.code_doc_match_report">
@@ -87,9 +76,7 @@
             <!-- +++ 新增代码/文档匹配度理由展示 +++ -->
             <div class="mt-4" v-if="submission.code_doc_match_report">
               <h4 class="font-semibold text-gray-700">代码/文档匹配度分析理由:</h4>
-              <p
-                class="mt-1 p-3 bg-yellow-50 text-gray-700 rounded-md whitespace-pre-wrap"
-              >
+              <p class="mt-1 p-3 bg-yellow-50 text-gray-700 rounded-md whitespace-pre-wrap">
                 {{ submission.code_doc_match_report.reasoning }}
               </p>
             </div>
@@ -132,10 +119,10 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from 'vue';
 
 const props = defineProps({ submission: Object, reportType: String });
-const emit = defineEmits(["close"]);
+const emit = defineEmits(['close']);
 
 const sortedPlagiarismReports = computed(() => {
   if (!props.submission || !props.submission.plagiarism_reports) {
@@ -148,20 +135,18 @@ const sortedPlagiarismReports = computed(() => {
   });
 });
 
-const close = () => emit("close");
+const close = () => emit('close');
 const getReportHeaderClass = (report) => {
-  if (report.llm_analysis && report.llm_analysis.similarity_score >= 85)
-    return "text-red-600";
-  if (report.llm_analysis && report.llm_analysis.similarity_score >= 70)
-    return "text-yellow-600";
-  return "text-gray-800";
+  if (report.llm_analysis && report.llm_analysis.similarity_score >= 85) return 'text-red-600';
+  if (report.llm_analysis && report.llm_analysis.similarity_score >= 70) return 'text-yellow-600';
+  return 'text-gray-800';
 };
 
 // +++ 新增辅助函数 +++
 const getCodeDocMatchColor = (report) => {
-  if (!report) return "text-gray-400";
-  if (report.score < 50) return "text-red-600";
-  if (report.score < 70) return "text-yellow-600";
-  return "text-green-600";
+  if (!report) return 'text-gray-400';
+  if (report.score < 50) return 'text-red-600';
+  if (report.score < 70) return 'text-yellow-600';
+  return 'text-green-600';
 };
 </script>

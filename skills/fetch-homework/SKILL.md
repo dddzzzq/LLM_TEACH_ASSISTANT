@@ -1,11 +1,21 @@
 ---
 name: fetch-homework
-description: Guide the browser Agent through locating a requested Xidian course and assignment for attachment export after human login. Use within an existing download task, not for general questions about downloading homework.
+description: 在现有任务浏览器完成已保存账号的登录认证，或定位指定课程与作业并打开附件导出；使用原页面 Agent，不创建独立流程。
 ---
 
 此 Skill 为页面导航 Agent 提供西电教学平台的业务操作知识。输入为目标课程、作业名称、可选学期、当前阶段和页面观察。它不创建后台任务、不注册工具，也不定义动作参数协议。
 
-用户负责完整登录和验证码；任务控制器负责班级确认、导出提交、导出关联及文件传输。依据运行时提供的工具协议选择动作。
+有 authentication.credentials_saved 时，先观察当前认证页面：login_form 为 true 且 credentials_filled 为 false，调用 fill_portal_credentials，由 Worker 内部读取已保存账号密码并提交。需要验证码时调用 request_login_code，教师在原任务浏览器填写后交还自动化，再调用 submit_login_code；已获取但未填写或填写无效时请求本人输入。trust_prompt 为 true 时用 apply_device_trust，按教师设置选择信任设备。无已保存凭据时保留原人工登录。密码和验证码不经过聊天或模型参数。
+
+credentials_filled 为 true 后，不再调用 fill_portal_credentials。根据当前页面继续认证；官网显示中英文验证码错误时，不通过重复填写或滚动尝试恢复。账号填写动作会等待官网异步验证检查完成，再提交登录，后续继续复用原验证工具。
+
+首次连接任务（task_type=AUTH_BOOTSTRAP）只完成认证，由执行器核验后结束；不要继续下载。正常下载继续原业务流程。任务控制器默认自动选择全部班级，负责导出提交、导出关联及文件传输。
+
+target.portal 存在时，根据课程、班级及作业的官网 ID 结合 platform_ids 区分同名记录。只选择匹配 ID 的当前页面入口，不构造直达地址，不用相同名称替换另一条官网记录。没有 ID 的原任务保留名称匹配和教师确认。
+
+旧卡片可能只暴露名称和脚本入口。可以按目标名称、学期与上下文进入该只读页面，由执行器核验跳转后的官网 ID；进入页面本身不等于已确认课程/作业，不能跳过后续 ID 核验而导出附件。
+
+SOLVE_CAPTCHA 阶段：先读取 observation.captcha。仅当 visible=true 且 attempts_remaining>0 时调用无参数的 solve_slider_captcha；存在歧义或需要其他验证时使用 request_human。该阶段不使用 click、fill、scroll 或页面切换操作验证码，不提取图片、不生成拖动轨迹、不索取账号密码。本轮总尝试次数由执行器限制为三次，失败后交给用户，不能反复调用或恢复任务绕过预算。人工控制期间不自动处理。滑块消失仅说明挑战可能完成，完整登录状态以执行器核验为准；登录核验通过后沿现有页面继续定位课程和作业。
 
 先阅读完整页面基础信息，再按下面的业务目标推进。门户→个人空间→课程→作业菜单→指定作业批阅入口→更多菜单→导出作业附件是业务流程；按钮样式、CSS 类名、DOM 层级及菜单位置可以变化。
 
@@ -24,4 +34,4 @@ coverage.truncated 表示模型观察经过长度控制，不表示页面不存�
 
 element_ref 只对当前观察有效。一次只推进一个动作，每次动作后重新观察页面基础信息，并按整个业务流程更新当前阶段。优先选择与目标名称精确对应的控件；context 和 context_labels 是控件局部的业务信息。不要仅因页面外观或类名变化请求人工；确实无法消歧、缺少目标核验或无明确进展时再交接。
 减少重复交接：target_evidence 已确认的课程和作业直接沿当前流程继续。recent_actions 出现暂时失败或 unknown 时，先核对当前观察是否已到达目标，再选择其他可验证的导航入口；不重放旧动作，也不因一次超时立即请求人工。不要把班级勾选或附件选项异常解释为“需要再次确认当前作业”。相同按钮若确实翻页或使页面内容改变，属于有效进展。
-进入导出设置即完成当前导航阶段；导出必须由任务控制器按已确认班级范围提交。不要声称文件已下载，完成状态以执行器核验为准。没有明确进展、遇到歧义或认证挑战时请求人工操作。
+进入导出设置即完成当前导航阶段；导出必须由任务控制器默认按全部班级范围提交，不请求教师选择或确认班级；已保存的历史指定班级任务保留原范围。不要声称文件已下载，完成状态以执行器核验为准。没有明确进展、遇到歧义、滑块处理失败或其他认证挑战时请求人工操作。

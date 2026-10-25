@@ -67,6 +67,6 @@ flowchart TD
 
 ## 验证
 
-在 `backend-go/` 运行 `go test ./...`，重点回归在 `internal/agent/runtime_test.go`、`internal/grading/service_test.go` 和 `internal/tools/examProcess_test.go`。覆盖按需加载、同批调用顺序限制、身份限制、学生查询范围、原生工具消息、任务幂等、缺项不提交、发布失败、OCR/评分异常及成功评分。
+在 `backend-go/` 运行 `go test ./...`，重点回归在 `internal/agent/runtime_test.go`、`internal/grading/service_test.go` 和 `internal/tools/exam_process_test.go`。覆盖按需加载、同批调用顺序限制、身份限制、学生查询范围、原生工具消息、任务幂等、缺项不提交、发布失败、OCR/评分异常及成功评分。
 
 并发评分回归可运行 `go test -race ./internal/agent ./internal/grading ./internal/tools`。前端在 `vue-grading-frontend/` 执行 `npm run build`；浏览器使用模拟 API 验证普通批改卡片、详情链接与 RPA 事件分流，不写入真实成绩。模拟测试不代表已经完成真实官网、在线模型和生产消息队列的端到端验证。

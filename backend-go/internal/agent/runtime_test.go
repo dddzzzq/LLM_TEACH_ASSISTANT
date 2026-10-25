@@ -148,3 +148,59 @@ func TestModelClientPreservesNativeToolMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type catalogSyncRuntimeTool struct{ runtimeTool }
+
+func (t *catalogSyncRuntimeTool) SubmitsJob() bool { return true }
+func (t *catalogSyncRuntimeTool) Execute(args string) (string, error) {
+	t.calls++
+	return `{"outcome":"accepted","job_id":"sync-fixture-job","job_type":"portal_catalog_sync","result_url":"/settings/portal"}`, nil
+}
+
+func TestSubmittedTaskRejectsToolMarkupAndUsesReceipt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response LLMResponse
+	}{
+		{"dsml", LLMResponse{Content: "<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name=\"get_portal_connection\">\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>"}},
+		{"ascii_dsml", LLMResponse{Content: "<||DSML||calls>"}},
+		{"unexpected_tool_call", *calls("get_portal_connection", `{}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := &catalogSyncRuntimeTool{runtimeTool{name: "sync_portal_catalog"}}
+			registry := NewToolRegistry()
+			registry.Register(tool)
+			rounds := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Messages   []map[string]any `json:"messages"`
+					Tools      []map[string]any `json:"tools"`
+					ToolChoice string           `json:"tool_choice"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				rounds++
+				response := calls("sync_portal_catalog", `{}`)
+				if rounds == 1 {
+					if len(body.Tools) == 0 || body.ToolChoice != "auto" {
+						t.Error("initial tool calling was disabled")
+					}
+				} else {
+					last := body.Messages[len(body.Messages)-1]
+					if rounds != 2 || len(body.Tools) != 0 || body.ToolChoice != "none" || last["role"] != "system" || !strings.Contains(last["content"].(string), "本轮任务已受理") {
+						t.Error("accepted task did not enter final reply phase")
+					}
+					response = &tc.response
+				}
+				json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]any{"content": response.Content, "tool_calls": response.ToolCalls}}}})
+			}))
+			defer server.Close()
+			t.Setenv("AGENT_MODEL_URL", server.URL)
+			result, err := RunDialogue(context.Background(), "policy", "刷新目录", "teacher", "teacher", registry, registry.ExportAllTools(), nil, NewDeepSeekClient("fixture").CallMessages)
+			if err != nil || tool.calls != 1 || rounds != 2 || result.JobID != "sync-fixture-job" || !strings.Contains(result.Reply, "已提交教务目录同步任务") || !strings.Contains(result.Reply, result.JobID) || strings.Contains(result.Reply, "DSML") {
+				t.Fatalf("result=%+v calls=%d rounds=%d err=%v", result, tool.calls, rounds, err)
+			}
+		})
+	}
+}

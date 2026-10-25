@@ -6,7 +6,7 @@ const apiClient = authApi.getClient();
 
 export default {
   // --- 现有作业 (Assignments) API ---
-  
+
   gradeHomework(formData) {
     return apiClient.post('/homework/grade', formData, {
       headers: {
@@ -39,10 +39,12 @@ export default {
     });
   },
 
-  getResultsForAssignment(assignmentId,batchId='') {
-    return apiClient.get(`/assignments/${assignmentId}/results`,{params:batchId ? {batch_id:batchId} : {}});
+  getResultsForAssignment(assignmentId, batchId = '') {
+    return apiClient.get(`/assignments/${assignmentId}/results`, {
+      params: batchId ? { batch_id: batchId } : {},
+    });
   },
-  
+
   deleteAllSubmissions(assignmentId) {
     return apiClient.delete(`/assignments/${assignmentId}/results`);
   },
@@ -55,10 +57,10 @@ export default {
     return apiClient.put(`/submissions/${submissionId}`, updateData);
   },
 
-  exportAssignment(assignmentId,batchId='') {
+  exportAssignment(assignmentId, batchId = '') {
     return apiClient.get(`/assignments/${assignmentId}/export`, {
       responseType: 'blob', // 重要：告诉axios期望一个blob
-      params:batchId ? {batch_id:batchId} : {},
+      params: batchId ? { batch_id: batchId } : {},
     });
   },
 
@@ -135,15 +137,15 @@ export default {
   },
   /**
    * 删除特定学生的评分结果
-   * @param {string|number} examId 
-   * @param {string|number} studentExamId 
+   * @param {string|number} examId
+   * @param {string|number} studentExamId
    */
   deleteStudentExamResult(examId, studentExamId) {
     return apiClient.delete(`/exams/${examId}/results/${studentExamId}`);
   },
 
   // --- 异步任务状态查询 API ---
-  
+
   /**
    * 查询异步任务状态
    * @param {string} jobId - 任务ID
@@ -151,6 +153,4 @@ export default {
   getJobStatus(jobId) {
     return apiClient.get(`/api/jobs/${jobId}`);
   },
-
 };
-

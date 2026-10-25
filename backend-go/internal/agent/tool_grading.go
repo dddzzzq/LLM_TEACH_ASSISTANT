@@ -85,7 +85,7 @@ func (t *GradingTool) ExecuteContext(ctx context.Context, args string) (string, 
 		switch p.Kind {
 		case "homework":
 			var rows []models.Assignment
-			if err := database.DB.WithContext(ctx).Select("id", "course_name", "class_name", "task_name").Where("course_name LIKE ? OR task_name LIKE ?", "%"+query+"%", "%"+query+"%").Order("id DESC").Limit(30).Find(&rows).Error; err != nil {
+			if err := database.DB.WithContext(ctx).Select("id", "course_name", "class_name", "task_name").Where("owner_id = ? AND (course_name LIKE ? OR task_name LIKE ?)", t.Actor.UserID, "%"+query+"%", "%"+query+"%").Order("id DESC").Limit(30).Find(&rows).Error; err != nil {
 				return "", err
 			}
 			for _, a := range rows {

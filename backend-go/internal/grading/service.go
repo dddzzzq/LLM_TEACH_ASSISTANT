@@ -145,6 +145,9 @@ func (s Service) Check(ctx context.Context, actor Actor, kind, resourceID string
 		if err != nil {
 			return Result{}, fmt.Errorf("作业不存在或读取失败")
 		}
+		if a.OwnerID != actor.UserID {
+			return Result{}, fmt.Errorf("作业不存在或无权批改；历史作业需管理员分配归属")
+		}
 		missing = HomeworkMissing(a)
 		resultURL = fmt.Sprintf("/assignments/%d", id)
 	case "exam":

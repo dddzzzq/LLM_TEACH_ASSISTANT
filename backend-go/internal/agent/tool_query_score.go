@@ -10,7 +10,10 @@ import (
 )
 
 // QueryStudentScoreTool 查询学生成绩的工具
-type QueryStudentScoreTool struct{}
+type QueryStudentScoreTool struct {
+	UserID uint
+	Role   string
+}
 
 // Name 返回工具名称
 func (s *QueryStudentScoreTool) Name() string {
@@ -54,7 +57,14 @@ func (s *QueryStudentScoreTool) Execute(args string) (string, error) {
 
 	// 查询作业提交记录
 	var submissions []models.Submission
-	if err := database.DB.Where("student_id = ?", studentID).Find(&submissions).Error; err != nil {
+	if s.UserID == 0 || database.DB == nil || (s.Role != "teacher" && s.Role != "admin" && s.Role != "student") {
+		return "当前用户或成绩服务不可用", nil
+	}
+	query := database.DB.Where("student_id = ?", studentID)
+	if s.Role == "teacher" {
+		query = query.Where("assignment_id IN (SELECT id FROM assignments WHERE owner_id = ?)", s.UserID)
+	}
+	if err := query.Find(&submissions).Error; err != nil {
 		// 数据库查询错误，返回友好提示
 		return fmt.Sprintf("查询学生 %s 的作业记录时发生错误，请稍后重试。", studentID), nil
 	}

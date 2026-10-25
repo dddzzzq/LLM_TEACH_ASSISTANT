@@ -30,6 +30,8 @@ func InitDB(dsn string) {
 		&models.User{},
 		&models.ChatSession{},
 		&models.ChatMessage{},
+		&models.AgentRun{},
+		&models.AgentEvent{},
 		&models.ToolDefinition{},
 		&models.Assignment{},
 		&models.Submission{},
@@ -43,6 +45,16 @@ func InitDB(dsn string) {
 		&models.RPAJob{},
 		&models.RPAFile{},
 		&models.MaterialBatch{},
+		&models.PortalConnection{},
+		&models.PortalOperation{},
+		&models.PortalOperationEvent{},
+		&models.PortalCatalogSnapshot{},
+		&models.PortalCourse{},
+		&models.PortalHomework{},
+		&models.PortalCourseClass{},
+		&models.PortalAssignmentBinding{},
+		&models.PortalWorkflow{},
+		&models.PortalWorkflowItem{},
 	)
 	if err != nil {
 		log.Fatalf("自动迁移表结构失败: %v", err)

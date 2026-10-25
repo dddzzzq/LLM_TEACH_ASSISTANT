@@ -1,14 +1,17 @@
 """Bounded semantic page inventory; never read form values or serialize HTML."""
+
 import json
 from urllib.parse import urljoin, urlsplit
 
 
-CONTROLS = ('a,button,input:not([type=hidden]):not([type=password]),select,summary,'
-            '[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],'
-            '[role=combobox],[role=treeitem],[role=option],li,dd,[onclick],[tabindex]:not([tabindex="-1"]),.grade_check,'
-            r':is(div,span,p):text-matches("^\\s*[0-9]{4}\\s*[-—–/]\\s*[0-9]{4}\\s*第[一二三123]学期\\s*$")')
-HEADINGS = 'h1,h2,h3,h4,h5,h6,[role=heading]'
-EXPORT_LABEL = r'^导出(?:作业|提交)?附件(?:\s*[（(].*[）)])?$'
+CONTROLS = (
+    "a,button,input:not([type=hidden]):not([type=password]),select,summary,"
+    "[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],"
+    '[role=combobox],[role=treeitem],[role=option],li,dd,[onclick],[tabindex]:not([tabindex="-1"]),.grade_check,'
+    r':is(div,span,p):text-matches("^\\s*[0-9]{4}\\s*[-—–/]\\s*[0-9]{4}\\s*第[一二三123]学期\\s*$")'
+)
+HEADINGS = "h1,h2,h3,h4,h5,h6,[role=heading]"
+EXPORT_LABEL = r"^导出(?:作业|提交)?附件(?:\s*[（(].*[）)])?$"
 MAX_ELEMENTS = 400
 MAX_SNAPSHOT_CHARS = 60000
 
@@ -18,18 +21,18 @@ def public_url(value):
         parsed = urlsplit(value)
         host, port_number = parsed.hostname, parsed.port
     except ValueError:
-        return ''
-    if parsed.scheme not in ('http', 'https') or not host:
-        return ''
+        return ""
+    if parsed.scheme not in ("http", "https") or not host:
+        return ""
     # Omit user info, query parameters and fragments, including signed links.
-    port = f':{port_number}' if port_number else ''
-    host = f'[{host}]' if ':' in host else host
-    return f'{parsed.scheme}://{host}{port}{parsed.path}'
+    port = f":{port_number}" if port_number else ""
+    host = f"[{host}]" if ":" in host else host
+    return f"{parsed.scheme}://{host}{port}{parsed.path}"
 
 
 # DOM names, labels and local semantic containers provide evidence independently
 # of the portal's CSS classes. Legacy cname remains an optional hint.
-FRAME_SNAPSHOT = r'''els => {
+FRAME_SNAPSHOT = r"""els => {
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const visible = e => !!e.getClientRects().length && e.getBoundingClientRect().width > 0 &&
     e.getBoundingClientRect().height > 0 && getComputedStyle(e).visibility !== 'hidden' &&
@@ -153,6 +156,19 @@ FRAME_SNAPSHOT = r'''els => {
     const options = e.matches('select') ? [...e.options].map(o=>clean(o.textContent)).slice(0,100) : null;
     const selected = e.matches('select') ? clean(e.selectedOptions[0]?.textContent) :
       (e.matches('input[readonly]') && term.test(e.value) ? clean(e.value) : '');
+    // Expose stable business IDs, never the URL query or authentication fields.
+    const source = record || e;
+    const link = e.matches('a[href]') ? e : source.querySelector('a[href]');
+    const navigation=e.getAttribute('onclick')||source.getAttribute('onclick')||'';
+    const literal=navigation.match(/["']((?:https:\/\/|\/)[^"']+)["']/)?.[1]||'';
+    let query = new URLSearchParams();
+    try { query = new URL(link?.getAttribute('href')||literal||location.href,location.href).searchParams; } catch {}
+    const attr = names => names.map(n=>e.getAttribute(n)||source.getAttribute(n)).find(Boolean)||'';
+    const param = names => [...query].find(([k])=>names.includes(k.toLowerCase()))?.[1]||'';
+    const platform_ids = {
+      course_id:attr(['data-courseid','data-course-id','courseid'])||param(['courseid']),
+      class_id:attr(['data-clazzid','data-classid','clazzid','classid'])||param(['clazzid','classid']),
+      homework_id:attr(['data-workid','data-work-id','workid'])||param(['workid','homeworkid','taskid'])};
     const item = {i,tag:e.tagName.toLowerCase(),type:e.getAttribute('type')||'',
       role:e.getAttribute('role')||nativeRole,
       name:label||selected,context:group ? String(group.innerText || '').trim().slice(0,280) : '',
@@ -165,6 +181,7 @@ FRAME_SNAPSHOT = r'''els => {
       search_submit:!!e.form && e.form.method.toLowerCase()==='get' && /^(搜索|查找|search)$/i.test(label),
       context_labels:[...new Set(labels)],context_id:group ? groups.get(group) : null,
       record_id:record ? records.get(record) : null,
+      platform_ids,
       href:e.matches('a') ? e.getAttribute('href')||'' : '',
       disabled:!!e.disabled || e.getAttribute('aria-disabled')==='true'||e.classList.contains('disabled')||e.classList.contains('is-disabled'),
       in_viewport:box.bottom>0 && box.right>0 && box.top<innerHeight && box.left<innerWidth};
@@ -180,17 +197,24 @@ FRAME_SNAPSHOT = r'''els => {
     landmarks:landmarks.slice(0,30),landmark_count:landmarks.length,
     viewport:{width:innerWidth,height:innerHeight},
     scroll:{x:Math.round(scrollX),y:Math.round(scrollY),height:document.documentElement.scrollHeight}};
-}'''
+}"""
 
 
 async def inventory(context, target, active_page=None):
     pages, frames, candidates = [], [], []
-    names = {target['course_name'], target['assignment_name']}
+    names = {target["course_name"], target["assignment_name"]}
     for pi, page in enumerate(context.pages):
         if page.is_closed():
             continue
-        pages.append({'page_id': str(pi), 'url': public_url(page.url),
-                      'title': (await page.title())[:120], 'frame_count': len(page.frames), 'active':page is active_page})
+        pages.append(
+            {
+                "page_id": str(pi),
+                "url": public_url(page.url),
+                "title": (await page.title())[:120],
+                "frame_count": len(page.frames),
+                "active": page is active_page,
+            }
+        )
         if active_page is not None and page is not active_page:
             continue  # Keep tab summaries; do not mix old portal controls into the current course page.
         for fi, frame in enumerate(page.frames):
@@ -198,33 +222,52 @@ async def inventory(context, target, active_page=None):
             # than silently expose a partial inventory as complete.
             controls = frame.locator(CONTROLS)
             data = await controls.evaluate_all(FRAME_SNAPSHOT)
-            data['headings'] = sorted(data['headings'], key=lambda h:h['text'] not in names)[:20]
-            data['landmarks'] = data['landmarks'][:10]
-            frame_id = f'p{pi}f{fi}'
-            frames.append({'frame_id': frame_id, 'page_id': str(pi), 'name': frame.name[:100],
-                           'url': public_url(frame.url), **{k:v for k,v in data.items() if k != 'controls'},
-                           'element_count': len(data['controls'])})
-            for item in data['controls']:
-                idx = item.pop('i')
-                if item['href']:
-                    item['href'] = public_url(urljoin(frame.url, item['href']))
-                group = item['context_id']
-                item['context_id'] = f'{frame_id}c{group}' if group is not None else ''
-                record = item['record_id']
-                item['record_id'] = f'{frame_id}r{record}' if record is not None else ''
-                if 'semester_menu' in item:
-                    item['semester_menu'] = f'{frame_id}m{item["semester_menu"]}'
-                ref = f'{frame_id}e{idx}'
-                candidates.append(({'ref':ref,'page_id':str(pi),'frame_id':frame_id,**item}, page, controls.nth(idx)))
+            data["headings"] = sorted(data["headings"], key=lambda h: h["text"] not in names)[:20]
+            data["landmarks"] = data["landmarks"][:10]
+            frame_id = f"p{pi}f{fi}"
+            frames.append(
+                {
+                    "frame_id": frame_id,
+                    "page_id": str(pi),
+                    "name": frame.name[:100],
+                    "url": public_url(frame.url),
+                    **{k: v for k, v in data.items() if k != "controls"},
+                    "element_count": len(data["controls"]),
+                }
+            )
+            for item in data["controls"]:
+                idx = item.pop("i")
+                if item["href"]:
+                    item["href"] = public_url(urljoin(frame.url, item["href"]))
+                group = item["context_id"]
+                item["context_id"] = f"{frame_id}c{group}" if group is not None else ""
+                record = item["record_id"]
+                item["record_id"] = f"{frame_id}r{record}" if record is not None else ""
+                if "semester_menu" in item:
+                    item["semester_menu"] = f"{frame_id}m{item['semester_menu']}"
+                ref = f"{frame_id}e{idx}"
+                candidates.append(
+                    (
+                        {"ref": ref, "page_id": str(pi), "frame_id": frame_id, **item},
+                        page,
+                        controls.nth(idx),
+                    )
+                )
+
     def priority(candidate):
         item = candidate[0]
-        if item.get('semester_kind')=='option' and item['in_viewport']: return 0
-        if item.get('semester_kind')=='trigger' and item['in_viewport']: return 1
-        if names.intersection([item['name'], *item['context_labels']]): return 2
-        if item['in_viewport'] and re_navigation(item['name']): return 3
-        return 4 if item['in_viewport'] else 5
+        if item.get("semester_kind") == "option" and item["in_viewport"]:
+            return 0
+        if item.get("semester_kind") == "trigger" and item["in_viewport"]:
+            return 1
+        if names.intersection([item["name"], *item["context_labels"]]):
+            return 2
+        if item["in_viewport"] and re_navigation(item["name"]):
+            return 3
+        return 4 if item["in_viewport"] else 5
+
     chosen = []
-    size = len(json.dumps({'pages':pages,'frames':frames}, ensure_ascii=False))
+    size = len(json.dumps({"pages": pages, "frames": frames}, ensure_ascii=False))
     for candidate in sorted(candidates, key=priority):
         extra = len(json.dumps(candidate[0], ensure_ascii=False)) + 2
         if size + extra > MAX_SNAPSHOT_CHARS:
@@ -234,26 +277,44 @@ async def inventory(context, target, active_page=None):
         if len(chosen) == MAX_ELEMENTS:
             break
     targets = {}
-    for kind, title in (('course',target['course_name']),('assignment',target['assignment_name'])):
+    for kind, title in (
+        ("course", target["course_name"]),
+        ("assignment", target["assignment_name"]),
+    ):
         groups = {}
-        for item,_,_ in candidates:
-            if title == item['name'] or title in item['context_labels']:
-                group = item['record_id'] or item['context_id'] or item['ref']
-                groups[group] = bool(target.get('term') and target['term'] in item['context'])
-        targets[kind] = {'group_count':len(groups), 'count_basis':'record',
-                         'record_ids':list(groups)[:12],
-                         'term_matches':[group for group,matched in groups.items() if matched][:2]}
-    refs = {item['ref']:(page,loc,item) for item,page,loc in chosen}
-    return {'pages':pages,'frames':frames,'elements':[item for item,_,_ in chosen],
-            'active_page_id':str(context.pages.index(active_page)) if active_page in context.pages else None,
-            'target_candidates':targets,
-            'coverage':{'total_elements':len(candidates),'included_elements':len(chosen),
-                        'truncated':len(chosen)<len(candidates),
-                        'scope':'active_page' if active_page is not None else 'all_pages',
-                        'snapshot_char_budget':MAX_SNAPSHOT_CHARS,
-                        'landmarks_truncated':any(f['landmark_count']>len(f['landmarks']) for f in frames),
-                        'headings_truncated':any(f['heading_count']>len(f['headings']) for f in frames)}}, refs
+        for item, _, _ in candidates:
+            if title == item["name"] or title in item["context_labels"]:
+                group = item["record_id"] or item["context_id"] or item["ref"]
+                groups[group] = bool(target.get("term") and target["term"] in item["context"])
+        targets[kind] = {
+            "group_count": len(groups),
+            "count_basis": "record",
+            "record_ids": list(groups)[:12],
+            "term_matches": [group for group, matched in groups.items() if matched][:2],
+        }
+    refs = {item["ref"]: (page, loc, item) for item, page, loc in chosen}
+    return {
+        "pages": pages,
+        "frames": frames,
+        "elements": [item for item, _, _ in chosen],
+        "active_page_id": str(context.pages.index(active_page))
+        if active_page in context.pages
+        else None,
+        "target_candidates": targets,
+        "coverage": {
+            "total_elements": len(candidates),
+            "included_elements": len(chosen),
+            "truncated": len(chosen) < len(candidates),
+            "scope": "active_page" if active_page is not None else "all_pages",
+            "snapshot_char_budget": MAX_SNAPSHOT_CHARS,
+            "landmarks_truncated": any(f["landmark_count"] > len(f["landmarks"]) for f in frames),
+            "headings_truncated": any(f["heading_count"] > len(f["headings"]) for f in frames),
+        },
+    }, refs
 
 
 def re_navigation(name):
-    return any(word in name for word in ('个人空间','我的课程','课程','作业','批阅','更多','导出','搜索'))
+    return any(
+        word in name
+        for word in ("个人空间", "我的课程", "课程", "作业", "批阅", "更多", "导出", "搜索")
+    )

@@ -4,10 +4,16 @@ import "time"
 
 // RPAJob contains no credentials, cookies, page HTML or browser input.
 type RPAJob struct {
-	PendingAction      string     `json:"-" gorm:"type:longtext"`
-	NavigationJSON     string     `json:"-" gorm:"type:longtext"`
-	DecisionOwner      string     `json:"-" gorm:"size:36"`
-	DecisionLeaseUntil *time.Time `json:"-"`
+	TaskType             string     `json:"task_type,omitempty" gorm:"size:32"`
+	ProfileGeneration    uint64     `json:"-"`
+	PortalConnectionID   string     `json:"portal_connection_id,omitempty" gorm:"size:36;index"`
+	PortalTargetJSON     string     `json:"-" gorm:"type:longtext"`
+	PortalWorkflowItemID string     `json:"portal_workflow_item_id,omitempty" gorm:"size:36;index"`
+	AssignmentID         uint       `json:"assignment_id,omitempty"`
+	PendingAction        string     `json:"-" gorm:"type:longtext"`
+	NavigationJSON       string     `json:"-" gorm:"type:longtext"`
+	DecisionOwner        string     `json:"-" gorm:"size:36"`
+	DecisionLeaseUntil   *time.Time `json:"-"`
 
 	ID             string    `json:"job_id" gorm:"type:char(36);primaryKey"`
 	UserID         uint      `json:"-" gorm:"not null;index"`

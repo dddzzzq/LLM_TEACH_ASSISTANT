@@ -1,0 +1,397 @@
+[
+  {
+    "Method": "DELETE",
+    "Path": "/api/portal/connection",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Disconnect-fm"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/api/sessions/:session_id",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).DeleteSession-fm"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/assignments/:id",
+    "Handler": "grading-gateway/internal/handlers.DeleteAssignment"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/assignments/:id/results",
+    "Handler": "grading-gateway/internal/handlers.ClearAllSubmissions"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/exams/:id",
+    "Handler": "grading-gateway/internal/handlers.DeleteExam"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/exams/:id/results/:student_exam_id",
+    "Handler": "grading-gateway/internal/handlers.DeleteStudentExamResult"
+  },
+  {
+    "Method": "DELETE",
+    "Path": "/submissions/:id",
+    "Handler": "grading-gateway/internal/handlers.DeleteSubmission"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/admin/skills",
+    "Handler": "grading-gateway/internal/handlers.ListToolsAdmin"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/admin/tools",
+    "Handler": "grading-gateway/internal/handlers.ListToolsAdmin"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/grading/workflows/:id",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Workflow-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/jobs/:job_id",
+    "Handler": "grading-gateway/internal/handlers.GetJobStatus"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/logs/entries/:id/context",
+    "Handler": "grading-gateway/internal/handlers.LogHandler.Context-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/logs/export",
+    "Handler": "grading-gateway/internal/handlers.LogHandler.Export-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/logs/search",
+    "Handler": "grading-gateway/internal/handlers.LogHandler.Search-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/logs/sources",
+    "Handler": "grading-gateway/internal/handlers.LogHandler.Sources-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/logs/tasks",
+    "Handler": "grading-gateway/internal/handlers.LogHandler.Tasks-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/materials",
+    "Handler": "grading-gateway/internal/handlers.ListMaterials"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/materials/:id",
+    "Handler": "grading-gateway/internal/handlers.GetMaterials"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/connection",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Connection-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/courses",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Courses-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/courses/:id/homeworks",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Homeworks-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/legacy-assignments",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).LegacyAssignments-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/operations/:id",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Operation-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/operations/:id/browser",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Browser-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/operations/:id/events",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Events-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/profile",
+    "Handler": "grading-gateway/internal/handlers.(*AuthHandler).Profile-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs",
+    "Handler": "grading-gateway/internal/handlers.ListRPAJobs"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs/:id",
+    "Handler": "grading-gateway/internal/handlers.GetRPAJob"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs/:id/browser",
+    "Handler": "grading-gateway/internal/handlers.RPABrowserFrame"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs/:id/requirements",
+    "Handler": "grading-gateway/internal/handlers.GetRPARequirements"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs/:id/stream",
+    "Handler": "grading-gateway/internal/handlers.RPABrowserStream"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/rpa/jobs/attention",
+    "Handler": "grading-gateway/internal/handlers.GetRPAAttention"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetUserSessions-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions/:session_id",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetSessionInfo-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions/:session_id/history",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetSessionHistory-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions/:session_id/runs",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetExecutions-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions/:session_id/runs/:run_id",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetExecutionEvents-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/sessions/:session_id/runs/:run_id/context",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).GetExecutionContext-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/assignments/",
+    "Handler": "grading-gateway/internal/handlers.GetAssignments"
+  },
+  {
+    "Method": "GET",
+    "Path": "/assignments/:id",
+    "Handler": "grading-gateway/internal/handlers.GetAssignment"
+  },
+  {
+    "Method": "GET",
+    "Path": "/assignments/:id/export",
+    "Handler": "grading-gateway/internal/handlers.ExportAssignmentExcel"
+  },
+  {
+    "Method": "GET",
+    "Path": "/assignments/:id/results",
+    "Handler": "grading-gateway/internal/handlers.GetAssignmentSubmissions"
+  },
+  {
+    "Method": "GET",
+    "Path": "/exams/",
+    "Handler": "grading-gateway/internal/handlers.GetExams"
+  },
+  {
+    "Method": "GET",
+    "Path": "/exams/:id",
+    "Handler": "grading-gateway/internal/handlers.GetExam"
+  },
+  {
+    "Method": "GET",
+    "Path": "/exams/:id/results",
+    "Handler": "grading-gateway/internal/handlers.GetExamResultsSummary"
+  },
+  {
+    "Method": "GET",
+    "Path": "/exams/:id/results/:student_exam_id",
+    "Handler": "grading-gateway/internal/handlers.GetStudentDetailedReport"
+  },
+  {
+    "Method": "GET",
+    "Path": "/submissions/:id",
+    "Handler": "grading-gateway/internal/handlers.GetSubmission"
+  },
+  {
+    "Method": "GET",
+    "Path": "/uploads/*filepath",
+    "Handler": "github.com/gin-gonic/gin.(*RouterGroup).createStaticHandler.func1"
+  },
+  {
+    "Method": "HEAD",
+    "Path": "/uploads/*filepath",
+    "Handler": "github.com/gin-gonic/gin.(*RouterGroup).createStaticHandler.func1"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/admin/skills/cache/refresh",
+    "Handler": "grading-gateway/internal/handlers.RefreshToolsCacheAdmin"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/admin/tools/cache/refresh",
+    "Handler": "grading-gateway/internal/handlers.RefreshToolsCacheAdmin"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/agent/chat",
+    "Handler": "grading-gateway/internal/handlers.AgentChat"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/grading/workflows",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).CreateWorkflow-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/grading/workflows/:id/cancel",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).CancelWorkflow-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/grading/workflows/:id/retry",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).RetryWorkflow-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/login",
+    "Handler": "grading-gateway/internal/handlers.(*AuthHandler).Login-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/materials",
+    "Handler": "grading-gateway/internal/handlers.CreateMaterials"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/materials/:id/cancel",
+    "Handler": "grading-gateway/internal/handlers.CancelMaterials"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/materials/:id/grade",
+    "Handler": "grading-gateway/internal/handlers.GradeMaterials"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/materials/:id/retry",
+    "Handler": "grading-gateway/internal/handlers.RetryMaterials"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/auth-runs/:id/:action",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).AuthAction-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/catalog-syncs",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Sync-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/connection/reauth",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Reauth-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/refresh",
+    "Handler": "grading-gateway/internal/handlers.(*AuthHandler).Refresh-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/register",
+    "Handler": "grading-gateway/internal/handlers.(*AuthHandler).Register-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/rpa/jobs",
+    "Handler": "grading-gateway/internal/handlers.CreateRPAJob"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/rpa/jobs/:id/:action",
+    "Handler": "grading-gateway/internal/handlers.ControlRPAJob"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/sessions",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).CreateSession-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/assignments/",
+    "Handler": "grading-gateway/internal/handlers.CreateAssignment"
+  },
+  {
+    "Method": "POST",
+    "Path": "/assignments/:id/submit",
+    "Handler": "grading-gateway/internal/handlers.UploadAssignment"
+  },
+  {
+    "Method": "POST",
+    "Path": "/exams/",
+    "Handler": "grading-gateway/internal/handlers.CreateExam"
+  },
+  {
+    "Method": "POST",
+    "Path": "/exams/:id/grade_submission",
+    "Handler": "grading-gateway/internal/handlers.UploadStudentExam"
+  },
+  {
+    "Method": "POST",
+    "Path": "/exams/:id/questions",
+    "Handler": "grading-gateway/internal/handlers.AddExamQuestion"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/admin/skills/:name",
+    "Handler": "grading-gateway/internal/handlers.UpdateToolAdmin"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/admin/tools/:name",
+    "Handler": "grading-gateway/internal/handlers.UpdateToolAdmin"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/portal/connection",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Save-fm"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/portal/legacy-assignments/:id",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).ClaimAssignment-fm"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/sessions/:session_id",
+    "Handler": "grading-gateway/internal/handlers.(*SessionHandler).UpdateSession-fm"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/submissions/:id",
+    "Handler": "grading-gateway/internal/handlers.UpdateSubmission"
+  }
+]

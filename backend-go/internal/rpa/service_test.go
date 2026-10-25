@@ -113,6 +113,78 @@ func TestWorkerRequestAuthenticatesAndPreservesConflict(t *testing.T) {
 	}
 }
 
+func TestIntegrationAllClassesArchiveContinuesWithoutClassPrompt(t *testing.T) {
+	integrationDB(t)
+	root := t.TempDir()
+	t.Setenv("HOMEWORK_ALLOWED_ROOTS", root)
+	t.Setenv("HOMEWORK_MATERIALS_ROOT", filepath.Join(root, "prepared"))
+	for _, portal := range []bool{false, true} {
+		job, err := Create(t.Context(), 8401, Target{CourseName: "全部班级测试课", AssignmentName: uuid.NewString(), OutputRoot: filepath.Join(root, "out")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if portal {
+			a := models.Assignment{OwnerID: job.UserID, CourseName: job.CourseName, TaskName: job.AssignmentName, ClassName: "全部班级", Question: "题目", Rubric: `{"正确性":100}`}
+			if err := database.DB.Create(&a).Error; err != nil {
+				t.Fatal(err)
+			}
+			job.AssignmentID = a.ID
+			job.PortalTargetJSON = `{"course_id":"11:22","homework_id":"33"}`
+		}
+		dir := filepath.Join(root, job.ID)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "homework.zip")
+		output, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archive := zip.NewWriter(output)
+		entry, _ := archive.Create("20260001_张三/report.txt")
+		entry.Write([]byte("student answer"))
+		archive.Close()
+		output.Close()
+		hash, _ := materials.HashFile(path)
+		info, _ := os.Stat(path)
+		className := "全部班级"
+		if portal {
+			className = "班级A"
+		} // Per-class files still belong to the aggregate assignment.
+		state, _ := json.Marshal(map[string]any{"class_scope": map[string]string{"mode": "all"}, "files": []map[string]any{{"status": "VERIFIED", "path": path, "sha256": hash, "size": info.Size(), "class_name": className, "export_ref": "all"}}})
+		job.Status, job.StateJSON = "SUCCEEDED", string(state)
+		if err := database.DB.Save(job).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := importFiles(*job); err != nil {
+			t.Fatal(err)
+		}
+		var file models.RPAFile
+		database.DB.First(&file, "job_id = ?", job.ID)
+		if file.ClassName != "全部班级" {
+			t.Fatal("aggregate archive requires a class name")
+		}
+		if err := dispatchFile(file); err != nil {
+			t.Fatal(err)
+		}
+		database.DB.First(&file, "id = ?", file.ID)
+		if file.MaterialBatchID == "" {
+			t.Fatal("all-class archive did not enter material processing")
+		}
+		if portal && file.AssignmentID != job.AssignmentID {
+			t.Fatal("archive detached from selected homework")
+		}
+		if err := materials.Default().ProcessOne(t.Context(), file.MaterialBatchID); err != nil {
+			t.Fatal(err)
+		}
+		var batch models.MaterialBatch
+		database.DB.First(&batch, "id = ?", file.MaterialBatchID)
+		if batch.Status != "READY" {
+			t.Fatalf("material preparation blocked: %s", batch.Status)
+		}
+	}
+}
+
 func TestRubricGate(t *testing.T) {
 	for _, rubric := range []string{"", "null", "{}", "not json"} {
 		if validRubric(models.Assignment{Question: "task", Rubric: rubric}) {
@@ -141,7 +213,7 @@ func integrationDB(t *testing.T) {
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old; sql, _ := db.DB(); sql.Close() })
-	if err := db.AutoMigrate(&models.RPAJob{}, &models.RPAFile{}, &models.AsyncJob{}, &models.Assignment{}, &models.Submission{}, &models.MaterialBatch{}); err != nil {
+	if err := db.AutoMigrate(&models.PortalConnection{}, &models.RPAJob{}, &models.RPAFile{}, &models.AsyncJob{}, &models.Assignment{}, &models.Submission{}, &models.MaterialBatch{}); err != nil {
 		t.Fatal(err)
 	}
 }

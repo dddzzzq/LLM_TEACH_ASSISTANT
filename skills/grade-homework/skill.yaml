@@ -1,6 +1,6 @@
 api_version: teaching.skills/v1
 id: teaching/grade-homework
-version: 2.0.0
+version: 2.1.0
 entry: SKILL.md
 runtimes:
   - teaching-assistant

@@ -108,7 +108,8 @@ except (OSError, ValueError, HTTPError, URLError):
 if (not isinstance(health, dict) or health.get('ok') is not True
         or health.get('protocol_version') != 'browser.v1'
         or health.get('decision_driver') != 'go-eino'
-        or health.get('browser_stream') != 'browser.stream.v1'):
+        or health.get('browser_stream') != 'browser.stream.v1'
+        or health.get('portal_automation') != 'teacher.portal.agent.v2'):
     sys.exit('浏览器 Worker 与 Go/Eino 不兼容，请用 scripts/kill.bash 停止旧服务后重新启动')
 print('rpa：已验证 browser.v1 和流式浏览器，页面决策由 Go/Eino 执行')
 PY

@@ -11,6 +11,70 @@ import (
 
 const fixtureContract = `{"oneOf":[{"description":"点击控件","properties":{"tool":{"type":"string","enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`
 
+func TestSamePageAgentLoadsCatalogSkillAndCallsReader(t *testing.T) {
+	contract := json.RawMessage(`{"oneOf":[{"description":"读取课程","type":"object","properties":{"tool":{"type":"string","enum":["read_course_list"]}},"required":["tool"],"additionalProperties":false}]}`)
+	round := 0
+	action, err := Decide(context.Background(), json.RawMessage(`{"stage":"READING_CATALOG","observation":{"catalog":{"courses":[]}}}`), catalog.Document{Name: "collect-homework", Description: "只读获取作业目录", Instructions: "课程→作业，只读当前页面"}, contract, func(_ context.Context, messages []map[string]interface{}, defs []map[string]interface{}) (*modelclient.LLMResponse, error) {
+		round++
+		if round == 1 {
+			return modelResponse("load_skill", `{"skill":"collect-homework"}`), nil
+		}
+		return modelResponse("read_course_list", `{}`), nil
+	})
+	if err != nil || string(action) != `{"tool":"read_course_list"}` {
+		t.Fatalf("action=%s err=%v", action, err)
+	}
+}
+
+func TestSamePageAgentLoadsPortalSkillForAuthenticationAndReturn(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := skills["sync-teacher-portal"]
+	for _, name := range []string{"fill_portal_credentials", "return_to_course_list"} {
+		t.Run(name, func(t *testing.T) {
+			contract := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"type":"string","enum":["` + name + `"]}},"required":["tool"],"additionalProperties":false}]}`)
+			round := 0
+			action, err := Decide(context.Background(), json.RawMessage(`{"observation":{"catalog":{"return_required":true}}}`), doc, contract, func(_ context.Context, messages []map[string]interface{}, _ []map[string]interface{}) (*modelclient.LLMResponse, error) {
+				round++
+				if round == 1 {
+					return modelResponse("load_skill", `{"skill":"sync-teacher-portal"}`), nil
+				}
+				raw, _ := json.Marshal(messages)
+				if doc.Instructions == "" || !strings.Contains(string(raw), "包括最后一门课和无作业的课程") {
+					t.Fatal("portal workflow knowledge missing")
+				}
+				return modelResponse(name, `{}`), nil
+			})
+			if err != nil || string(action) != `{"tool":"`+name+`"}` {
+				t.Fatalf("action=%s err=%v", action, err)
+			}
+		})
+	}
+}
+
+func TestPageAgentCanChooseZeroArgumentSliderTool(t *testing.T) {
+	contract := json.RawMessage(`{"oneOf":[{"description":"滑块验证","type":"object","properties":{"tool":{"type":"string","enum":["solve_slider_captcha"]}},"required":["tool"],"additionalProperties":false}]}`)
+	round := 0
+	action, err := Decide(context.Background(), json.RawMessage(`{"stage":"SOLVE_CAPTCHA","observation":{"captcha":{"visible":true,"attempts_remaining":3}}}`),
+		catalog.Document{Name: "fetch-homework", Description: "nav", Instructions: "验证码通过后核验登录"}, contract,
+		func(_ context.Context, messages []map[string]interface{}, defs []map[string]interface{}) (*modelclient.LLMResponse, error) {
+			round++
+			if round == 1 {
+				return modelResponse("load_skill", `{"skill":"fetch-homework"}`), nil
+			}
+			raw, _ := json.Marshal(messages)
+			if !strings.Contains(string(raw), "solve_slider_captcha") || !strings.Contains(string(raw), "SOLVE_CAPTCHA") {
+				t.Fatal("slider policy or observation missing")
+			}
+			return modelResponse("solve_slider_captcha", `{}`), nil
+		})
+	if err != nil || string(action) != `{"tool":"solve_slider_captcha"}` {
+		t.Fatalf("action=%s err=%v", action, err)
+	}
+}
+
 func modelResponse(name, args string) *modelclient.LLMResponse {
 	return &modelclient.LLMResponse{ToolCalls: []modelclient.ToolCall{{ID: "fixture", Type: "function", Function: modelclient.FunctionCall{Name: name, Arguments: args}}}}
 }

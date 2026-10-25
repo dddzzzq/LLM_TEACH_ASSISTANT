@@ -1,4 +1,5 @@
 """Shared Chromium frame producer and bounded, ordered manual input streams."""
+
 import asyncio
 import base64
 import contextlib
@@ -19,6 +20,7 @@ def replace_latest(queue, value):
 
 class BrowserFrames:
     """One CDP screencast per task; slow viewers keep only the newest frame."""
+
     def __init__(self, task):
         self.task = task
         self.viewers = set()
@@ -50,8 +52,8 @@ class BrowserFrames:
     async def run(self):
         task = self.task
         while True:
-            if task.state['status'] in TERMINAL:
-                self.publish({'type': 'ended', 'message': '浏览器任务已结束'})
+            if task.state["status"] in TERMINAL:
+                self.publish({"type": "ended", "message": "浏览器任务已结束"})
                 return
             try:
                 await self.capture_page()
@@ -59,15 +61,33 @@ class BrowserFrames:
                 raise
             except Exception:
                 # Never include browser exceptions: they may contain form data or URLs.
-                self.publish({'type': 'error', 'message': '浏览器暂未就绪，正在重新连接'})
+                self.publish({"type": "error", "message": "浏览器暂未就绪，正在重新连接"})
                 await asyncio.sleep(1)
 
     async def capture_page(self):
         task = self.task
+        if task.state.get("portal_session"):
+            # CDP screencasts cannot mask credential fields. Persistent portal jobs
+            # use the masked capture path and never publish raw authentication frames.
+            data, meta, pages = await task.frame()
+            self.publish(
+                {
+                    "type": "frame",
+                    "image": base64.b64encode(data).decode(),
+                    "revision": meta["revision"],
+                    "page_id": meta["page_id"],
+                    "epoch": meta["epoch"],
+                    "pages": pages,
+                    "width": 1440,
+                    "height": 1000,
+                }
+            )
+            await asyncio.sleep(0.2)
+            return
         async with task.lock:
-            page, context, epoch = task.page, task.context, task.state['control_epoch']
+            page, context, epoch = task.page, task.context, task.state["control_epoch"]
             if not page or page.is_closed():
-                raise ValueError('浏览器当前不可用')
+                raise ValueError("浏览器当前不可用")
             url = page.url
         session = await context.new_cdp_session(page)
         events = asyncio.Queue(maxsize=1)
@@ -75,45 +95,73 @@ class BrowserFrames:
 
         async def receive_frame(event):
             with contextlib.suppress(Exception):
-                await session.send('Page.screencastFrameAck', {'sessionId': event['sessionId']})
+                await session.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
             if active:
-                replace_latest(events, event['data'])
+                replace_latest(events, event["data"])
 
-        session.on('Page.screencastFrame', receive_frame)
+        session.on("Page.screencastFrame", receive_frame)
         try:
-            await session.send('Page.startScreencast', {
-                'format': 'jpeg', 'quality': 55, 'maxWidth': 1440, 'maxHeight': 1000, 'everyNthFrame': 1})
+            await session.send(
+                "Page.startScreencast",
+                {
+                    "format": "jpeg",
+                    "quality": 55,
+                    "maxWidth": 1440,
+                    "maxHeight": 1000,
+                    "everyNthFrame": 1,
+                },
+            )
             last_frame = 0
-            while task.state['status'] not in TERMINAL:
-                if (page is not task.page or page.is_closed() or url != page.url
-                        or epoch != task.state['control_epoch']):
+            while task.state["status"] not in TERMINAL:
+                if (
+                    page is not task.page
+                    or page.is_closed()
+                    or url != page.url
+                    or epoch != task.state["control_epoch"]
+                ):
                     return
                 try:
-                    image = await asyncio.wait_for(events.get(), .25)
+                    image = await asyncio.wait_for(events.get(), 0.25)
                 except asyncio.TimeoutError:
                     if time.monotonic() - last_frame < 1:
                         continue
                     # Static pages also need fresh metadata for the three-second click window.
                     async with task.frame_lock:
-                        data = await page.screenshot(type='jpeg', quality=55, timeout=5000)
+                        data = await page.screenshot(type="jpeg", quality=55, timeout=5000)
                     image = base64.b64encode(data).decode()
-                pages = [{'id': str(i), 'title': (await p.title())[:100]}
-                         for i, p in enumerate(context.pages) if not p.is_closed()]
+                pages = [
+                    {"id": str(i), "title": (await p.title())[:100]}
+                    for i, p in enumerate(context.pages)
+                    if not p.is_closed()
+                ]
                 async with task.lock:
-                    if (page is not task.page or page.is_closed() or url != page.url
-                            or epoch != task.state['control_epoch']):
+                    if (
+                        page is not task.page
+                        or page.is_closed()
+                        or url != page.url
+                        or epoch != task.state["control_epoch"]
+                    ):
                         return
                     meta = task.record_frame(page, url, epoch)
-                self.publish({'type': 'frame', 'image': image, 'revision': meta['revision'],
-                              'page_id': meta['page_id'], 'epoch': epoch, 'pages': pages,
-                              'width': 1440, 'height': 1000})
+                self.publish(
+                    {
+                        "type": "frame",
+                        "image": image,
+                        "revision": meta["revision"],
+                        "page_id": meta["page_id"],
+                        "epoch": epoch,
+                        "pages": pages,
+                        "width": 1440,
+                        "height": 1000,
+                    }
+                )
                 last_frame = time.monotonic()
                 await asyncio.sleep(1 / 30)
         finally:
             active = False
-            session.remove_listener('Page.screencastFrame', receive_frame)
+            session.remove_listener("Page.screencastFrame", receive_frame)
             with contextlib.suppress(Exception):
-                await session.send('Page.stopScreencast')
+                await session.send("Page.stopScreencast")
             with contextlib.suppress(Exception):
                 await session.detach()
 
@@ -134,7 +182,7 @@ async def serve_browser_stream(socket, task):
 
     def reply(message):
         if replies.full():
-            raise StreamFailure('连接过慢，请重新连接', 4429)
+            raise StreamFailure("连接过慢，请重新连接", 4429)
         replies.put_nowait(message)
         available.set()
 
@@ -143,22 +191,26 @@ async def serve_browser_stream(socket, task):
         while True:
             raw = await asyncio.wait_for(socket.receive_text(), 40)
             if len(raw.encode()) > 16 * 1024:
-                raise StreamFailure('操作参数过大', 4400)
+                raise StreamFailure("操作参数过大", 4400)
             try:
                 message = json.loads(raw)
             except (ValueError, TypeError):
-                raise StreamFailure('操作参数无效', 4400)
+                raise StreamFailure("操作参数无效", 4400)
             if not isinstance(message, dict):
-                raise StreamFailure('操作参数无效', 4400)
-            if message.get('type') == 'ping':
-                reply({'type': 'pong'})
+                raise StreamFailure("操作参数无效", 4400)
+            if message.get("type") == "ping":
+                reply({"type": "pong"})
                 continue
-            seq = message.get('id')
-            if (message.get('type') != 'input' or type(seq) is not int
-                    or not last_id < seq <= 2**53 - 1 or not isinstance(message.get('action'), dict)):
-                raise StreamFailure('操作顺序或参数无效', 4400)
+            seq = message.get("id")
+            if (
+                message.get("type") != "input"
+                or type(seq) is not int
+                or not last_id < seq <= 2**53 - 1
+                or not isinstance(message.get("action"), dict)
+            ):
+                raise StreamFailure("操作顺序或参数无效", 4400)
             if inputs.full():
-                raise StreamFailure('操作积压，请重新连接', 4429)
+                raise StreamFailure("操作积压，请重新连接", 4429)
             last_id = seq
             inputs.put_nowait(message)
 
@@ -166,12 +218,12 @@ async def serve_browser_stream(socket, task):
         while True:
             message = await inputs.get()
             try:
-                await task.browser_input(message['action'], owner=owner)
+                await task.browser_input(message["action"], owner=owner)
             except (ValueError, KeyError, TypeError, OverflowError):
-                raise StreamFailure('页面或控制权已变化，操作未全部完成，请检查画面后重试')
+                raise StreamFailure("页面或控制权已变化，操作未全部完成，请检查画面后重试")
             except Exception:
-                raise StreamFailure('操作结果未确认，请检查画面后重试')
-            reply({'type': 'input_ack', 'id': message['id']})
+                raise StreamFailure("操作结果未确认，请检查画面后重试")
+            reply({"type": "input_ack", "id": message["id"]})
 
     async def frames(queue):
         nonlocal latest_frame
@@ -190,13 +242,15 @@ async def serve_browser_stream(socket, task):
             if replies.empty() and latest_frame is None:
                 available.clear()
             await asyncio.wait_for(socket.send_json(message), 5)
-            if message.get('type') == 'ended':
+            if message.get("type") == "ended":
                 return
 
-    reply({'type': 'ready'})
+    reply({"type": "ready"})
     error = None
     async with task.browser_frames.subscribe() as queue:
-        workers = [asyncio.create_task(fn()) for fn in (receive, execute, lambda: frames(queue), send)]
+        workers = [
+            asyncio.create_task(fn()) for fn in (receive, execute, lambda: frames(queue), send)
+        ]
         try:
             done, _ = await asyncio.wait(workers, return_when=asyncio.FIRST_COMPLETED)
             for worker in done:
@@ -207,7 +261,7 @@ async def serve_browser_stream(socket, task):
                 except (WebSocketDisconnect, asyncio.TimeoutError):
                     pass
                 except Exception:
-                    error = StreamFailure('浏览器连接中断，请重新连接')
+                    error = StreamFailure("浏览器连接中断，请重新连接")
         finally:
             for worker in workers:
                 worker.cancel()
@@ -216,5 +270,5 @@ async def serve_browser_stream(socket, task):
                 await asyncio.wait_for(task.release_pointer(owner), 3)
     with contextlib.suppress(Exception):
         if error:
-            await asyncio.wait_for(socket.send_json({'type': 'error', 'message': error.message}), 1)
+            await asyncio.wait_for(socket.send_json({"type": "error", "message": error.message}), 1)
         await socket.close(code=error.code if error else 1000)

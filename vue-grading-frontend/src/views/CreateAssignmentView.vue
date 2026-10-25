@@ -1,6 +1,11 @@
 <template>
   <div class="form-page">
-    <div class="page-heading"><div><h1 class="page-title">新建作业任务</h1><p class="page-description">完善课程信息与评分标准，为智能批改做好准备。</p></div></div>
+    <div class="page-heading"
+      ><div
+        ><h1 class="page-title">新建作业任务</h1
+        ><p class="page-description">完善课程信息与评分标准，为智能批改做好准备。</p></div
+      ></div
+    >
 
     <form @submit.prevent="createAssignment" class="form-surface space-y-6 bg-white rounded-xl">
       <div>
@@ -12,7 +17,7 @@
           required
           class="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           placeholder="例如：软件工程"
-        >
+        />
       </div>
 
       <div>
@@ -24,7 +29,7 @@
           required
           class="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           placeholder="例如：2CS20510502"
-        >
+        />
       </div>
 
       <div>
@@ -36,7 +41,7 @@
           required
           class="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           placeholder="例如：第一次分布式作业"
-        >
+        />
       </div>
 
       <div>
@@ -52,7 +57,9 @@
       </div>
 
       <div>
-        <label for="rubric" class="block text-sm font-medium text-gray-700">评分标准 (JSON格式)</label>
+        <label for="rubric" class="block text-sm font-medium text-gray-700"
+          >评分标准 (JSON格式)</label
+        >
         <textarea
           id="rubric"
           v-model="rubric"
@@ -93,13 +100,13 @@ const question = ref('');
 const rubric = ref(
   JSON.stringify(
     {
-      "功能实现": { description: "核心功能完整无误", score: 60 },
-      "代码质量": { description: "代码规范，注释清晰", score: 20 },
-      "文档报告": { description: "报告内容详实，格式正确", score: 20 },
+      功能实现: { description: '核心功能完整无误', score: 60 },
+      代码质量: { description: '代码规范，注释清晰', score: 20 },
+      文档报告: { description: '报告内容详实，格式正确', score: 20 },
     },
     null,
-    2,
-  ),
+    2
+  )
 );
 const isLoading = ref(false);
 const error = ref<string | null>(null);
@@ -118,7 +125,7 @@ const createAssignment = async () => {
       question: question.value,
       rubric: rubricData,
     });
-    
+
     router.push({ name: 'assignments' });
   } catch (e: unknown) {
     if (e instanceof SyntaxError) {

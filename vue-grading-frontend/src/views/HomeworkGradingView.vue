@@ -1,135 +1,343 @@
 <template>
-  <div class="form-page">
-    <header class="mb-7">
-      <h1 class="page-title">智能作业批改</h1>
-      <p class="page-description">上传学生作业压缩包，AI将进行综合评估</p>
-    </header>
-
-    <main class="form-surface bg-white rounded-xl">
-      <form @submit.prevent="submitGradingTask">
-        <div class="space-y-6">
-          <!-- 任务名称 -->
-          <div>
-            <label for="task_name" class="block text-sm font-medium text-gray-700">任务名称</label>
-            <input type="text" v-model="taskName" id="task_name" required
-                  class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  placeholder="例如：第一次分布式作业">
-          </div>
-
-          <!-- 题目要求 -->
-          <div>
-            <label for="question" class="block text-sm font-medium text-gray-700">题目要求</label>
-            <textarea v-model="question" id="question" rows="4" required
-                      class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                      placeholder="请详细描述本次作业的具体要求..."></textarea>
-          </div>
-
-          <!-- 评分标准 -->
-          <div>
-            <label for="rubric" class="block text-sm font-medium text-gray-700">评分标准 (JSON格式)</label>
-            <textarea v-model="rubric" id="rubric" rows="6" required
-                      class="mt-1 block w-full px-3 py-2 font-mono text-sm bg-gray-50 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder='例如：\n{\n  "功能实现": {"description": "核心功能完整无误", "score": 60},\n  "代码质量": {"description": "代码规范，注释清晰", "score": 20},\n  "文档报告": {"description": "报告内容详实，格式正确", "score": 20}\n}'></textarea>
-          </div>
-
-          <!-- 文件上传 -->
-          <div>
-            <label for="file-upload" class="block text-sm font-medium text-gray-700">上传作业压缩包</label>
-            <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
-              <div class="space-y-1 text-center">
-                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-                  <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <div class="flex text-sm text-gray-600">
-                  <label for="file-upload" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
-                    <span>选择文件</span>
-                    <input id="file-upload" name="file-upload" type="file" class="sr-only" @change="handleFileChange" accept=".zip" required>
-                  </label>
-                  <p class="pl-1">或拖拽到此处</p>
-                </div>
-                <p class="text-xs text-gray-500">仅支持 .zip 格式</p>
-                <p v-if="fileName" class="text-sm text-green-600 pt-2 font-semibold">{{ fileName }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 提交按钮 -->
-        <div class="mt-8">
-          <button type="submit" :disabled="isLoading" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-300 disabled:cursor-not-allowed">
-            <span v-if="!isLoading">开始AI批改</span>
-            <span v-else>批改中，请稍候...</span>
-          </button>
-        </div>
-      </form>
-      
-      <!-- 加载、错误和结果展示 -->
-      <Loader v-if="isLoading" class="mt-8" />
-      <div v-if="error" class="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
-        <h3 class="font-bold">发生错误</h3>
-        <p>{{ error }}</p>
-      </div>
-      <GradingResult v-if="result" :result-data="result" class="mt-8" />
-    </main>
+  <div class="form-page grading-workbench">
+    <header
+      ><h1 class="page-title">作业批改工作台</h1
+      ><p class="page-description"
+        >选择材料来源、填写评分配置，系统自动完成材料整理与批改。</p
+      ></header
+    >
+    <form class="form-surface workbench-form" @submit.prevent="submit">
+      <fieldset class="source-options"
+        ><legend>材料来源</legend
+        ><label v-for="option in sources" :key="option.value"
+          ><input
+            v-model="source"
+            type="radio"
+            name="material_source"
+            :value="option.value"
+            :disabled="busy"
+          />{{ option.label }}</label
+        ></fieldset
+      >
+      <PortalAssignmentPicker
+        v-if="source === 'portal'"
+        :disabled="busy"
+        @change="selection = $event"
+      />
+      <template v-else>
+        <div class="local-target"
+          ><label>课程名称<input v-model="courseName" required maxlength="255" /></label
+          ><label>班级名称<input v-model="className" required maxlength="255" /></label
+          ><label>作业名称<input v-model="taskName" required maxlength="255" /></label
+        ></div>
+        <label v-if="source === 'upload'"
+          >上传作业压缩包<input
+            type="file"
+            accept=".zip,.rar,.7z"
+            required
+            @change="file = $event.target.files[0] || null"
+        /></label>
+        <label v-else
+          >作业所在目录<input
+            v-model="directory"
+            required
+            placeholder="例如 D:\dzq\homework\第一次作业"
+          /><small>填写运行本系统的服务器可读取的绝对路径。</small></label
+        >
+      </template>
+      <label
+        >题目要求<textarea
+          v-model="question"
+          rows="5"
+          required
+          placeholder="描述本次作业要求，作为批改依据"
+        />
+      </label>
+      <label
+        >评分标准（JSON）<textarea
+          v-model="rubric"
+          rows="7"
+          required
+          class="rubric"
+          placeholder='例如 {"正确性":{"description":"程序运行正确","score":100}}'
+        />
+      </label>
+      <p
+        >点击开始批改后，将按本次选定范围自动下载或读取附件、整理材料并评分；需核对的异常会保留在材料批次中。</p
+      >
+      <button
+        class="primary"
+        type="submit"
+        :disabled="busy || (source === 'portal' && !selection.items.length)"
+        >{{ busy ? '正在提交…' : '开始批改' }}</button
+      >
+    </form>
+    <p v-if="error" role="alert" class="error">{{ error }}</p
+    ><p v-if="notice" role="status">{{ notice }}</p>
+    <section v-if="workflow" class="form-surface workflow-progress" aria-live="polite">
+      <header
+        ><h2>批改流程：{{ portalStatus(workflow.workflow.status) }}</h2
+        ><button v-if="!finished" :disabled="busy" @click="cancelWorkflow">取消后续处理</button
+        ><button
+          v-if="['FAILED', 'PARTIAL_SUCCESS'].includes(workflow.workflow.status)"
+          :disabled="busy"
+          @click="retryWorkflow"
+          >重试中断的下载</button
+        ><button v-if="finished" :disabled="busy" @click="newRound">新建下一轮</button></header
+      >
+      <p>流程编号：{{ workflow.workflow.id }}</p>
+      <article v-for="item in workflow.items" :key="item.id"
+        ><strong>{{ item.course_name }} / {{ item.homework_name }} / {{ item.class_name }}</strong
+        ><p>{{ portalStatus(item.status) }} · {{ item.message }}</p
+        ><router-link v-if="item.assignment_id" :to="'/assignments/' + item.assignment_id"
+          >查看材料和批改结果</router-link
+        ><router-link
+          v-if="item.status === 'WAITING_AUTH' && !item.rpa_job_id"
+          to="/settings/portal"
+          >完成教务认证</router-link
+        ><RpaTaskPanel
+          v-if="item.rpa_job_id && item.status === 'WAITING_AUTH'"
+          :task-id="item.rpa_job_id"
+          embedded
+      /></article>
+    </section>
+    <section v-if="assignmentId" class="form-surface"
+      ><router-link :to="'/assignments/' + assignmentId">查看本次作业与批改结果 →</router-link
+      ><MaterialBatchPanel :assignment-id="assignmentId"
+    /></section>
   </div>
 </template>
-
 <script setup>
-import { ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import authApi from '../services/authApi';
 import gradingApi from '../services/gradingApi';
-import GradingResult from '../components/GradingResult.vue';
-import Loader from '../components/Loader.vue';
-
-// 响应式状态定义
-const taskName = ref('第一次Web开发大作业');
-const question = ref('利用HTML, CSS, JavaScript技术实现一个个人作品集网站。');
-const rubric = ref(JSON.stringify({
-  "页面设计": { "description": "界面美观，布局合理", "score": 30 },
-  "功能实现": { "description": "交互功能完整，无明显bug", "score": 50 },
-  "代码质量": { "description": "代码规范，有适当注释", "score": 20 }
-}, null, 2));
-const file = ref(null);
-const fileName = ref('');
-const isLoading = ref(false);
-const error = ref(null);
-const result = ref(null);
-
-const handleFileChange = (event) => {
-  const selectedFile = event.target.files[0];
-  if (selectedFile) {
-    file.value = selectedFile;
-    fileName.value = selectedFile.name;
-  }
-};
-
-const submitGradingTask = async () => {
-  if (!file.value) {
-    error.value = "请选择要上传的ZIP文件。";
-    return;
-  }
-  
-  isLoading.value = true;
-  error.value = null;
-  result.value = null;
-
-  const formData = new FormData();
-  formData.append('task_name', taskName.value);
-  formData.append('question', question.value);
-  formData.append('rubric', rubric.value);
-  formData.append('file', file.value);
-
+import { createMaterialsApi } from '../services/materialsApi';
+import { createPortalApi, portalStatus } from '../services/portalApi';
+import PortalAssignmentPicker from '../components/PortalAssignmentPicker.vue';
+import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
+import RpaTaskPanel from '../components/RpaTaskPanel.vue';
+const route = useRoute(),
+  router = useRouter(),
+  api = createPortalApi(authApi.getClient()),
+  materials = createMaterialsApi(authApi.getClient());
+const sources = [
+  { value: 'upload', label: '上传压缩包' },
+  { value: 'directory', label: '指定目录' },
+  { value: 'portal', label: '选择官网作业' },
+];
+const source = ref('portal'),
+  courseName = ref(''),
+  className = ref(''),
+  taskName = ref(''),
+  question = ref(''),
+  rubric = ref(''),
+  directory = ref(''),
+  file = ref(null),
+  selection = ref({ snapshot_id: '', items: [] });
+const busy = ref(false),
+  error = ref(''),
+  notice = ref(''),
+  workflow = ref(null),
+  assignmentId = ref(null);
+let timer,
+  disposed = false,
+  polling = false,
+  submissionKey = '',
+  submissionBody = '',
+  localConfig = '';
+const finished = computed(() =>
+  ['SUCCEEDED', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'].includes(workflow.value?.workflow.status)
+);
+async function loadWorkflow() {
+  const id = route.query.workflow;
+  if (!id || disposed || polling) return;
+  polling = true;
   try {
-    const response = await gradingApi.gradeHomework(formData);
-    result.value = response.data;
+    const { data } = await api.workflow(id);
+    if (!disposed) workflow.value = data;
   } catch (e) {
-    console.error('提交失败:', e);
-    if (e.response && e.response.data && e.response.data.detail) {
-        error.value = e.response.data.detail;
-    } else {
-        error.value = '请求失败，请检查网络连接或后端服务是否正常。';
-    }
+    if (!disposed) error.value = e.response?.data?.detail || '批改流程读取失败';
   } finally {
-    isLoading.value = false;
+    polling = false;
   }
-};
+}
+async function submit() {
+  busy.value = true;
+  error.value = '';
+  notice.value = '';
+  try {
+    const parsed = JSON.parse(rubric.value);
+    if (!parsed || typeof parsed !== 'object' || !Object.keys(parsed).length)
+      throw new Error('评分标准必须为非空 JSON 对象或数组');
+    if (source.value === 'portal') {
+      const body = {
+          source: 'portal',
+          ...selection.value,
+          question: question.value,
+          rubric: parsed,
+        },
+        serialized = JSON.stringify(body);
+      if (serialized !== submissionBody) {
+        submissionKey = crypto.randomUUID();
+        submissionBody = serialized;
+      }
+      const { data } = await api.createWorkflow(body, submissionKey);
+      await router.replace({ query: { workflow: data.id } });
+      await loadWorkflow();
+      notice.value = '批改流程已受理，可离开页面，后台会继续执行';
+    } else {
+      if (source.value === 'upload' && !file.value) throw new Error('请选择作业压缩包');
+      const config = JSON.stringify({
+        course_name: courseName.value,
+        class_name: className.value,
+        task_name: taskName.value,
+        question: question.value,
+        rubric: parsed,
+      });
+      if (!assignmentId.value || localConfig !== config) {
+        const { data } = await gradingApi.createAssignment(JSON.parse(config));
+        assignmentId.value = data.id;
+        localConfig = config;
+      }
+      if (source.value === 'upload') {
+        const body = new FormData();
+        body.append('batch_file', file.value);
+        body.append('auto_grade', 'true');
+        await gradingApi.submitBatch(assignmentId.value, body);
+      } else
+        await materials.create(
+          { source_path: directory.value, assignment_id: assignmentId.value, auto_grade: true },
+          crypto.randomUUID()
+        );
+      notice.value = '材料已受理，整理完成后自动批改';
+    }
+  } catch (e) {
+    error.value =
+      e.response?.data?.detail ||
+      (e instanceof SyntaxError ? '评分标准不是有效 JSON' : e.message) ||
+      '提交失败';
+  } finally {
+    busy.value = false;
+  }
+}
+async function cancelWorkflow() {
+  busy.value = true;
+  try {
+    await api.cancelWorkflow(workflow.value.workflow.id);
+    await loadWorkflow();
+  } catch (e) {
+    error.value = e.response?.data?.detail || '取消未完成';
+  } finally {
+    busy.value = false;
+  }
+}
+async function retryWorkflow() {
+  busy.value = true;
+  error.value = '';
+  try {
+    await api.retryWorkflow(workflow.value.workflow.id);
+    await loadWorkflow();
+  } catch (e) {
+    error.value = e.response?.data?.detail || '重试未完成';
+  } finally {
+    busy.value = false;
+  }
+}
+async function newRound() {
+  submissionKey = '';
+  submissionBody = '';
+  workflow.value = null;
+  notice.value = '';
+  await router.replace({ query: {} });
+}
+onMounted(() => {
+  loadWorkflow();
+  timer = setInterval(loadWorkflow, 3000);
+});
+onBeforeUnmount(() => {
+  disposed = true;
+  clearInterval(timer);
+});
 </script>
+<style scoped>
+.grading-workbench {
+  display: grid;
+  gap: 22px;
+}
+.form-surface {
+  padding: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: white;
+}
+.workbench-form {
+  display: grid;
+  gap: 20px;
+}
+label {
+  display: grid;
+  gap: 8px;
+}
+input:not([type='radio']),
+textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  width: 100%;
+}
+.source-options {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.source-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.source-options legend {
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.local-target {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.rubric {
+  font-family: monospace;
+}
+button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+button.primary {
+  background: #2563eb;
+  color: white;
+}
+button:disabled {
+  opacity: 0.5;
+}
+.error {
+  color: #b91c1c;
+}
+a {
+  color: #2563eb;
+}
+.workflow-progress header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.workflow-progress article {
+  padding: 18px 0;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 16px;
+}
+small,
+p {
+  color: #64748b;
+}
+</style>

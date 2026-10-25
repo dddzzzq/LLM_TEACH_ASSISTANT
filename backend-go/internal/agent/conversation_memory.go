@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/execution"
 	"grading-gateway/internal/models"
 
 	"github.com/google/uuid"
@@ -28,7 +29,7 @@ type Message struct {
 type RedisMemoryManager struct {
 	maxMessages int           // 每个会话最大消息数
 	messageTTL  time.Duration // Redis 键过期时间
-	db          *gorm.DB      // MySQL 数据库连接（用于异步持久化）
+	db          *gorm.DB      // MySQL 数据库连接（持久化真源）
 }
 
 // NewRedisMemoryManager 创建新的 Redis 对话记忆管理器
@@ -52,161 +53,53 @@ func (rmm *RedisMemoryManager) GetMemoryKey(userID uint, sessionID string) strin
 	return database.RedisKey(strconv.FormatUint(uint64(userID), 10), sessionID)
 }
 
-// AddMessage 添加一条消息到指定用户的会话记忆（Redis + 异步持久化到 MySQL）
+// AddMessage is a legacy display-message API. Durable writes precede best-effort cache refresh.
+// New agent turns use execution.Store so the event and display projection commit together.
 func (rmm *RedisMemoryManager) AddMessage(userID uint, sessionID, role, content string) error {
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
-
-	// 创建消息对象
-	message := Message{
-		Role:      role,
-		Content:   content,
-		Timestamp: time.Now(),
-	}
-
-	// 序列化消息为 JSON
-	messageJSON, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
-	}
-
-	// 使用事务确保 Redis 操作原子性
-	err = database.RetryRedisOperation(func() error {
-		pipe := database.GetRedisClient().TxPipeline()
-
-		// 将消息添加到列表头部
-		pipe.LPush(ctx, redisKey, messageJSON)
-
-		// 修剪列表，只保留最近的 maxMessages 条消息
-		pipe.LTrim(ctx, redisKey, 0, int64(rmm.maxMessages-1))
-
-		// 设置键的过期时间
-		pipe.Expire(ctx, redisKey, rmm.messageTTL)
-
-		_, err := pipe.Exec(ctx)
+	if err := rmm.ensureChatSessionExists(userID, sessionID); err != nil {
 		return err
-	}, 3, 100*time.Millisecond)
-
-	if err != nil {
-		return fmt.Errorf("failed to add message to Redis: %w", err)
 	}
-
-	// 异步持久化到 MySQL
-	go rmm.persistMessageToMySQL(userID, sessionID, role, content)
-
+	if err := rmm.db.Create(&models.ChatMessage{SessionID: sessionID, Role: role, Content: content}).Error; err != nil {
+		return err
+	}
+	if err := rmm.RestoreSessionToRedis(userID, sessionID); err != nil {
+		log.Printf("chat cache refresh failed: %v", err)
+	}
 	return nil
 }
 
-// persistMessageToMySQL 异步将消息持久化到 MySQL 数据库
-func (rmm *RedisMemoryManager) persistMessageToMySQL(userID uint, sessionID, role, content string) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("panic in persistMessageToMySQL: %v", r)
-		}
-	}()
-
-	// 确保会话存在
-	err := rmm.ensureChatSessionExists(userID, sessionID)
-	if err != nil {
-		log.Printf("failed to ensure chat session exists: %v", err)
-		return
-	}
-
-	// 创建聊天消息记录
-	chatMessage := models.ChatMessage{
-		SessionID: sessionID,
-		Role:      role,
-		Content:   content,
-	}
-
-	// 异步写入数据库
-	if err := rmm.db.Create(&chatMessage).Error; err != nil {
-		log.Printf("failed to persist message to MySQL: %v", err)
-	}
-}
-
-// ensureChatSessionExists 确保聊天会话在 MySQL 中存在
 func (rmm *RedisMemoryManager) ensureChatSessionExists(userID uint, sessionID string) error {
-	var chatSession models.ChatSession
-	result := rmm.db.Where("id = ?", sessionID).First(&chatSession)
-
-	if result.Error == gorm.ErrRecordNotFound {
-		// 创建新会话
-		chatSession = models.ChatSession{
-			ID:     sessionID,
-			UserID: userID,
-			Title:  fmt.Sprintf("会话 %s", time.Now().Format("2006-01-02 15:04")),
-		}
-		return rmm.db.Create(&chatSession).Error
+	var session models.ChatSession
+	err := rmm.db.First(&session, "id = ?", sessionID).Error
+	if err == gorm.ErrRecordNotFound {
+		return rmm.db.Create(&models.ChatSession{ID: sessionID, UserID: userID, Title: "新会话"}).Error
 	}
-
-	return result.Error
-}
-
-// GetRecentMessages 获取指定用户会话的最近消息（从 Redis）
-func (rmm *RedisMemoryManager) GetRecentMessages(userID uint, sessionID string) ([]Message, error) {
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
-
-	// 获取列表中的所有消息
-	messagesJSON, err := database.ListRange(ctx, redisKey, 0, -1)
 	if err != nil {
-		// 如果键不存在，返回空列表
-		if err.Error() == "redis: nil" {
-			return []Message{}, nil
-		}
-		return nil, fmt.Errorf("failed to get messages from Redis: %w", err)
+		return err
 	}
-
-	// 反序列化消息
-	var messages []Message
-	for _, msgJSON := range messagesJSON {
-		var msg Message
-		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
-			log.Printf("failed to unmarshal message: %v", err)
-			continue
-		}
-		messages = append(messages, msg)
+	if session.UserID != userID {
+		return gorm.ErrRecordNotFound
 	}
-
-	// 返回消息（Redis 列表是先进后出，需要反转顺序）
-	return rmm.reverseMessages(messages), nil
+	return nil
 }
 
-// GetRecentMessagesWithLimit 获取指定数量的最近消息
+// Read the durable display projection, so Redis loss or a stale cache cannot lose a turn.
+func (rmm *RedisMemoryManager) GetRecentMessages(userID uint, sessionID string) ([]Message, error) {
+	return rmm.GetRecentMessagesWithLimit(userID, sessionID, rmm.maxMessages)
+}
 func (rmm *RedisMemoryManager) GetRecentMessagesWithLimit(userID uint, sessionID string, limit int) ([]Message, error) {
 	if limit <= 0 {
-		return rmm.GetRecentMessages(userID, sessionID)
+		limit = rmm.maxMessages
 	}
-
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
-
-	// 获取最新的 limit 条消息
-	startIdx := int64(0)
-	stopIdx := int64(limit - 1)
-	messagesJSON, err := database.ListRange(ctx, redisKey, startIdx, stopIdx)
+	rows, err := (execution.Store{DB: rmm.db}).Display(context.Background(), userID, sessionID, limit)
 	if err != nil {
-		// 如果键不存在，返回空列表
-		if err.Error() == "redis: nil" {
-			return []Message{}, nil
-		}
-		return nil, fmt.Errorf("failed to get messages from Redis: %w", err)
+		return nil, err
 	}
-
-	// 反序列化消息
-	var messages []Message
-	for _, msgJSON := range messagesJSON {
-		var msg Message
-		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
-			log.Printf("failed to unmarshal message: %v", err)
-			continue
-		}
-		messages = append(messages, msg)
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, Message{Role: row.Role, Content: row.Content, Timestamp: row.Timestamp})
 	}
-
-	// 返回消息（Redis 列表是先进后出，需要反转顺序）
-	return rmm.reverseMessages(messages), nil
+	return messages, nil
 }
 
 // GetFormattedHistory 获取格式化的对话历史，用于 LLM 输入
@@ -233,34 +126,24 @@ func (rmm *RedisMemoryManager) GetFormattedHistory(userID uint, sessionID string
 
 // ClearSession 清空指定用户会话的记忆
 func (rmm *RedisMemoryManager) ClearSession(userID uint, sessionID string) error {
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
-
-	return database.DeleteKey(ctx, redisKey)
-}
-
-// GetMessageCount 获取指定会话的消息数量
-func (rmm *RedisMemoryManager) GetMessageCount(userID uint, sessionID string) (int64, error) {
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
-
-	result, err := database.GetRedisClient().LLen(ctx, redisKey).Result()
-	if err != nil {
-		if err.Error() == "redis: nil" {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("failed to get message count: %w", err)
+	client := database.GetRedisClient()
+	if client == nil {
+		return nil
 	}
-
-	return result, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return client.Del(ctx, rmm.GetMemoryKey(userID, sessionID)).Err()
 }
 
-// SessionExists 检查会话是否存在
-func (rmm *RedisMemoryManager) SessionExists(userID uint, sessionID string) (bool, error) {
-	ctx := context.Background()
-	redisKey := rmm.GetMemoryKey(userID, sessionID)
+func (rmm *RedisMemoryManager) GetMessageCount(userID uint, sessionID string) (int64, error) {
+	messages, err := rmm.GetRecentMessages(userID, sessionID)
+	return int64(len(messages)), err
+}
 
-	return database.KeyExists(ctx, redisKey)
+func (rmm *RedisMemoryManager) SessionExists(userID uint, sessionID string) (bool, error) {
+	var count int64
+	err := rmm.db.Model(&models.ChatSession{}).Where("id = ? AND user_id = ?", sessionID, userID).Count(&count).Error
+	return count > 0, err
 }
 
 // CreateNewSession 创建新会话并返回会话ID
@@ -293,7 +176,7 @@ func (rmm *RedisMemoryManager) GetUserSessions(userID uint) ([]models.ChatSessio
 // GetSessionMessagesFromDB 从 MySQL 获取会话的历史消息（用于持久化恢复）
 func (rmm *RedisMemoryManager) GetSessionMessagesFromDB(sessionID string) ([]Message, error) {
 	var chatMessages []models.ChatMessage
-	if err := rmm.db.Where("session_id = ?", sessionID).Order("created_at ASC").Find(&chatMessages).Error; err != nil {
+	if err := rmm.db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Find(&chatMessages).Error; err != nil {
 		return nil, fmt.Errorf("failed to get session messages from DB: %w", err)
 	}
 
@@ -311,24 +194,29 @@ func (rmm *RedisMemoryManager) GetSessionMessagesFromDB(sessionID string) ([]Mes
 
 // RestoreSessionToRedis 将 MySQL 中的会话消息恢复到 Redis
 func (rmm *RedisMemoryManager) RestoreSessionToRedis(userID uint, sessionID string) error {
-	messages, err := rmm.GetSessionMessagesFromDB(sessionID)
+	messages, err := rmm.GetRecentMessages(userID, sessionID)
 	if err != nil {
 		return err
 	}
-
-	// 清空现有 Redis 数据
-	if err := rmm.ClearSession(userID, sessionID); err != nil {
-		return err
+	client := database.GetRedisClient()
+	if client == nil {
+		return nil
 	}
-
-	// 将消息批量添加到 Redis
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	key := rmm.GetMemoryKey(userID, sessionID)
+	pipe := client.TxPipeline()
+	pipe.Del(ctx, key)
 	for _, msg := range messages {
-		if err := rmm.AddMessage(userID, sessionID, msg.Role, msg.Content); err != nil {
+		data, err := json.Marshal(msg)
+		if err != nil {
 			return err
 		}
+		pipe.LPush(ctx, key, data)
 	}
-
-	return nil
+	pipe.Expire(ctx, key, rmm.messageTTL)
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // reverseMessages 反转消息顺序（因为 Redis LPUSH 将最新消息放在列表头部）
@@ -348,11 +236,6 @@ var (
 
 // GetGlobalRedisMemoryManager 获取全局 Redis 记忆管理器实例（单例模式）
 func GetGlobalRedisMemoryManager() *RedisMemoryManager {
-	onceRedis.Do(func() {
-		// 需要数据库连接，这里延迟初始化
-		// 实际使用时应通过依赖注入传递 db 连接
-		log.Println("Warning: RedisMemoryManager not initialized. Call InitRedisMemoryManager first.")
-	})
 	return globalRedisMemoryManager
 }
 
@@ -371,8 +254,5 @@ type MemoryManager struct {
 
 // GetGlobalMemoryManager 获取全局记忆管理器实例（单例模式），已废弃，请使用 GetGlobalRedisMemoryManager
 func GetGlobalMemoryManager() *MemoryManager {
-	onceRedis.Do(func() {
-		log.Println("Warning: MemoryManager is deprecated. Please use RedisMemoryManager instead.")
-	})
 	return &MemoryManager{GetGlobalRedisMemoryManager()}
 }

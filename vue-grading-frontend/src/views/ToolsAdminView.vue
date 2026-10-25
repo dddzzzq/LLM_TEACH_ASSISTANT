@@ -32,11 +32,7 @@
     <div v-if="loading" class="text-sm text-gray-500">加载中...</div>
 
     <div v-else class="space-y-4">
-      <div
-        v-for="tool in tools"
-        :key="tool.name"
-        class="border tool-card"
-      >
+      <div v-for="tool in tools" :key="tool.name" class="border tool-card">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -48,7 +44,9 @@
                 {{ tool.enabled ? 'ENABLED' : 'DISABLED' }}
               </span>
             </div>
-            <div v-if="!tool.registered" class="text-xs text-amber-700 mt-1">工具暂不可用：执行器未注册</div>
+            <div v-if="!tool.registered" class="text-xs text-amber-700 mt-1"
+              >工具暂不可用：执行器未注册</div
+            >
           </div>
 
           <label class="flex items-center gap-2 text-sm">
@@ -98,9 +96,7 @@
         </div>
 
         <div class="mt-4 flex items-center justify-between">
-          <div class="text-xs text-gray-400">
-            updated_at: {{ tool.updated_at }}
-          </div>
+          <div class="text-xs text-gray-400"> updated_at: {{ tool.updated_at }} </div>
           <button
             @click="save(tool)"
             class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded"
@@ -111,37 +107,35 @@
         </div>
       </div>
 
-      <div v-if="tools.length === 0" class="text-sm text-gray-500">
-        暂无工具配置。
-      </div>
+      <div v-if="tools.length === 0" class="text-sm text-gray-500"> 暂无工具配置。 </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import toolsApi from '../services/toolsApi'
+import { onMounted, ref } from 'vue';
+import toolsApi from '../services/toolsApi';
 
-const tools = ref([])
-const loading = ref(false)
-const error = ref('')
-const savingName = ref('')
+const tools = ref([]);
+const loading = ref(false);
+const error = ref('');
+const savingName = ref('');
 
 function safeParseAllowedRoles(value) {
   try {
-    const arr = JSON.parse(value || '[]')
-    return Array.isArray(arr) ? arr : []
+    const arr = JSON.parse(value || '[]');
+    return Array.isArray(arr) ? arr : [];
   } catch {
-    return []
+    return [];
   }
 }
 
 async function load() {
-  loading.value = true
-  error.value = ''
+  loading.value = true;
+  error.value = '';
   try {
-    const res = await toolsApi.listTools()
-    const rows = Array.isArray(res.data) ? res.data : []
+    const res = await toolsApi.listTools();
+    const rows = Array.isArray(res.data) ? res.data : [];
     tools.value = rows.map((s) => ({
       id: s.id,
       name: s.name,
@@ -150,41 +144,40 @@ async function load() {
       description: s.description || '',
       schema_json: s.schema_json || '',
       allowed_roles: safeParseAllowedRoles(s.allowed_roles),
-      updated_at: s.updated_at
-    }))
+      updated_at: s.updated_at,
+    }));
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || '加载失败'
+    error.value = e?.response?.data?.error || e?.message || '加载失败';
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 async function save(tool) {
-  savingName.value = tool.name
-  error.value = ''
+  savingName.value = tool.name;
+  error.value = '';
   try {
     const res = await toolsApi.updateTool(tool.name, {
       enabled: tool.enabled,
       description: tool.description,
-      allowed_roles: tool.allowed_roles
-    })
-    tool.updated_at = res.data.updated_at
+      allowed_roles: tool.allowed_roles,
+    });
+    tool.updated_at = res.data.updated_at;
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || '保存失败'
+    error.value = e?.response?.data?.error || e?.message || '保存失败';
   } finally {
-    savingName.value = ''
+    savingName.value = '';
   }
 }
 
 async function refreshCache() {
-  error.value = ''
+  error.value = '';
   try {
-    await toolsApi.refreshToolsCache()
+    await toolsApi.refreshToolsCache();
   } catch (e) {
-    error.value = e?.response?.data?.error || e?.message || '刷新缓存失败'
+    error.value = e?.response?.data?.error || e?.message || '刷新缓存失败';
   }
 }
 
-onMounted(load)
+onMounted(load);
 </script>
-

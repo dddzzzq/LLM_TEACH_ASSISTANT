@@ -1,13 +1,11 @@
 <template>
   <div>
     <div class="page-heading">
-      <div><h1 class="page-title">试卷列表</h1><p class="page-description">管理试卷与评分标准，查看学生答卷和逐题反馈。</p></div>
-      <router-link
-        to="/exams/new"
-        class="primary-button"
+      <div
+        ><h1 class="page-title">试卷列表</h1
+        ><p class="page-description">管理试卷与评分标准，查看学生答卷和逐题反馈。</p></div
       >
-        + 新建试卷
-      </router-link>
+      <router-link to="/exams/new" class="primary-button"> + 新建试卷 </router-link>
     </div>
 
     <div v-if="isLoading" class="py-10 text-center">
@@ -18,7 +16,9 @@
       {{ error }}
     </div>
 
-    <div v-else-if="exams.length === 0" class="empty-state"><h3>暂无试卷</h3><p>点击右上角“新建试卷”，设置题目与评分标准。</p></div>
+    <div v-else-if="exams.length === 0" class="empty-state"
+      ><h3>暂无试卷</h3><p>点击右上角“新建试卷”，设置题目与评分标准。</p></div
+    >
 
     <div v-else class="surface overflow-hidden">
       <ul class="divide-y divide-gray-200">
@@ -101,10 +101,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { RouterLink } from "vue-router";
-import gradingApi from "../services/gradingApi";
-import Loader from "../components/Loader.vue";
+import { ref, onMounted } from 'vue';
+import { RouterLink } from 'vue-router';
+import gradingApi from '../services/gradingApi';
+import Loader from '../components/Loader.vue';
 
 const exams = ref([]);
 const isLoading = ref(true);
@@ -119,14 +119,14 @@ const fetchExams = async () => {
     exams.value = response.data;
   } catch (e) {
     console.error(e);
-    error.value = "无法加载试卷列表。";
+    error.value = '无法加载试卷列表。';
   } finally {
     isLoading.value = false;
   }
 };
 
 const deleteExam = async (id, index) => {
-  if (!window.confirm("确定要删除这个试卷吗？")) return;
+  if (!window.confirm('确定要删除这个试卷吗？')) return;
 
   isDeleting.value[id] = true;
   error.value = null;

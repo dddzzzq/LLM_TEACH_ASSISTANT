@@ -182,9 +182,19 @@ func launchNavigation(ctx context.Context, job models.RPAJob) {
 				handoffNavigation(stepCtx, job.ID)
 				return
 			}
-			snapshot.Skill = skills["fetch-homework"]
+			snapshot.Skill = skills[pageSkill(job)]
 		}
-		if snapshot.Skill.Name != "fetch-homework" || snapshot.Skill.Instructions == "" {
+		if legacyPortalSkill(job, snapshot.Skill.Name) {
+			// Upgrade only the known old authentication/catalog documents. The
+			// action journal remains intact and is reconciled before any decision.
+			skills, loadErr := catalog.Default("portal-browser")
+			if loadErr != nil {
+				handoffNavigation(stepCtx, job.ID)
+				return
+			}
+			snapshot.Skill = skills[pageSkill(job)]
+		}
+		if snapshot.Skill.Name != pageSkill(job) || snapshot.Skill.Instructions == "" {
 			handoffNavigation(stepCtx, job.ID)
 			return
 		}
@@ -205,9 +215,18 @@ func launchNavigation(ctx context.Context, job models.RPAJob) {
 			return
 		}
 		if len(snapshot.ActionSchema) > 0 && !sameJSON(snapshot.ActionSchema, caps.Schema) {
-			// An existing task must retain its original action contract.
-			handoffNavigation(stepCtx, job.ID)
-			return
+			// Only this additive tool migration is supported; existing actions must
+			// retain their exact contracts, including pending journaled actions.
+			if !sliderToolExtension(snapshot.ActionSchema, caps.Schema) && !portalToolExtension(snapshot.ActionSchema, caps.Schema) {
+				handoffNavigation(stepCtx, job.ID)
+				return
+			}
+			skills, loadErr := catalog.Default("portal-browser")
+			if loadErr != nil || skills[pageSkill(job)].Instructions == "" {
+				handoffNavigation(stepCtx, job.ID)
+				return
+			}
+			snapshot.Skill = skills[pageSkill(job)]
 		}
 		snapshot.Protocol = caps.Protocol
 		snapshot.ActionSchema = caps.Schema
@@ -226,6 +245,83 @@ func launchNavigation(ctx context.Context, job models.RPAJob) {
 		}
 	}()
 }
+
+func pageSkill(job models.RPAJob) string {
+	if job.TaskType == "CATALOG_SYNC" || job.TaskType == "AUTH_BOOTSTRAP" {
+		return "sync-teacher-portal"
+	}
+	return "fetch-homework"
+}
+
+func legacyPortalSkill(job models.RPAJob, name string) bool {
+	return (job.TaskType == "AUTH_BOOTSTRAP" && name == "fetch-homework") ||
+		(job.TaskType == "CATALOG_SYNC" && name == "collect-homework")
+}
+
+// Permit only the known additive login/catalog tools. Existing action contracts
+// and pending receipts must stay identical across this code upgrade.
+func portalToolExtension(old, current json.RawMessage) bool {
+	decode := func(raw json.RawMessage) map[string]json.RawMessage {
+		var contract struct {
+			OneOf []json.RawMessage `json:"oneOf"`
+		}
+		if json.Unmarshal(raw, &contract) != nil {
+			return nil
+		}
+		out := map[string]json.RawMessage{}
+		for _, spec := range contract.OneOf {
+			var field struct {
+				Properties map[string]struct {
+					Enum []string `json:"enum"`
+				} `json:"properties"`
+			}
+			if json.Unmarshal(spec, &field) != nil || len(field.Properties["tool"].Enum) != 1 {
+				return nil
+			}
+			name := field.Properties["tool"].Enum[0]
+			if out[name] != nil {
+				return nil
+			}
+			out[name] = spec
+		}
+		return out
+	}
+	before, after := decode(old), decode(current)
+	if len(before) == 0 || len(after) <= len(before) {
+		return false
+	}
+	allowed := map[string]bool{"solve_slider_captcha": true, "fill_portal_credentials": true, "request_login_code": true, "submit_login_code": true, "apply_device_trust": true, "read_course_list": true, "read_homework_list": true, "finish_catalog": true, "return_to_course_list": true}
+	for name, spec := range before {
+		if !sameJSON(spec, after[name]) {
+			return false
+		}
+	}
+	for name, spec := range after {
+		if before[name] != nil {
+			continue
+		}
+		if !allowed[name] {
+			return false
+		}
+		props := map[string]any{"tool": map[string]any{"type": "string", "enum": []string{name}}}
+		required := []string{"tool"}
+		if name == "read_homework_list" {
+			props["course_id"] = map[string]string{"type": "string"}
+			required = append(required, "course_id")
+		}
+		var actual map[string]any
+		if json.Unmarshal(spec, &actual) != nil {
+			return false
+		}
+		delete(actual, "description")
+		expected, _ := json.Marshal(map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false})
+		encoded, _ := json.Marshal(actual)
+		if !sameJSON(encoded, expected) {
+			return false
+		}
+	}
+	return true
+}
 func sameJSON(a, b []byte) bool {
 	var x, y any
 	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
@@ -234,6 +330,55 @@ func sameJSON(a, b []byte) bool {
 	aa, _ := json.Marshal(x)
 	bb, _ := json.Marshal(y)
 	return string(aa) == string(bb)
+}
+
+// sliderToolExtension allows one known zero-argument addition, not general drift.
+func sliderToolExtension(old, current json.RawMessage) bool {
+	decode := func(raw json.RawMessage) map[string]json.RawMessage {
+		var contract struct {
+			OneOf []json.RawMessage `json:"oneOf"`
+		}
+		if json.Unmarshal(raw, &contract) != nil {
+			return nil
+		}
+		out := map[string]json.RawMessage{}
+		for _, item := range contract.OneOf {
+			var variant struct {
+				Properties map[string]struct {
+					Enum []string `json:"enum"`
+				} `json:"properties"`
+			}
+			if json.Unmarshal(item, &variant) != nil || len(variant.Properties["tool"].Enum) != 1 {
+				return nil
+			}
+			name := variant.Properties["tool"].Enum[0]
+			if _, exists := out[name]; exists {
+				return nil
+			}
+			out[name] = item
+		}
+		return out
+	}
+	before, after := decode(old), decode(current)
+	if len(before) == 0 || len(after) != len(before)+1 || before["solve_slider_captcha"] != nil {
+		return false
+	}
+	for name, spec := range before {
+		if !sameJSON(spec, after[name]) {
+			return false
+		}
+	}
+	var added struct {
+		Type                 string                     `json:"type"`
+		Properties           map[string]json.RawMessage `json:"properties"`
+		Required             []string                   `json:"required"`
+		AdditionalProperties bool                       `json:"additionalProperties"`
+	}
+	if json.Unmarshal(after["solve_slider_captcha"], &added) != nil {
+		return false
+	}
+	return added.Type == "object" && len(added.Properties) == 1 && added.Properties["tool"] != nil &&
+		len(added.Required) == 1 && added.Required[0] == "tool" && !added.AdditionalProperties
 }
 
 func handoffNavigation(ctx context.Context, id string) {

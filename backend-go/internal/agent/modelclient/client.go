@@ -16,7 +16,9 @@ type LLMResponse struct {
 	// Content LLM 返回的文本内容
 	Content string
 	// ToolCalls 工具调用列表，如果没有工具调用则为空
-	ToolCalls []ToolCall
+	ToolCalls    []ToolCall
+	Usage        map[string]any `json:"usage,omitempty"`
+	FinishReason string         `json:"finish_reason,omitempty"`
 }
 
 // ToolCall 表示一个工具调用请求
@@ -116,6 +118,8 @@ func (c *DeepSeekClient) CallMessages(ctx context.Context, messages []map[string
 	if len(tools) > 0 {
 		requestBody["tools"] = tools
 		requestBody["tool_choice"] = "auto" // 让模型自行决定是否调用工具
+	} else {
+		requestBody["tool_choice"] = "none"
 	}
 
 	// 编码请求体
@@ -175,7 +179,8 @@ func (c *DeepSeekClient) CallMessages(ctx context.Context, messages []map[string
 	}
 
 	// 构建响应结果
-	result := &LLMResponse{}
+	result := &LLMResponse{FinishReason: getString(choice, "finish_reason")}
+	result.Usage, _ = apiResponse["usage"].(map[string]any)
 
 	// 提取文本内容
 	if content, ok := message["content"].(string); ok && content != "" {
@@ -245,3 +250,8 @@ func NewPageClient() *DeepSeekClient {
 }
 
 type Call func(context.Context, []map[string]interface{}, []map[string]interface{}) (*LLMResponse, error)
+
+// Metadata excludes credentials and request headers from the durable execution record.
+func (c *DeepSeekClient) Metadata() map[string]any {
+	return map[string]any{"name": c.model, "temperature": 0.3, "max_tokens": 4000}
+}

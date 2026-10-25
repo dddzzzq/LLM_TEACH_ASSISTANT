@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"grading-gateway/internal/agent/catalog"
+	"grading-gateway/internal/execution"
 	"strings"
 )
 
@@ -29,6 +30,7 @@ type toolGateway struct {
 	executed              map[string]string
 	submitted             bool
 	lastResult            string
+	record                execution.Record
 }
 
 func newGateway(role, username string, r *ToolRegistry) *toolGateway {
@@ -82,6 +84,12 @@ func (g *toolGateway) execute(ctx context.Context, name, args string) (string, e
 	// Both historical download names represent the same operation.
 	if name == "fetch_and_grade_homework" {
 		key = "fetch_homework" + string(canonical)
+	}
+	if g.record != nil {
+		_, cached := g.executed[key]
+		if err := g.record(ctx, "tool.bound", map[string]any{"call_id": execution.CallID(ctx), "name": name, "effective_arguments": args, "request_id": g.runID, "skill": required, "skill_version": g.visible[required], "cached": cached}); err != nil {
+			return "", err
+		}
 	}
 	if prior, ok := g.executed[key]; ok {
 		return prior, nil
