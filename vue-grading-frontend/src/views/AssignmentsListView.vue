@@ -1,225 +1,686 @@
 <template>
-  <div>
-    <div class="page-heading">
+  <div class="assignment-workspace">
+    <header class="assignment-heading">
       <div
-        ><h1 class="page-title">作业批改记录</h1
-        ><p class="page-description">集中管理课程作业，查看查重分析与智能评分结果。</p></div
+        ><div class="eyebrow">ASSIGNMENTS</div><h1 class="page-title">作业批改</h1
+        ><p class="page-description">查看作业内容，整理学生材料，跟进每一次批改。</p></div
       >
-      <router-link to="/assignments/new" class="primary-button">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-5 w-5 mr-1"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-        >
-          <path
-            fill-rule="evenodd"
-            d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
-            clip-rule="evenodd"
-          />
-        </svg>
-        新建作业
-      </router-link>
+      <div class="heading-actions"
+        ><router-link class="workspace-button" to="/grade-homework"
+          ><AppIcon name="download" />导入与自动批改</router-link
+        ><router-link class="workspace-button primary" to="/assignments/new"
+          ><AppIcon name="plus" />新建作业</router-link
+        ></div
+      >
+    </header>
+    <div class="workspace-metrics" aria-label="作业概况">
+      <div
+        ><span>全部作业</span><strong>{{ assignments.length }}</strong></div
+      >
+      <div
+        ><span><i class="metric-dot blue"></i>处理中</span
+        ><strong>{{ summariesAvailable ? processingCount : '—' }}</strong></div
+      >
+      <div
+        ><span><i class="metric-dot amber"></i>待处理</span
+        ><strong>{{ summariesAvailable ? attentionCount : '—' }}</strong></div
+      >
+      <div
+        ><span><i class="metric-dot green"></i>已有评分结果</span
+        ><strong>{{ summariesAvailable ? gradedCount : '—' }}</strong></div
+      >
     </div>
-
-    <div v-if="isLoading" class="py-20 text-center">
-      <Loader />
-      <p class="text-gray-500 mt-4">正在加载作业列表...</p>
-    </div>
-
-    <div
-      v-else-if="error"
-      class="p-6 text-red-700 bg-red-100 rounded-lg border border-red-200 flex items-start"
+    <div v-if="error" class="workspace-error" role="alert"
+      >{{ error }} <button @click="loadAssignments">重新加载</button></div
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        class="h-6 w-6 mr-2 flex-shrink-0"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-      <div>
-        <h3 class="font-bold text-lg">加载失败</h3>
-        <p>{{ error }}</p>
-        <button
-          @click="fetchAssignments"
-          class="mt-2 text-sm font-semibold underline hover:text-red-900"
+    <div class="assignment-layout">
+      <section class="assignment-list surface" aria-label="作业列表" :aria-busy="loading">
+        <div class="list-toolbar"
+          ><label class="search-field"
+            ><AppIcon name="search" /><input
+              v-model="search"
+              aria-label="搜索作业"
+              placeholder="搜索作业、课程或题目…" /></label
+          ><button
+            class="icon-button"
+            aria-label="刷新作业列表"
+            :disabled="loading"
+            @click="loadAssignments"
+            ><AppIcon name="history" /></button
+        ></div>
+        <div class="list-filters"
+          ><select v-model="course" aria-label="筛选课程"
+            ><option value="">全部课程</option
+            ><option v-for="name in courses" :key="name" :value="name">{{ name }}</option></select
+          ><select v-model="status" aria-label="筛选状态"
+            ><option value="">全部状态</option
+            ><option v-for="(state, key) in assignmentStates" :key="key" :value="key">{{
+              state.label
+            }}</option></select
+          ><span>{{ filtered.length }} 项作业</span
+          ><button
+            v-if="search || course || status"
+            class="text-action"
+            @click="
+              search = '';
+              course = '';
+              status = '';
+            "
+            >清除筛选</button
+          ></div
         >
-          重试
-        </button>
-      </div>
-    </div>
-
-    <div v-else-if="assignments.length === 0" class="empty-state">
-      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-8 w-8 text-gray-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
+        <div v-if="loading && !assignments.length" class="workspace-empty"
+          ><Loader /><p>正在读取作业…</p></div
         >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-          />
-        </svg>
-      </div>
-      <h3 class="text-lg font-medium text-gray-900">暂无作业任务</h3>
-      <p class="mt-1 text-gray-500">点击右上角的"新建作业"按钮创建一个新的作业任务。</p>
-    </div>
-
-    <div v-else class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      <div
-        v-for="(assignment, index) in assignments"
-        :key="assignment.id"
-        class="surface assignment-card overflow-hidden flex flex-col"
-      >
-        <div class="p-6 flex-grow">
-          <div class="flex justify-between items-start mb-4">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-2">
-                <span
-                  class="px-2 py-1 text-xs font-semibold text-green-600 bg-green-50 rounded-full"
+        <template v-else-if="filtered.length">
+          <div class="assignment-table-scroll"
+            ><table class="assignment-table"
+              ><thead
+                ><tr
+                  ><th>作业名称 / 课程</th><th>状态</th><th>已评分</th><th>最近处理</th
+                  ><th><span class="sr-only">操作</span></th></tr
+                ></thead
+              ><tbody>
+                <tr
+                  v-for="item in filtered"
+                  :key="item.id"
+                  :class="{ selected: selected?.id === item.id }"
+                  @click="selectedId = item.id"
                 >
-                  {{ assignment.course_name }}
-                </span>
-                <span class="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-50 rounded-full">
-                  {{ assignment.class_name }}
-                </span>
-              </div>
-              <h3
-                class="text-lg font-semibold text-gray-800 line-clamp-2"
-                :title="assignment.task_name"
-              >
-                {{ assignment.task_name }}
-              </h3>
-            </div>
-            <span
-              class="px-2 py-1 text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-full ml-2"
-              >ID: {{ assignment.id }}</span
-            >
-          </div>
-          <p class="text-gray-500 text-sm leading-relaxed line-clamp-3 mb-4 min-h-12">
-            {{ assignment.question || '无题目描述' }}
-          </p>
-        </div>
-
-        <div
-          class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center mt-auto"
+                  <td
+                    ><button
+                      class="assignment-title"
+                      :aria-pressed="selected?.id === item.id"
+                      @click.stop="selectedId = item.id"
+                      >{{ item.task_name || '未命名作业' }}</button
+                    ><span class="course-label">{{ item.course_name || '未命名课程' }}</span></td
+                  >
+                  <td
+                    ><span class="status-badge" :class="assignmentState(item).tone"
+                      ><i></i>{{ assignmentState(item).label }}</span
+                    ></td
+                  ><td class="tabular"
+                    >{{ item.summary ? item.summary.graded_count : '—'
+                    }}<small v-if="item.summary"> 人</small></td
+                  ><td class="activity-cell">{{ formatActivity(item.summary?.updated_at) }}</td
+                  ><td
+                    ><router-link
+                      class="row-open"
+                      :to="`/assignments/${item.id}?tab=materials`"
+                      :aria-label="`批改${item.task_name}`"
+                      >进入 <span aria-hidden="true">↗</span></router-link
+                    ></td
+                  >
+                </tr>
+              </tbody></table
+            ></div
+          >
+          <div class="list-footer">点击作业名称预览内容，进入作业后导入材料或查看评分。</div>
+        </template>
+        <div v-else class="workspace-empty"
+          ><div class="empty-symbol"><AppIcon name="book" /></div
+          ><h2>{{ assignments.length ? '没有符合条件的作业' : '从第一份作业开始' }}</h2
+          ><p>{{
+            assignments.length
+              ? '试试其他关键词，或清除筛选。'
+              : '先创建题目和评分标准，也可以直接导入并自动批改。'
+          }}</p
+          ><router-link
+            v-if="!assignments.length"
+            class="workspace-button primary"
+            to="/assignments/new"
+            >新建作业</router-link
+          ></div
         >
-          <router-link
-            :to="`/assignments/${assignment.id}`"
-            class="text-indigo-600 hover:text-indigo-800 font-medium text-sm flex items-center"
-          >
-            进入评分
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4 ml-1"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </router-link>
-
-          <button
-            @click.prevent="deleteAssignment(assignment.id, index)"
-            title="删除此作业"
-            class="text-gray-400 hover:text-red-600 transition-colors p-1 rounded-full hover:bg-red-50"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="w-5 h-5"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
+      </section>
+      <aside class="assignment-preview surface" aria-label="作业预览">
+        <div class="preview-heading"><span>作业预览</span><AppIcon name="file" /></div>
+        <template v-if="selected"
+          ><div class="preview-course">{{ selected.course_name }}</div
+          ><h2>{{ selected.task_name }}</h2
+          ><span class="status-badge" :class="assignmentState(selected).tone"
+            ><i></i>{{ assignmentState(selected).label }}</span
+          ><div class="preview-stats"
+            ><div
+              ><strong>{{ selected.summary?.graded_count ?? '—' }}</strong
+              ><span>已评分学生</span></div
+            ><div
+              ><strong>{{ selected.summary?.batch_count ?? '—' }}</strong
+              ><span>材料批次</span></div
+            ></div
+          ><h3>题目要求</h3
+          ><p class="question-preview">{{ selected.question || '尚未填写题目要求。' }}</p
+          ><h3>评分标准</h3><RubricSummary :rubric="selected.rubric" /><router-link
+            class="workspace-button primary preview-open"
+            :to="`/assignments/${selected.id}`"
+            >查看完整作业 <span aria-hidden="true">→</span></router-link
+          ><router-link
+            class="text-action preview-results"
+            :to="`/assignments/${selected.id}?tab=results`"
+            >查看评分结果</router-link
+          ><details class="assignment-more"
+            ><summary>更多操作</summary
+            ><button
+              class="danger-action"
+              :disabled="deleting"
+              @click="removeAssignment(selected)"
+              >{{ deleting ? '删除中…' : '删除此作业' }}</button
+            ></details
+          ></template
+        >
+        <div v-else class="preview-placeholder"
+          ><AppIcon name="file" /><p>选择一份作业<br />在这里查看题目和评分标准</p></div
+        >
+      </aside>
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { RouterLink } from 'vue-router';
+<script setup>
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import gradingApi from '../services/gradingApi';
+import AppIcon from '../components/AppIcon.vue';
 import Loader from '../components/Loader.vue';
-
-interface Assignment {
-  id: number;
-  course_name: string;
-  class_name: string;
-  task_name: string;
-  question: string;
-}
-
-const assignments = ref<Assignment[]>([]);
-const isLoading = ref(true);
-const error = ref<string | null>(null);
-
-const fetchAssignments = async () => {
-  isLoading.value = true;
-  error.value = null;
+import RubricSummary from '../components/RubricSummary.vue';
+import {
+  assignmentStates,
+  assignmentState,
+  filterAssignments,
+  formatActivity,
+} from '../services/assignmentWorkspace';
+const assignments = ref([]),
+  search = ref(''),
+  course = ref(''),
+  status = ref(''),
+  selectedId = ref(null),
+  loading = ref(false),
+  deleting = ref(false),
+  error = ref('');
+const courses = computed(() =>
+  [...new Set(assignments.value.map((item) => item.course_name).filter(Boolean))].sort()
+);
+const filtered = computed(() =>
+  filterAssignments(assignments.value, {
+    search: search.value,
+    course: course.value,
+    status: status.value,
+  })
+);
+const selected = computed(
+  () => filtered.value.find((item) => item.id === selectedId.value) || filtered.value[0]
+);
+const summariesAvailable = computed(() => assignments.value.every((item) => item.summary));
+const processingCount = computed(
+  () =>
+    assignments.value.filter((item) => ['GRADING', 'PREPARING'].includes(item.summary?.status))
+      .length
+);
+const attentionCount = computed(
+  () => assignments.value.filter((item) => item.summary?.status === 'ATTENTION').length
+);
+const gradedCount = computed(
+  () => assignments.value.filter((item) => item.summary?.graded_count > 0).length
+);
+async function loadAssignments() {
+  if (loading.value) return;
+  loading.value = true;
   try {
-    console.log('开始获取作业列表...'); // 调试日志
-    const response = await gradingApi.getAssignments();
-    console.log('API 响应数据:', response.data); // 调试日志
-    assignments.value = response.data;
-  } catch (e: any) {
-    console.error('获取作业列表失败:', e); // 调试日志
-    error.value = e.message || '无法加载作业列表，请检查后端服务是否启动。';
-    // 如果是网络错误，通常 e.message 会是 "Network Error"
+    const { data } = await gradingApi.getAssignments();
+    assignments.value = Array.isArray(data) ? data : [];
+    error.value = '';
+  } catch {
+    error.value = '暂时无法读取作业，请检查服务连接后重试。';
   } finally {
-    isLoading.value = false;
+    loading.value = false;
   }
-};
-
-const deleteAssignment = async (id: number, index: number) => {
-  if (confirm('确定要删除这个作业及其所有评分记录吗？\n此操作不可撤销。')) {
-    try {
-      await gradingApi.deleteAssignment(id);
-      assignments.value.splice(index, 1);
-    } catch (e) {
-      alert('删除失败，请重试。');
-      console.error(e);
-    }
+}
+async function removeAssignment(item) {
+  if (!confirm(`确定删除“${item.task_name}”及其评分记录？此操作无法撤销。`)) return;
+  deleting.value = true;
+  try {
+    await gradingApi.deleteAssignment(item.id);
+    assignments.value = assignments.value.filter((row) => row.id !== item.id);
+  } catch {
+    error.value = '删除失败，请稍后重试。';
+  } finally {
+    deleting.value = false;
   }
-};
-
-onMounted(fetchAssignments);
+}
+let timer;
+onMounted(() => {
+  loadAssignments();
+  timer = setInterval(() => {
+    if (processingCount.value && !document.hidden) loadAssignments();
+  }, 10000);
+});
+onUnmounted(() => clearInterval(timer));
 </script>
 <style scoped>
-.assignment-card {
-  transition: border-color 150ms;
+.assignment-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
 }
-.assignment-card:hover {
-  border-color: #83c4b9;
+.eyebrow {
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
 }
-.assignment-card .flex.items-center.gap-2 {
+.heading-actions {
+  display: flex;
+  gap: 10px;
   flex-wrap: wrap;
 }
-.assignment-card h3 {
+.workspace-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-line);
+  margin-bottom: 26px;
+}
+.workspace-metrics > div {
+  background: white;
+  padding: 19px 24px;
+}
+.workspace-metrics span {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+.workspace-metrics strong {
+  display: block;
+  margin-top: 9px;
+  font-size: 27px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+.metric-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6679ed;
+}
+.metric-dot.amber {
+  background: #d99531;
+}
+.metric-dot.green {
+  background: #2d9b7b;
+}
+.assignment-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 22px;
+  align-items: start;
+}
+.assignment-list {
+  min-width: 0;
+  overflow: hidden;
+}
+.list-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 17px 20px 10px;
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+}
+.search-field svg {
+  width: 17px;
+  color: #8490a2;
+}
+.search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 13px;
+  padding: 0;
+  min-height: 34px !important;
+  background: transparent;
+}
+.list-filters {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 20px 16px;
+  flex-wrap: wrap;
+}
+.list-filters select {
+  max-width: 200px;
+  min-height: 32px;
+  font-size: 11px;
+  padding: 4px 25px 4px 10px;
+  border: 1px solid var(--color-line);
+  background: #fafbfe;
+}
+.list-filters > span {
+  margin-left: auto;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.assignment-table-scroll {
+  overflow-x: auto;
+}
+.assignment-table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.assignment-table th {
+  text-align: left;
+  font-size: 10px;
+  color: var(--color-muted);
+  font-weight: 500;
+  background: #fafbfe;
+  border-block: 1px solid var(--color-line);
+  padding: 12px 16px;
+}
+.assignment-table td {
+  padding: 19px 16px;
+  border-bottom: 1px solid #edf0f5;
+  font-size: 12px;
+}
+.assignment-table th:first-child,
+.assignment-table td:first-child {
+  padding-left: 20px;
+}
+.assignment-table tr.selected td {
+  background: #f5f6ff;
+}
+.assignment-table tbody tr:hover td {
+  background: #f8f9ff;
+}
+.assignment-title {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #27334b;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assignment-title:hover {
+  color: var(--color-accent);
+}
+.course-label {
+  display: block;
+  margin-top: 7px;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.tabular small {
+  font-size: 10px;
+  color: var(--color-muted);
+}
+.activity-cell {
+  font-size: 11px !important;
+  color: var(--color-muted);
+}
+.row-open {
+  font-size: 11px;
+  color: var(--color-accent);
+}
+.row-open span {
+  margin-left: 3px;
+}
+.list-footer {
+  padding: 15px 20px;
+  font-size: 10px;
+  color: #8993a6;
+  background: #fcfcfe;
+}
+.assignment-preview {
+  padding: 23px;
+  min-width: 0;
+}
+.preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #687387;
+  font-size: 11px;
+  border-bottom: 1px solid var(--color-line);
+  padding-bottom: 16px;
+  margin-bottom: 22px;
+}
+.preview-heading svg {
+  width: 16px;
+}
+.preview-course {
+  font-size: 11px;
+  color: var(--color-accent);
+  margin-bottom: 7px;
+}
+.assignment-preview h2 {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin-bottom: 12px;
   overflow-wrap: anywhere;
+}
+.preview-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #f8f9fc;
+  border-radius: 9px;
+  padding: 17px 12px;
+  margin: 22px 0;
+}
+.preview-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+}
+.preview-stats > div + div {
+  border-left: 1px solid var(--color-line);
+}
+.preview-stats strong {
+  font-size: 21px;
+  font-weight: 600;
+}
+.preview-stats span {
+  font-size: 10px;
+  color: var(--color-muted);
+}
+.assignment-preview h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 23px;
+}
+.question-preview {
+  font-size: 12px;
+  color: #667086;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.preview-open {
+  display: flex;
+  width: 100%;
+  margin-top: 22px;
+  justify-content: space-between;
+}
+.preview-results {
+  display: block;
+  text-align: center;
+  margin-top: 15px;
+  font-size: 12px;
+}
+.assignment-more {
+  border-top: 1px solid var(--color-line);
+  margin-top: 23px;
+  padding-top: 15px;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.assignment-more summary {
+  cursor: pointer;
+}
+.danger-action {
+  color: #bf435b;
+  padding-top: 12px;
+}
+.preview-placeholder {
+  text-align: center;
+  padding: 65px 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 2;
+}
+.preview-placeholder svg {
+  width: 36px;
+  margin: 0 auto 18px;
+  color: #bcc3d3;
+}
+.workspace-empty {
+  text-align: center;
+  padding: 65px 22px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.workspace-empty h2 {
+  color: var(--color-ink);
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.workspace-empty p {
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+.empty-symbol {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  background: #f0f2ff;
+  border-radius: 13px;
+  color: var(--color-accent);
+  margin: 0 auto 20px;
+}
+.empty-symbol svg {
+  width: 24px;
+}
+@media (min-width: 1500px) {
+  .assignment-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+@media (max-width: 1200px) {
+  .assignment-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .assignment-preview {
+    display: block;
+  }
+  .preview-stats {
+    max-width: 360px;
+  }
+  .question-preview {
+    -webkit-line-clamp: 5;
+  }
+  .preview-open {
+    max-width: 300px;
+  }
+  .preview-results {
+    text-align: left;
+  }
+  .assignment-more {
+    max-width: 300px;
+  }
+}
+@media (max-width: 760px) {
+  .assignment-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 20px;
+  }
+  .heading-actions {
+    width: 100%;
+  }
+  .heading-actions a {
+    flex: 1;
+    justify-content: center;
+    font-size: 11px;
+    padding: 10px;
+  }
+  .workspace-metrics {
+    grid-template-columns: repeat(2, 1fr);
+    margin-bottom: 18px;
+  }
+  .workspace-metrics > div {
+    padding: 15px 18px;
+  }
+  .workspace-metrics strong {
+    font-size: 23px;
+  }
+  .list-filters select {
+    max-width: 145px;
+  }
+  .list-toolbar {
+    padding: 12px 14px 6px;
+  }
+  .list-filters {
+    padding: 0 14px 12px;
+  }
+  .assignment-title {
+    max-width: 190px;
+  }
+  .assignment-preview {
+    padding: 20px;
+  }
+  .assignment-table td {
+    padding: 16px 12px;
+  }
+  .assignment-layout {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 760px) {
+  .assignment-table th:nth-child(4),
+  .assignment-table td:nth-child(4) {
+    display: none;
+  }
+  .assignment-table th,
+  .assignment-table td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .assignment-table th:first-child,
+  .assignment-table td:first-child {
+    padding-left: 14px;
+  }
+  .assignment-title,
+  .course-label {
+    max-width: 125px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>

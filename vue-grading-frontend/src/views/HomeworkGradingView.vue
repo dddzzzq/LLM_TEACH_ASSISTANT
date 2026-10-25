@@ -1,12 +1,13 @@
 <template>
   <div class="form-page grading-workbench">
+    <router-link to="/assignments" class="back-link">← 返回作业批改</router-link>
     <header
-      ><h1 class="page-title">作业批改工作台</h1
+      ><h1 class="page-title">导入与自动批改</h1
       ><p class="page-description"
         >按三个步骤开始：选择作业、填写要求、提交批改。全部班级默认一并处理。</p
       ></header
     >
-    <p class="workflow-step">提交后可在“批改记录”查看结果，在“作业材料”处理异常。</p>
+    <p class="workflow-step">提交后可返回作业列表查看内容与结果，也可在作业详情中处理材料。</p>
     <form class="form-surface workbench-form" @submit.prevent="submit">
       <fieldset class="source-options"
         ><legend>1. 选择作业来源</legend
@@ -83,7 +84,9 @@
       <article v-for="item in workflow.items" :key="item.id"
         ><strong>{{ item.course_name }} / {{ item.homework_name }} / {{ item.class_name }}</strong
         ><p>{{ portalStatus(item.status) }} · {{ item.message }}</p
-        ><router-link v-if="item.assignment_id" :to="'/assignments/' + item.assignment_id"
+        ><router-link
+          v-if="item.assignment_id"
+          :to="'/assignments/' + item.assignment_id + '?tab=materials'"
           >查看材料和批改结果</router-link
         ><router-link
           v-if="item.status === 'WAITING_AUTH' && !item.rpa_job_id"
@@ -96,7 +99,8 @@
       /></article>
     </section>
     <section v-if="assignmentId" class="form-surface"
-      ><router-link :to="'/assignments/' + assignmentId">查看本次作业与批改结果 →</router-link
+      ><router-link :to="'/assignments/' + assignmentId + '?tab=results'"
+        >查看本次作业与批改结果 →</router-link
       ><MaterialBatchPanel :assignment-id="assignmentId"
     /></section>
   </div>
@@ -315,7 +319,7 @@ button {
   border: 1px solid #cbd5e1;
 }
 button.primary {
-  background: #2563eb;
+  background: var(--color-accent);
   color: white;
 }
 button:disabled {
@@ -325,7 +329,7 @@ button:disabled {
   color: #b91c1c;
 }
 a {
-  color: #2563eb;
+  color: var(--color-accent);
 }
 .workflow-progress header {
   display: flex;
@@ -340,5 +344,36 @@ a {
 small,
 p {
   color: #64748b;
+}
+
+.grading-workbench {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.grading-workbench > .back-link {
+  margin-bottom: 0;
+}
+.source-options label {
+  flex: 1;
+  min-width: 160px;
+  padding: 17px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  font-size: 13px;
+  color: #647089;
+  background: #fafbfe;
+}
+.source-options label:has(input:checked) {
+  border-color: #98a3f3;
+  background: #f3f4ff;
+  color: #4455cf;
+}
+.source-options legend,
+.submission-title {
+  font-size: 14px;
+}
+.workflow-step {
+  font-size: 12px;
+  color: var(--color-muted);
 }
 </style>

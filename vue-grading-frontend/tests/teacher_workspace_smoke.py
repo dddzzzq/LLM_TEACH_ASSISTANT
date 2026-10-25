@@ -53,7 +53,9 @@ async def main():
         await expect(page.get_by_role('heading',name='AI 助手',exact=True)).to_be_visible()
         assert not re.search('试卷|主观题|考试',await page.locator('body').inner_text())
         await navigation.get_by_role('link',name='作业批改',exact=True).click()
-        await expect(page.get_by_role('navigation',name='作业批改导航')).to_be_visible()
+        await expect(page.get_by_role('heading',name='作业批改',exact=True)).to_be_visible()
+        await expect(page.get_by_text('从第一份作业开始',exact=True)).to_be_visible()
+        await page.get_by_role('link',name='导入与自动批改',exact=True).click()
         for label in ['上传压缩包','指定目录','选择官网作业']:
             await expect(page.get_by_role('radio',name=label,exact=True)).to_be_visible()
         await page.screenshot(path='/mnt/d/dzq/LLM_TEACH_ASSISTANT/.runtime/diagnostics/teacher-workspace-desktop.png',full_page=True)
@@ -79,11 +81,11 @@ async def main():
         submitted=next(body for path,body in posts if path=='/api/grading/workflows')
         assert submitted['items']==[{'homework_id':'h1'}]
         assert submitted['rubric']=={'功能正确性':{'description':'完成全部功能','score':100}}
-        for path in ['/assignments','/materials','/settings/portal']:
+        for path in ['/assignments','/assignments/new']:
             await page.evaluate('(path)=>window.fixtureRouter.push(path)',path)
             await expect(navigation.get_by_role('link',name='作业批改',exact=True)).to_have_class(re.compile('is-active'))
         await page.evaluate("window.fixtureRouter.push('/exams/1')")
-        await expect(page.get_by_role('heading',name='AI 助手',exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading',name='作业批改',exact=True)).to_be_visible()
         await page.set_viewport_size({'width':390,'height':844})
         await page.screenshot(path=str(diagnostics/'teacher-assistant-mobile.png'),full_page=True)
         assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'Mobile overflow'

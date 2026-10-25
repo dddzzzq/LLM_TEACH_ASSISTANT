@@ -5,7 +5,7 @@ import { mainNavigation, isTeacherAccount, isHomeworkPage } from './teacherWorks
 test('teacher workspace has two entry points and preserves homework subpages', () => {
   assert.deepEqual(
     mainNavigation.map((item) => item.path),
-    ['/ai-assistant', '/grade-homework']
+    ['/assignments', '/ai-assistant']
   );
   for (const path of ['/assignments/12', '/assignments/new', '/materials', '/settings/portal'])
     assert.equal(isHomeworkPage(path), true);

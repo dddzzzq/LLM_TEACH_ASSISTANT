@@ -59,10 +59,13 @@ func CreateAssignment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, schemas.AssignmentResponse{
-		ID:       assignment.ID,
-		TaskName: assignment.TaskName,
-		Question: assignment.Question,
-		Rubric:   req.Rubric,
+		Summary:    &schemas.AssignmentSummary{Status: "EMPTY"},
+		CourseName: assignment.CourseName,
+		ClassName:  assignment.ClassName,
+		ID:         assignment.ID,
+		TaskName:   assignment.TaskName,
+		Question:   assignment.Question,
+		Rubric:     req.Rubric,
 	})
 }
 
@@ -86,6 +89,16 @@ func GetAssignments(c *gin.Context) {
 	}
 
 	// 获取成功后返回json
+	ids := make([]uint, 0, len(assignments))
+	for _, assignment := range assignments {
+		ids = append(ids, assignment.ID)
+	}
+	summaries, err := assignmentSummaries(c.Request.Context(), database.DB, ids)
+	if err != nil {
+		// Progress is additive metadata; assignments remain accessible if a
+		// statistics query is temporarily unavailable.
+		log.Printf("读取作业进度失败：%v", err)
+	}
 	var res []schemas.AssignmentResponse
 	for _, ass := range assignments {
 		var rubricMap map[string]interface{}
@@ -97,7 +110,12 @@ func GetAssignments(c *gin.Context) {
 			rubricMap = make(map[string]interface{})
 		}
 
+		var summary *schemas.AssignmentSummary
+		if value, ok := summaries[ass.ID]; ok {
+			summary = &value
+		}
 		res = append(res, schemas.AssignmentResponse{
+			Summary:    summary,
 			ID:         ass.ID,
 			CourseName: ass.CourseName,
 			ClassName:  ass.ClassName,

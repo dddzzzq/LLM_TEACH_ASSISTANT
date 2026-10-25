@@ -14,16 +14,33 @@
         class="sidebar-link"
         :class="{
           'is-active':
-            item.path === '/grade-homework' ? isHomeworkPage(route.path) : route.path === item.path,
+            item.path === '/assignments'
+              ? route.path.startsWith('/assignments') || route.path === '/grade-homework'
+              : route.path === item.path,
         }"
       >
         <AppIcon :name="item.icon" /><span>{{ item.name }}</span>
         <span v-if="item.path === '/ai-assistant'" class="ai-label">AI</span>
       </router-link>
     </nav>
-    <div class="sidebar-note"
-      ><AppIcon name="sparkles" /><p>让繁琐交给技术<br /><span>让用心回归教学</span></p></div
-    >
+    <details class="sidebar-resources" open>
+      <summary>资源与设置</summary>
+      <nav aria-label="资源与设置">
+        <router-link to="/materials" class="sidebar-link"
+          ><AppIcon name="file" />作业材料</router-link
+        >
+        <router-link to="/settings/portal" class="sidebar-link"
+          ><AppIcon name="settings" />教务账号</router-link
+        >
+        <details class="sidebar-advanced"
+          ><summary>更多设置</summary>
+          <router-link to="/tools-admin" class="sidebar-link">工具与技能</router-link>
+          <router-link v-if="currentUser?.role === 'admin'" to="/logs" class="sidebar-link"
+            >运行日志</router-link
+          >
+        </details>
+      </nav>
+    </details>
     <div class="sidebar-footer">
       <div v-if="currentUser" class="sidebar-user">
         <div class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</div>
@@ -45,7 +62,7 @@ import { computed, ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import authApi from '../services/authApi';
 import AppIcon from './AppIcon.vue';
-import { mainNavigation, isHomeworkPage } from '../services/teacherWorkspace';
+import { mainNavigation } from '../services/teacherWorkspace';
 
 const router = useRouter();
 const route = useRoute();
@@ -117,7 +134,7 @@ const handleLogout = async () => {
   width: 39px;
   height: 39px;
   flex-shrink: 0;
-  background: #197b70;
+  background: var(--color-accent);
   border-radius: 11px;
   color: #fff;
 }
@@ -170,18 +187,18 @@ const handleLogout = async () => {
   color: #66788a;
 }
 .sidebar-link:hover {
-  color: #197b70;
-  background: #f3f8f7;
+  color: var(--color-accent);
+  background: #f5f6ff;
 }
 .sidebar-link.is-active,
 .sidebar-link.router-link-exact-active {
-  color: #14655d;
-  background: #eaf4f2;
+  color: #4455cf;
+  background: #eef0ff;
   font-weight: 600;
 }
 .sidebar-link.is-active > svg,
 .sidebar-link.router-link-exact-active > svg {
-  color: #197b70;
+  color: var(--color-accent);
 }
 .sidebar-link.is-active::before {
   content: '';
@@ -191,7 +208,7 @@ const handleLogout = async () => {
   bottom: 12px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: #197b70;
+  background: var(--color-accent);
 }
 .ai-label {
   margin-left: auto;
@@ -199,14 +216,14 @@ const handleLogout = async () => {
   border: 1px solid #d9e7e4;
   border-radius: 4px;
   font-size: 9px;
-  color: #197b70;
+  color: var(--color-accent);
 }
 .sidebar-note {
   display: flex;
   gap: 11px;
   margin: auto 25px 28px;
   padding-top: 40px;
-  color: #197b70;
+  color: var(--color-accent);
 }
 .sidebar-note > svg {
   width: 20px;
@@ -222,6 +239,7 @@ const handleLogout = async () => {
   color: #66788a;
 }
 .sidebar-footer {
+  margin-top: auto;
   border-top: 1px solid #e0e7ee;
   padding: 20px 21px 17px;
 }
@@ -236,10 +254,10 @@ const handleLogout = async () => {
   width: 35px;
   height: 35px;
   flex-shrink: 0;
-  background: #eaf4f2;
+  background: #eef0ff;
   border: 1px solid #d9e7e4;
   border-radius: 10px;
-  color: #197b70;
+  color: var(--color-accent);
   font-size: 13px;
   font-weight: 600;
 }
@@ -363,6 +381,62 @@ const handleLogout = async () => {
     margin: 0;
     padding: 7px 9px;
     font-size: 10px;
+  }
+}
+
+.sidebar-resources {
+  padding: 28px 15px 20px;
+}
+.sidebar-resources > summary {
+  list-style: none;
+  font-size: 10px;
+  color: var(--color-muted);
+  padding: 0 13px 14px;
+  cursor: pointer;
+}
+.sidebar-resources .sidebar-link {
+  font-size: 12px;
+  padding: 11px 14px;
+}
+.sidebar-advanced {
+  font-size: 11px;
+  color: var(--color-muted);
+  margin-top: 8px;
+}
+.sidebar-advanced > summary {
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.sidebar-advanced .sidebar-link {
+  padding-left: 26px;
+  font-size: 11px;
+}
+@media (max-width: 760px) {
+  .sidebar-resources {
+    padding: 0 14px 8px;
+  }
+  .sidebar-resources > summary {
+    font-size: 11px;
+    padding: 3px 10px 8px;
+  }
+  .sidebar-resources:not([open]) {
+    padding-bottom: 0;
+  }
+  .sidebar-resources nav {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .sidebar-resources .sidebar-link {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+  .sidebar-advanced {
+    margin-top: 0;
+  }
+  .sidebar-advanced > summary {
+    padding: 6px 10px;
   }
 }
 </style>

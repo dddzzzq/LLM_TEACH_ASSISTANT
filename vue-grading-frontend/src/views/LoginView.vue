@@ -321,7 +321,7 @@ const handleLogin = async (event) => {
       successMessage.value = `欢迎回来，${name}！`;
 
       // 根据角色进行路由分流
-      const redirectPath = '/ai-assistant';
+      const redirectPath = '/assignments';
 
       // 延迟跳转
       setTimeout(() => {
@@ -377,7 +377,7 @@ const handleRegister = async (event) => {
 
       // 延迟跳转
       setTimeout(() => {
-        router.push('/ai-assistant');
+        router.push('/assignments');
       }, 1500);
     }
   } catch (error) {

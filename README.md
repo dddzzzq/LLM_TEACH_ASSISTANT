@@ -12,26 +12,28 @@
 
 ### 作业批改
 
-1. 选择来源：官网作业、上传 ZIP/RAR/7z 压缩包或指定本机目录。
-2. 填写题目要求，调整评分项名称、分值和要求；需要时切换 JSON 高级编辑。
-3. 点击“开始批改”，系统自动下载或读取附件、整理材料、查重、检测 AIGC、评分并保存结果。
+默认首页为独立的作业工作区：按课程、状态和关键词筛选作业，点击名称预览题目与评分标准。进度与人数来自实际材料批次和批改记录，统计不可用时显示待同步。
 
-默认处理全部班级，无需班级选择。相关页面集中在作业批改入口下：
+常规流程：新建作业 → 保存题目与评分标准 → 在作业详情导入学生材料 → 开始批改 → 查看结果、复查与导出。新建作业默认处理全部班级，无需选择班级。
+
+“导入与自动批改”保留原来的一步提交方式：选择官网作业、压缩包或本机目录，填写要求后自动整理并批改。它与常规作业详情分开，避免长表单挤占作业内容。
 
 | 页面 | 用途 |
 | --- | --- |
-| 开始批改 | 选择材料、配置题目和评分标准 |
-| 批改记录 | 查看结果、复核评分、导出 Excel |
+| 作业批改 `/assignments` | 作业列表、筛选、进度、内容预览 |
+| 新建作业 `/assignments/new` | 保存题目与评分标准，随后进入详情 |
+| 作业详情 `/assignments/:id` | 分为作业内容、材料与批改、评分结果三个页签 |
+| 导入与自动批改 `/grade-homework` | 原有三种来源与自动流程，旧链接继续有效 |
 | 作业材料 | 查看解压进度、学生材料清单和异常 |
 | 教务账号 | 加密保存教务凭据、认证、更新课程目录 |
 | 更多设置 | 助手工具配置；已有管理员账号还可查阅运行日志 |
 
 ## 账号和功能边界
 
-- 登录后直接进入 AI 助手，不再展示学生端或多功能概览。
+- 登录后直接进入作业批改列表；AI 助手作为另一个主入口。
 - 新注册账号固定为教师，不接受学生或管理员角色注册。学生账号及旧学生令牌无法访问教师业务 API。
 - 已有教师和管理员账号进入同一教师工作区，管理员原有后台权限保留。
-- 本系统账号与学校教务账号分别管理，教务账号在“作业批改 → 教务账号”中设置。
+- 本系统账号与学校教务账号分别管理，教务账号在侧栏“资源与设置 → 教务账号”中设置。
 - 移除试卷页面、HTTP 接口、Skill、评分工具考试参数、试卷队列处理及 Python 试卷评分实现。
 - 历史数据库表和 protobuf 消息定义保留兼容，不删除历史数据。旧试卷 RPC 返回 UNIMPLEMENTED，新进程仅订阅作业批改队列。
 - 作业查重、AIGC 检测、文档解析、代码文档匹配、教师复核、成绩池化和结果导出继续保留。
@@ -57,14 +59,16 @@ cd ../ai_engine_python
 python -m unittest discover -s tests
 ```
 
-浏览器回归：`vue-grading-frontend/tests/teacher_workspace_smoke.py` 验证真实路由、教师权限、两个主入口、评分编辑及移动端布局；`portal_automation_smoke.py` 验证教务认证、课程刷新及三种材料来源。均使用模拟接口，不触发真实批改或发送验证码。
+浏览器回归：`vue-grading-frontend/tests/assignment_workspace_smoke.py` 验证列表、内容预览、组合筛选、详情页签、上传默认行为、新建作业与移动端；`teacher_workspace_smoke.py` 验证真实路由、教师权限、两个主入口和评分编辑；`portal_automation_smoke.py` 验证教务认证、课程刷新及三种材料来源。均使用模拟接口，不触发真实批改或发送验证码。`TestAssignmentWorkspaceSummaryAndOwnership` 在隔离 MySQL 数据库验证人数去重、人工复查、任务重试与教师数据隔离。
 
 ## 源码入口
 
 | 内容 | 位置 |
 | --- | --- |
 | 工作区路由与导航 | `vue-grading-frontend/src/router/index.js`、`src/services/teacherWorkspace.js` |
-| 作业与评分表格 | `vue-grading-frontend/src/views/HomeworkGradingView.vue`、`src/components/RubricEditor.vue` |
+| 作业列表与内容详情 | `vue-grading-frontend/src/views/AssignmentsListView.vue`、`src/views/AssignmentDetailView.vue` |
+| 新建与自动批改表单 | `vue-grading-frontend/src/views/CreateAssignmentView.vue`、`src/views/HomeworkGradingView.vue`、`src/components/RubricEditor.vue` |
+| 作业状态和人数统计 | `backend-go/internal/handlers/assignment_summary.go` |
 | 教师账号权限 | `backend-go/internal/handlers/auth_handler.go`、`internal/middleware/auth.go` |
 | Agent 与工具 | `backend-go/internal/agent/`、`internal/browseragent/` |
 | 下载、整理、批改衔接 | `backend-go/internal/portal/workflows.go`、`internal/rpa/service.go`、`internal/grading/materials.go` |

@@ -27,6 +27,7 @@ async def main():
             else:data=[]
             await route.fulfill(content_type='application/json',body=json.dumps(data,ensure_ascii=False))
         await page.route('**/api/**',register_api)
+        await page.route('**/assignments/**',register_api)
         await page.goto(base+'/login')
         await expect(page.get_by_label('教师账号',exact=True)).to_be_visible()
         await expect(page.get_by_label('登录密码',exact=True)).to_be_visible()
@@ -55,7 +56,7 @@ async def main():
         await expect(page.locator('#reg-username')).to_be_disabled()
         await expect(page.get_by_role('button',name='返回登录',exact=True)).to_be_disabled()
         release.set()
-        await expect(page).to_have_url(re.compile('/ai-assistant$'))
+        await expect(page).to_have_url(re.compile('/assignments$'))
         await expect(page.locator('.sidebar-user .user-info p')).to_have_text('正确姓名')
         await expect(page.locator('.sidebar-user .user-info p')).to_have_attribute('title','真实姓名')
         await expect(page.locator('.sidebar-user .user-avatar')).to_have_text('正')
@@ -85,11 +86,12 @@ async def main():
                 else:data=[]
                 await route.fulfill(content_type='application/json',body=json.dumps(data,ensure_ascii=False))
             await page.route('**/api/**',login_api)
+            await page.route('**/assignments/**',login_api)
             await page.goto(base+'/login')
             await page.locator('#username').fill('entered-user')
             await page.locator('#password').fill('login-fixture-secret')
             await page.get_by_role('button',name='登录',exact=True).click()
-            await expect(page).to_have_url(re.compile('/ai-assistant$'))
+            await expect(page).to_have_url(re.compile('/assignments$'))
             await expect(page.locator('.sidebar-user .user-info p')).to_have_text('独立姓名')
             assert (await page.evaluate('JSON.parse(localStorage.getItem("user_info"))'))['username']=='canonical-'+role
             assert requests==[dict(username='entered-user',password='login-fixture-secret')]

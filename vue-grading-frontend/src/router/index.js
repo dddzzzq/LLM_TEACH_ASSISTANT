@@ -15,8 +15,8 @@ import PortalSettingsView from '../views/PortalSettingsView.vue';
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', redirect: '/ai-assistant' },
-    { path: '/home', redirect: '/ai-assistant' },
+    { path: '/', redirect: '/assignments' },
+    { path: '/home', redirect: '/assignments' },
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/ai-assistant', name: 'ai-assistant', component: AIAssistantView },
     { path: '/grade-homework', name: 'grade-homework', component: HomeworkGradingView },
@@ -37,7 +37,7 @@ const router = createRouter({
       component: ToolsAdminView,
     },
     { path: '/logs', name: 'logs', component: LogsView, meta: { admin: true } },
-    { path: '/:pathMatch(.*)*', redirect: '/ai-assistant' },
+    { path: '/:pathMatch(.*)*', redirect: '/assignments' },
   ],
 });
 router.beforeEach((to) => {
@@ -47,9 +47,9 @@ router.beforeEach((to) => {
     authApi.logout();
     return { path: '/login', query: { reason: 'teacher' } };
   }
-  if (to.meta.public) return signedIn ? '/ai-assistant' : true;
+  if (to.meta.public) return signedIn ? '/assignments' : true;
   if (!signedIn) return '/login';
-  if (to.meta.admin && role !== 'admin') return '/grade-homework';
+  if (to.meta.admin && role !== 'admin') return '/assignments';
   return true;
 });
 export default router;

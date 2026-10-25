@@ -1,5 +1,17 @@
 package schemas
 
+import "time"
+
+type AssignmentSummary struct {
+	Status        string     `json:"status"`
+	GradedCount   int        `json:"graded_count"`
+	ReviewedCount int        `json:"reviewed_count"`
+	FailedCount   int        `json:"failed_count"`
+	BatchCount    int        `json:"batch_count"`
+	IssueCount    int        `json:"issue_count"`
+	UpdatedAt     *time.Time `json:"updated_at"`
+}
+
 // AssignmentCreate 对应前端新建作业时发送的 JSON
 type AssignmentCreate struct {
 	CourseName string                 `json:"course_name" binding:"required"`
@@ -11,6 +23,7 @@ type AssignmentCreate struct {
 
 // AssignmentResponse 对应返回给前端的作业数据
 type AssignmentResponse struct {
+	Summary    *AssignmentSummary     `json:"summary,omitempty"`
 	ID         uint                   `json:"id"`
 	CourseName string                 `json:"course_name"`
 	ClassName  string                 `json:"class_name"`

@@ -8,32 +8,48 @@
       {{ error }}
     </div>
 
-    <div v-else-if="assignment" class="space-y-8">
-      <div class="p-5 md:p-7 surface">
-        <div class="flex items-center gap-3 mb-4">
-          <span class="px-3 py-1 text-sm font-semibold text-green-600 bg-green-50 rounded-full">
-            {{ assignment.course_name }}
-          </span>
-          <span class="px-3 py-1 text-sm font-semibold text-blue-600 bg-blue-50 rounded-full">
-            {{ assignment.class_name }}
-          </span>
-        </div>
-        <h1 class="page-title">{{ assignment.task_name }}</h1>
-        <p class="mt-4 text-gray-600 whitespace-pre-wrap">{{ assignment.question }}</p>
-        <div class="mt-4">
-          <h3 class="font-semibold text-gray-700">评分标准:</h3>
-          <pre
-            class="p-4 mt-2 overflow-x-auto text-sm text-gray-700 bg-gray-50 border rounded-md whitespace-pre-wrap"
-            >{{ JSON.stringify(assignment.rubric, null, 2) }}</pre
-          >
-        </div>
-      </div>
-
-      <div class="p-5 md:p-7 surface">
+    <div v-else-if="assignment" class="assignment-detail-workspace">
+      <router-link to="/assignments" class="back-link">← 返回作业批改</router-link>
+      <header class="detail-heading">
+        <div
+          ><p class="detail-course"
+            >{{ assignment.course_name }} · {{ assignment.class_name || '全部班级' }}</p
+          ><h1 class="page-title">{{ assignment.task_name }}</h1></div
+        >
+        <button
+          v-if="activeTab === 'content'"
+          class="workspace-button primary"
+          @click="selectTab('materials')"
+          >导入学生作业 →</button
+        >
+      </header>
+      <nav class="detail-tabs" aria-label="作业详情导航">
+        <button
+          v-for="tab in tabs"
+          :key="tab.key"
+          :class="{ active: activeTab === tab.key }"
+          :aria-current="activeTab === tab.key ? 'page' : undefined"
+          @click="selectTab(tab.key)"
+          >{{ tab.label }}<span v-if="tab.key === 'results'">{{ results.length }}</span></button
+        >
+      </nav>
+      <section v-if="activeTab === 'content'" class="assignment-content-grid">
+        <div class="surface content-section"
+          ><div class="content-section-heading"><h2>题目要求</h2><span>作业内容</span></div
+          ><p class="full-question">{{ assignment.question || '尚未填写题目要求。' }}</p></div
+        >
+        <aside class="surface content-section"
+          ><div class="content-section-heading"><h2>评分标准</h2></div
+          ><RubricSummary :rubric="assignment.rubric" /><p class="grading-scope"
+            >批改范围：{{ assignment.class_name || '全部班级' }}</p
+          ></aside
+        >
+      </section>
+      <section v-show="activeTab === 'materials'" class="p-5 md:p-7 surface">
         <h2 class="mb-4 text-2xl font-bold text-gray-800">导入学生作业</h2>
         <form @submit.prevent="submitBatchFile">
           <label for="file-upload" class="block text-sm font-medium text-gray-700">
-            上传班级或学生作业 ZIP/RAR/7z；上传后只整理，不自动批改
+            上传学生作业 ZIP / RAR / 7z 压缩包
           </label>
           <input
             id="file-upload"
@@ -44,12 +60,15 @@
             @change="handleFileChange"
           />
           <p v-if="fileName" class="mt-2 text-sm text-green-600"> 已选择文件: {{ fileName }} </p>
+          <label class="upload-autograde"
+            ><input v-model="autoGrade" type="checkbox" />材料整理完成后自动批改</label
+          >
           <button
             type="submit"
             :disabled="isSubmitting"
             class="flex justify-center px-6 py-2 mt-4 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm w-full sm:w-auto hover:bg-indigo-700 disabled:bg-indigo-400"
           >
-            <span v-if="!isSubmitting">上传并整理材料</span>
+            <span v-if="!isSubmitting">{{ autoGrade ? '上传并自动批改' : '上传并整理材料' }}</span>
             <span v-else>提交中...</span>
           </button>
         </form>
@@ -61,13 +80,14 @@
           {{ submissionMessage }}
         </div>
         <MaterialBatchPanel
+          v-if="activeTab === 'materials'"
           :assignment-id="props.id"
           :refresh-key="materialsVersion"
           @results="showBatchResults"
         />
-      </div>
+      </section>
 
-      <div class="p-5 md:p-7 surface">
+      <section v-show="activeTab === 'results'" class="p-5 md:p-7 surface results-section">
         <div class="flex items-center justify-between mb-4">
           <div
             ><h2 class="text-2xl font-bold text-gray-800">评分结果</h2
@@ -105,6 +125,7 @@
           </div>
         </div>
 
+        <p v-if="resultsError" class="workspace-error" role="alert">{{ resultsError }}</p>
         <div v-if="isLoadingResults" class="py-5 text-center">
           <Loader />
         </div>
@@ -271,8 +292,10 @@
             </tbody>
           </table>
         </div>
-        <div v-else class="py-5 text-center text-gray-500">暂无提交结果。</div>
-      </div>
+        <div v-else class="py-5 text-center text-gray-500"
+          >暂无评分结果。请在“材料与批改”中导入学生作业并开始批改。</div
+        >
+      </section>
     </div>
   </div>
 
@@ -292,12 +315,25 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import gradingApi from '../services/gradingApi';
 import Loader from '../components/Loader.vue';
 import ReportModal from '../components/ReportModal.vue';
 import ReviewModal from '../components/ReviewModal.vue';
 import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
+import RubricSummary from '../components/RubricSummary.vue';
+const route = useRoute(),
+  router = useRouter();
+const tabs = [
+  { key: 'content', label: '作业内容' },
+  { key: 'materials', label: '材料与批改' },
+  { key: 'results', label: '评分结果' },
+];
+const activeTab = computed(() =>
+  tabs.some((tab) => tab.key === route.query.tab) ? route.query.tab : 'content'
+);
+const selectTab = (tab: string) => router.replace({ query: { ...route.query, tab } });
+const autoGrade = ref(false);
 const materialsVersion = ref(0);
 const resultsBatchId = ref('');
 
@@ -355,6 +391,7 @@ const file = ref<File | null>(null);
 const fileName = ref('');
 const isLoadingAssignment = ref(true);
 const isLoadingResults = ref(false);
+const resultsError = ref('');
 const isSubmitting = ref(false);
 const isModalVisible = ref(false);
 const error = ref<string | null>(null);
@@ -427,12 +464,13 @@ const fetchAssignmentDetails = async () => {
 
 const fetchResults = async () => {
   isLoadingResults.value = true;
+  resultsError.value = '';
   try {
     const response = await gradingApi.getResultsForAssignment(props.id, resultsBatchId.value);
     // 添加 || []，防止 Go 后端返回 null 导致前端崩溃
     results.value = response.data || [];
   } catch (e) {
-    console.error('无法加载结果:', e);
+    resultsError.value = '评分结果暂时无法读取，请点击刷新结果重试。';
   } finally {
     isLoadingResults.value = false;
   }
@@ -440,6 +478,7 @@ const fetchResults = async () => {
 
 const showBatchResults = async (batchId: string) => {
   resultsBatchId.value = batchId;
+  selectTab('results');
   await fetchResults();
 };
 
@@ -450,6 +489,7 @@ const submitBatchFile = async () => {
   submissionError.value = false;
   const formData = new FormData();
   formData.append('batch_file', file.value);
+  formData.append('auto_grade', String(autoGrade.value));
   try {
     const response = await gradingApi.submitBatch(props.id, formData);
     submissionMessage.value = response.data.message;
@@ -591,3 +631,132 @@ const getCodeDocMatchColor = (report?: CodeDocMatchReport): string => {
 
 onMounted(fetchAssignmentDetails);
 </script>
+
+<style scoped>
+.detail-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.detail-course {
+  font-size: 12px;
+  color: var(--color-muted);
+  margin-bottom: 10px;
+}
+.detail-tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--color-line);
+  margin-bottom: 26px;
+}
+.detail-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 14px;
+  color: var(--color-muted);
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+.detail-tabs button.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+.detail-tabs span {
+  font-size: 10px;
+  border-radius: 5px;
+  background: #edf0f6;
+  padding: 1px 6px;
+}
+.assignment-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.content-section {
+  padding: 26px 28px;
+}
+.content-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-line);
+  margin-bottom: 20px;
+}
+.content-section h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.content-section-heading > span {
+  font-size: 10px;
+  color: var(--color-muted);
+}
+.full-question {
+  font-size: 14px;
+  line-height: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 220px;
+  color: #4b5670;
+}
+.grading-scope {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-line);
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.upload-autograde {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #667086;
+  margin-top: 20px;
+}
+.results-section {
+  min-width: 0;
+}
+.results-section > div:first-child {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.results-section > div:first-child > div:last-child {
+  flex-wrap: wrap;
+}
+.detail-page h2.text-2xl {
+  font-size: 16px;
+}
+@media (max-width: 1100px) {
+  .assignment-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .detail-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .detail-tabs {
+    gap: 22px;
+  }
+  .detail-tabs button {
+    font-size: 12px;
+  }
+  .content-section {
+    padding: 20px;
+  }
+  .assignment-content-grid {
+    gap: 16px;
+  }
+  .full-question {
+    min-height: 150px;
+    font-size: 13px;
+  }
+}
+</style>
