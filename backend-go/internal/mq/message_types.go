@@ -20,15 +20,3 @@ type HomeworkTaskMessage struct {
 	AssignmentID uint   `json:"assignment_id"` // 改为uint类型
 	ZipPath      string `json:"zip_path"`
 }
-
-// ============================
-//    试卷批改任务消息
-// ============================
-
-// ExamTaskMessage 试卷批改任务消息结构
-type ExamTaskMessage struct {
-	JobID      string   `json:"job_id"`
-	ExamID     string   `json:"exam_id"`
-	StudentID  string   `json:"student_id"`
-	ImagePaths []string `json:"image_paths"`
-}

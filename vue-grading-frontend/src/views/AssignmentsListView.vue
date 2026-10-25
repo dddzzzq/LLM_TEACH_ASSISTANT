@@ -2,7 +2,7 @@
   <div>
     <div class="page-heading">
       <div
-        ><h1 class="page-title">所有作业任务</h1
+        ><h1 class="page-title">作业批改记录</h1
         ><p class="page-description">集中管理课程作业，查看查重分析与智能评分结果。</p></div
       >
       <router-link to="/assignments/new" class="primary-button">

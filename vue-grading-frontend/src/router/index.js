@@ -1,16 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import authApi from '../services/authApi';
-
-// 导入视图组件
-import HomeView from '../views/HomeView.vue';
+import { isTeacherAccount } from '../services/teacherWorkspace';
 import HomeworkGradingView from '../views/HomeworkGradingView.vue';
 import AssignmentsListView from '../views/AssignmentsListView.vue';
 import AssignmentDetailView from '../views/AssignmentDetailView.vue';
 import CreateAssignmentView from '../views/CreateAssignmentView.vue';
-import ExamListView from '../views/ExamListView.vue';
-import CreateExamView from '../views/CreateExamView.vue';
-import ExamDetailView from '../views/ExamDetailView.vue';
-import StudentReportView from '../views/StudentReportView.vue';
 import AIAssistantView from '../views/AIAssistantView.vue';
 import LoginView from '../views/LoginView.vue';
 import ToolsAdminView from '../views/ToolsAdminView.vue';
@@ -18,216 +12,44 @@ import LogsView from '../views/LogsView.vue';
 import MaterialsView from '../views/MaterialsView.vue';
 import PortalSettingsView from '../views/PortalSettingsView.vue';
 
-// 路由守卫：检查用户是否已认证
-const requireAuth = (to, from, next) => {
-  if (authApi.isAuthenticated()) {
-    next();
-  } else {
-    next('/login');
-  }
-};
-
-// 路由守卫：检查角色权限
-const checkRolePermission = (allowedRoles) => {
-  return (to, from, next) => {
-    if (!authApi.isAuthenticated()) {
-      next('/login');
-      return;
-    }
-
-    const currentUser = authApi.getCurrentUser();
-    if (!currentUser) {
-      next('/login');
-      return;
-    }
-
-    const userRole = currentUser.role || 'student';
-
-    // 如果是学生，只能访问AI教学助手
-    if (userRole === 'student') {
-      if (to.path === '/ai-assistant') {
-        next();
-      } else {
-        next('/ai-assistant');
-      }
-      return;
-    }
-
-    // 按页面声明的角色放行
-    if (allowedRoles.includes(userRole)) {
-      next();
-    } else {
-      next('/home');
-    }
-  };
-};
-
-// 路由守卫：如果已登录，重定向到首页
-const redirectIfAuthenticated = (to, from, next) => {
-  if (authApi.isAuthenticated()) {
-    const currentUser = authApi.getCurrentUser();
-    if (currentUser) {
-      const userRole = currentUser.role || 'student';
-      if (userRole === 'student') {
-        next('/ai-assistant');
-      } else {
-        next('/home');
-      }
-    } else {
-      next('/home');
-    }
-  } else {
-    next();
-  }
-};
-
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    // 根路径重定向
-    {
-      path: '/',
-      redirect: () => {
-        if (!authApi.isAuthenticated()) {
-          return '/login';
-        }
-        const currentUser = authApi.getCurrentUser();
-        const userRole = currentUser?.role || 'student';
-        if (userRole === 'student') return '/ai-assistant';
-        return '/home';
-      },
-    },
-
-    // 公开路由
-    {
-      path: '/login',
-      name: 'login',
-      component: LoginView,
-      beforeEnter: redirectIfAuthenticated,
-    },
-
-    // 主页路由
-    {
-      path: '/home',
-      name: 'home',
-      component: HomeView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 作业批改路由
-    {
-      path: '/settings/portal',
-      name: 'portal-settings',
-      component: PortalSettingsView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-    {
-      path: '/grade-homework',
-      name: 'grade-homework',
-      component: HomeworkGradingView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 作业列表路由
-    {
-      path: '/assignments',
-      name: 'assignments',
-      component: AssignmentsListView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 创建作业路由
-    {
-      path: '/assignments/new',
-      name: 'create-assignment',
-      component: CreateAssignmentView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 作业详情路由
+    { path: '/', redirect: '/ai-assistant' },
+    { path: '/home', redirect: '/ai-assistant' },
+    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
+    { path: '/ai-assistant', name: 'ai-assistant', component: AIAssistantView },
+    { path: '/grade-homework', name: 'grade-homework', component: HomeworkGradingView },
+    { path: '/assignments', name: 'assignments', component: AssignmentsListView },
+    { path: '/assignments/new', name: 'create-assignment', component: CreateAssignmentView },
     {
       path: '/assignments/:id',
       name: 'assignment-detail',
       component: AssignmentDetailView,
       props: true,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
     },
-
-    // 试卷列表路由
-    {
-      path: '/exams',
-      name: 'exams',
-      component: ExamListView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 创建试卷路由
-    {
-      path: '/exams/new',
-      name: 'create-exam',
-      component: CreateExamView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 试卷详情路由
-    {
-      path: '/exams/:id',
-      name: 'exam-detail',
-      component: ExamDetailView,
-      props: true,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // 学生报告路由
-    {
-      path: '/exams/:id/student/:studentExamId',
-      name: 'student-report',
-      component: StudentReportView,
-      props: true,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-
-    // AI教学助手路由（所有角色都可以访问）
-    {
-      path: '/ai-assistant',
-      name: 'ai-assistant',
-      component: AIAssistantView,
-      beforeEnter: requireAuth,
-    },
-
-    // 工具管理（教师/管理员）；旧 URL 继续可用。
+    { path: '/materials', name: 'materials', component: MaterialsView },
+    { path: '/settings/portal', name: 'portal-settings', component: PortalSettingsView },
     {
       path: '/tools-admin',
       alias: '/skills-admin',
       name: 'skills-admin',
       component: ToolsAdminView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
     },
-
-    // 作业材料与管理员日志查阅
-    {
-      path: '/materials',
-      name: 'materials',
-      component: MaterialsView,
-      beforeEnter: checkRolePermission(['teacher', 'admin']),
-    },
-    {
-      path: '/logs',
-      name: 'logs',
-      component: LogsView,
-      beforeEnter: checkRolePermission(['admin']),
-    },
-    // 404页面
-    {
-      path: '/:pathMatch(.*)*',
-      redirect: '/',
-    },
+    { path: '/logs', name: 'logs', component: LogsView, meta: { admin: true } },
+    { path: '/:pathMatch(.*)*', redirect: '/ai-assistant' },
   ],
 });
-
-// 全局路由守卫
-router.beforeEach((to, from, next) => {
-  next();
+router.beforeEach((to) => {
+  const signedIn = authApi.isAuthenticated();
+  const role = authApi.getCurrentUser()?.role;
+  if (signedIn && !isTeacherAccount(role)) {
+    authApi.logout();
+    return { path: '/login', query: { reason: 'teacher' } };
+  }
+  if (to.meta.public) return signedIn ? '/ai-assistant' : true;
+  if (!signedIn) return '/login';
+  if (to.meta.admin && role !== 'admin') return '/grade-homework';
+  return true;
 });
-
 export default router;

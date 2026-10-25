@@ -257,3 +257,38 @@ func EnsureGradingTools(ctx context.Context) {
 	}
 	InvalidateToolsCache(ctx)
 }
+
+// Keep stored built-in metadata consistent with this edition without enabling
+// disabled tools or broadening an administrator's configured permissions.
+func EnsureTeacherEditionTools(ctx context.Context) {
+	if database.DB == nil {
+		return
+	}
+	registry := NewBuiltinToolRegistry(0)
+	for _, name := range registry.ListTools() {
+		var row models.ToolDefinition
+		if database.DB.WithContext(ctx).Where("name = ?", name).First(&row).Error != nil {
+			continue
+		}
+		tool, _ := registry.GetTool(name)
+		patch := map[string]any{"schema_json": tool.Schema()}
+		if strings.Contains(row.Description, "试卷") {
+			patch["description"] = tool.Description()
+		}
+		var roles []string
+		if json.Unmarshal([]byte(row.AllowedRoles), &roles) == nil {
+			filtered := []string{}
+			for _, role := range roles {
+				if role == "teacher" || role == "admin" {
+					filtered = append(filtered, role)
+				}
+			}
+			encoded, _ := json.Marshal(filtered)
+			patch["allowed_roles"] = string(encoded)
+		}
+		if err := database.DB.WithContext(ctx).Model(&row).Updates(patch).Error; err != nil {
+			log.Printf("教师版工具元数据更新失败: %s", name)
+		}
+	}
+	InvalidateToolsCache(ctx)
+}

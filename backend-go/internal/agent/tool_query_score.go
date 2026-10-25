@@ -22,7 +22,7 @@ func (s *QueryStudentScoreTool) Name() string {
 
 // Description 返回工具描述
 func (s *QueryStudentScoreTool) Description() string {
-	return "当需要查询某个学生的历史作业和试卷得分、评语时调用此工具。"
+	return "当需要查询某个学生的历史作业得分、评语时调用此工具。"
 }
 
 // Schema 返回 JSON Schema 字符串
@@ -57,7 +57,7 @@ func (s *QueryStudentScoreTool) Execute(args string) (string, error) {
 
 	// 查询作业提交记录
 	var submissions []models.Submission
-	if s.UserID == 0 || database.DB == nil || (s.Role != "teacher" && s.Role != "admin" && s.Role != "student") {
+	if s.UserID == 0 || database.DB == nil || (s.Role != "teacher" && s.Role != "admin") {
 		return "当前用户或成绩服务不可用", nil
 	}
 	query := database.DB.Where("student_id = ?", studentID)
@@ -67,14 +67,6 @@ func (s *QueryStudentScoreTool) Execute(args string) (string, error) {
 	if err := query.Find(&submissions).Error; err != nil {
 		// 数据库查询错误，返回友好提示
 		return fmt.Sprintf("查询学生 %s 的作业记录时发生错误，请稍后重试。", studentID), nil
-	}
-
-	// 查询试卷记录
-	var studentExams []models.StudentExam
-	if err := database.DB.Preload("Answers").Preload("Answers.Question").
-		Preload("Report").Where("student_id = ?", studentID).Find(&studentExams).Error; err != nil {
-		// 数据库查询错误，返回友好提示
-		return fmt.Sprintf("查询学生 %s 的试卷记录时发生错误，请稍后重试。", studentID), nil
 	}
 
 	// 组装结果
@@ -105,64 +97,6 @@ func (s *QueryStudentScoreTool) Execute(args string) (string, error) {
 			}
 			result.WriteString("\n")
 		}
-	}
-
-	// 试卷成绩
-	if len(studentExams) == 0 {
-		result.WriteString("试卷记录：暂无\n")
-	} else {
-		result.WriteString("=== 试卷成绩 ===\n")
-		for i, exam := range studentExams {
-			result.WriteString(fmt.Sprintf("%d. 试卷ID: %d\n", i+1, exam.ExamID))
-
-			// 总分
-			totalScore := 0.0
-			if exam.Report.TotalScore > 0 {
-				totalScore = exam.Report.TotalScore
-			} else {
-				// 计算各题总分
-				for _, answer := range exam.Answers {
-					totalScore += answer.Score
-				}
-			}
-
-			result.WriteString(fmt.Sprintf("   总分: %.2f\n", totalScore))
-
-			// 各题详情
-			if len(exam.Answers) > 0 {
-				result.WriteString("   各题得分:\n")
-				for _, answer := range exam.Answers {
-					result.WriteString(fmt.Sprintf("     - 第%d题: %.2f分", answer.Question.QuestionNumber, answer.Score))
-					if answer.Feedback != "" {
-						feedback := answer.Feedback
-						if len(feedback) > 100 {
-							feedback = feedback[:100] + "..."
-						}
-						result.WriteString(fmt.Sprintf(" (评语: %s)", feedback))
-					}
-					result.WriteString("\n")
-				}
-			}
-
-			// 整体评语
-			if exam.Report.Summary != "" {
-				summary := exam.Report.Summary
-				if len(summary) > 200 {
-					summary = summary[:200] + "..."
-				}
-				result.WriteString(fmt.Sprintf("   整体评语: %s\n", summary))
-			}
-			result.WriteString("\n")
-		}
-	}
-
-	// 统计数据
-	totalAssignments := len(submissions)
-	totalExams := len(studentExams)
-	if totalAssignments == 0 && totalExams == 0 {
-		result.WriteString("该学生暂无任何成绩记录。")
-	} else {
-		result.WriteString(fmt.Sprintf("总计：%d 份作业，%d 份试卷。", totalAssignments, totalExams))
 	}
 
 	return result.String(), nil

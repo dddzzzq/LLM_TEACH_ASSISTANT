@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,17 +36,15 @@ func (a Actor) Check() error {
 }
 
 type Request struct {
-	BatchID       string   `json:"batch_id,omitempty"`
-	DirectoryPath string   `json:"directory_path,omitempty"`
-	OutputRoot    string   `json:"output_root,omitempty"`
-	AllowPartial  bool     `json:"allow_partial,omitempty"`
-	Kind          string   `json:"kind"`
-	ResourceID    string   `json:"resource_id"`
-	FilePath      string   `json:"file_path,omitempty"`
-	StudentID     string   `json:"student_id,omitempty"`
-	ImagePaths    []string `json:"image_paths,omitempty"`
-	SkillName     string   `json:"-"`
-	SkillVersion  string   `json:"-"`
+	BatchID       string `json:"batch_id,omitempty"`
+	DirectoryPath string `json:"directory_path,omitempty"`
+	OutputRoot    string `json:"output_root,omitempty"`
+	AllowPartial  bool   `json:"allow_partial,omitempty"`
+	Kind          string `json:"kind"`
+	ResourceID    string `json:"resource_id"`
+	FilePath      string `json:"file_path,omitempty"`
+	SkillName     string `json:"-"`
+	SkillVersion  string `json:"-"`
 }
 type Result struct {
 	BatchID   string                `json:"batch_id,omitempty"`
@@ -61,7 +58,6 @@ type Result struct {
 }
 type Repository interface {
 	Assignment(context.Context, uint) (models.Assignment, error)
-	Exam(context.Context, uint) (models.Exam, error)
 	Job(context.Context, string) (models.AsyncJob, error)
 	Create(context.Context, *models.AsyncJob) error
 	Fail(context.Context, string, string) error
@@ -69,11 +65,10 @@ type Repository interface {
 type Service struct {
 	Repo            Repository
 	PublishHomework func(string, uint, string) error
-	PublishExam     func(string, string, string, []string) error
 }
 
 func Default() Service {
-	return Service{SQLRepository{database.DB}, mq.PublishHomeworkTask, mq.PublishExamTask}
+	return Service{Repo: SQLRepository{database.DB}, PublishHomework: mq.PublishHomeworkTask}
 }
 
 func ResourceID(value string) (uint, error) {
@@ -102,33 +97,6 @@ func HomeworkMissing(a models.Assignment) []string {
 	}
 	return missing
 }
-func ExamMissing(e models.Exam) []string {
-	missing := []string{}
-	if len(e.Questions) == 0 {
-		return []string{"试卷题目"}
-	}
-	seen := map[int]bool{}
-	for _, q := range e.Questions {
-		prefix := fmt.Sprintf("第 %d 题", q.QuestionNumber)
-		if q.QuestionNumber <= 0 || seen[q.QuestionNumber] {
-			missing = append(missing, "唯一且为正数的题号")
-		}
-		seen[q.QuestionNumber] = true
-		if strings.TrimSpace(q.QuestionText) == "" {
-			missing = append(missing, prefix+"题目")
-		}
-		if strings.TrimSpace(q.StandardAnswer) == "" {
-			missing = append(missing, prefix+"标准答案")
-		}
-		if strings.TrimSpace(q.Rubric) == "" {
-			missing = append(missing, prefix+"评分标准")
-		}
-		if q.MaxScore <= 0 || math.IsNaN(q.MaxScore) || math.IsInf(q.MaxScore, 0) {
-			missing = append(missing, prefix+"有效满分")
-		}
-	}
-	return missing
-}
 func (s Service) Check(ctx context.Context, actor Actor, kind, resourceID string) (Result, error) {
 	if err := actor.Check(); err != nil {
 		return Result{}, err
@@ -150,15 +118,8 @@ func (s Service) Check(ctx context.Context, actor Actor, kind, resourceID string
 		}
 		missing = HomeworkMissing(a)
 		resultURL = fmt.Sprintf("/assignments/%d", id)
-	case "exam":
-		e, err := s.Repo.Exam(ctx, id)
-		if err != nil {
-			return Result{}, fmt.Errorf("试卷不存在或读取失败")
-		}
-		missing = ExamMissing(e)
-		resultURL = fmt.Sprintf("/exams/%d", id)
 	default:
-		return Result{}, fmt.Errorf("kind 仅支持 homework 或 exam")
+		return Result{}, fmt.Errorf("当前版本仅支持 homework 作业批改")
 	}
 	if len(missing) > 0 {
 		return Result{Outcome: "needs_input", Missing: missing, Message: "请在目标详情页补齐：" + strings.Join(missing, "、"), ResultURL: resultURL}, nil
@@ -204,27 +165,7 @@ func CheckFiles(r Request) ([]string, error) {
 		}
 		return nil, nil
 	}
-	missing := []string{}
-	if strings.TrimSpace(r.StudentID) == "" {
-		missing = append(missing, "学生学号")
-	}
-	if len(r.ImagePaths) == 0 {
-		missing = append(missing, "按页排序的答卷图片路径")
-	}
-	if len(missing) > 0 {
-		return missing, nil
-	}
-	for _, p := range r.ImagePaths {
-		ext := strings.ToLower(filepath.Ext(p))
-		if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".bmp" {
-			return nil, fmt.Errorf("答卷必须是支持的图片文件")
-		}
-		info, err := os.Stat(p)
-		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-			return nil, fmt.Errorf("答卷图片不存在或为空")
-		}
-	}
-	return nil, nil
+	return nil, fmt.Errorf("当前版本仅支持 homework 作业批改")
 }
 func (s Service) Submit(ctx context.Context, actor Actor, r Request, requestID string) (Result, error) {
 	if r.Kind == "homework" && r.BatchID != "" {
@@ -275,11 +216,7 @@ func (s Service) Submit(ctx context.Context, actor Actor, r Request, requestID s
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return Result{}, err
 	}
-	kind := models.JobTypeHomework
-	if r.Kind == "exam" {
-		kind = models.JobTypeExam
-	}
-	job := models.AsyncJob{ID: id, OwnerID: actor.UserID, JobType: kind, ReferenceID: r.ResourceID, StudentID: r.StudentID, Status: models.JobStatusPending, Message: "任务已创建，等待队列处理", SkillName: r.SkillName, SkillVersion: r.SkillVersion}
+	job := models.AsyncJob{ID: id, OwnerID: actor.UserID, JobType: models.JobTypeHomework, ReferenceID: r.ResourceID, Status: models.JobStatusPending, Message: "任务已创建，等待队列处理", SkillName: r.SkillName, SkillVersion: r.SkillVersion}
 	if err = s.Repo.Create(ctx, &job); err != nil {
 		if old, lookupErr := s.Repo.Job(ctx, id); lookupErr == nil {
 			return receipt(old), nil
@@ -287,12 +224,8 @@ func (s Service) Submit(ctx context.Context, actor Actor, r Request, requestID s
 		return Result{}, err
 	}
 	// Publishing is intentionally after the durable record. Do not roll back an accepted job on HTTP disconnect.
-	if r.Kind == "homework" {
-		id, _ := ResourceID(r.ResourceID)
-		err = s.PublishHomework(job.ID, id, r.FilePath)
-	} else {
-		err = s.PublishExam(job.ID, r.ResourceID, r.StudentID, r.ImagePaths)
-	}
+	assignmentID, _ := ResourceID(r.ResourceID)
+	err = s.PublishHomework(job.ID, assignmentID, r.FilePath)
 	if err != nil {
 		job.Status = models.JobStatusFailed
 		job.Message = "消息队列提交失败，请检查队列后重新发起任务"
@@ -313,9 +246,7 @@ func receipt(job models.AsyncJob) Result {
 		outcome = "completed"
 	}
 	url := "/assignments/" + job.ReferenceID
-	if job.JobType == models.JobTypeExam {
-		url = "/exams/" + job.ReferenceID
-	}
+
 	return Result{Outcome: outcome, JobID: job.ID, JobType: string(job.JobType), Status: job.Status, Message: job.Message, ResultURL: url, BatchID: job.MaterialBatchID}
 }
 func (s Service) Status(ctx context.Context, actor Actor, id string) (Result, error) {
@@ -323,7 +254,7 @@ func (s Service) Status(ctx context.Context, actor Actor, id string) (Result, er
 		return Result{}, err
 	}
 	job, err := s.Repo.Job(ctx, id)
-	if err != nil || job.OwnerID != actor.UserID || (job.JobType != models.JobTypeHomework && job.JobType != models.JobTypeExam) {
+	if err != nil || job.OwnerID != actor.UserID || job.JobType != models.JobTypeHomework {
 		return Result{}, fmt.Errorf("批改任务不存在或不属于当前用户")
 	}
 	result := receipt(job)
@@ -339,11 +270,6 @@ func (r SQLRepository) Assignment(ctx context.Context, id uint) (models.Assignme
 	var a models.Assignment
 	err := r.DB.WithContext(ctx).First(&a, id).Error
 	return a, err
-}
-func (r SQLRepository) Exam(ctx context.Context, id uint) (models.Exam, error) {
-	var e models.Exam
-	err := r.DB.WithContext(ctx).Preload("Questions").First(&e, id).Error
-	return e, err
 }
 func (r SQLRepository) Job(ctx context.Context, id string) (models.AsyncJob, error) {
 	var j models.AsyncJob

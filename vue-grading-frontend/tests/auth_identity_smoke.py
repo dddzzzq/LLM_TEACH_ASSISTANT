@@ -17,7 +17,9 @@ async def main():
         posts=[];ready=asyncio.Event();release=asyncio.Event()
         async def register_api(route):
             req=route.request;path=urllib.parse.urlparse(req.url).path
-            if req.method=='POST':
+            if path=='/api/sessions':data=[{'id':'fixture-session','title':'Fixture'}] if req.method=='GET' else {'id':'fixture-session'}
+            elif path.endswith('/history'):data={'messages':[]}
+            elif req.method=='POST':
                 assert path=='/api/register'
                 posts.append(req.post_data_json);ready.set();await release.wait()
                 data=dict(user_id=99,username='canonical-user',name='正确姓名',role='teacher',access_token='fixture-access',refresh_token='fixture-refresh')
@@ -26,7 +28,7 @@ async def main():
             await route.fulfill(content_type='application/json',body=json.dumps(data,ensure_ascii=False))
         await page.route('**/api/**',register_api)
         await page.goto(base+'/login')
-        await expect(page.get_by_label('登录账号／学号',exact=True)).to_be_visible()
+        await expect(page.get_by_label('教师账号',exact=True)).to_be_visible()
         await expect(page.get_by_label('登录密码',exact=True)).to_be_visible()
         await expect(page.locator('#username')).to_have_attribute('autocomplete','section-login username')
         await expect(page.locator('#password')).to_have_attribute('autocomplete','section-login current-password')
@@ -37,7 +39,7 @@ async def main():
         await page.locator('#reg-username').fill('typed-user')
         await page.locator('#reg-password').fill('fixture-secret')
         await page.locator('#reg-name').fill('fixture-secret')
-        await page.locator('#reg-role').select_option('teacher')
+        assert await page.locator('#reg-role').count()==0
         await page.get_by_role('button',name='注册',exact=True).click()
         await expect(page.get_by_role('alert')).to_contain_text('姓名不能与密码相同')
         assert not posts,'Unsafe name must be blocked before request'
@@ -53,7 +55,7 @@ async def main():
         await expect(page.locator('#reg-username')).to_be_disabled()
         await expect(page.get_by_role('button',name='返回登录',exact=True)).to_be_disabled()
         release.set()
-        await expect(page).to_have_url(re.compile('/home$'))
+        await expect(page).to_have_url(re.compile('/ai-assistant$'))
         await expect(page.locator('.sidebar-user .user-info p')).to_have_text('正确姓名')
         await expect(page.locator('.sidebar-user .user-info p')).to_have_attribute('title','真实姓名')
         await expect(page.locator('.sidebar-user .user-avatar')).to_have_text('正')
@@ -67,14 +69,15 @@ async def main():
         assert 'stale-fixture-secret' not in await page.locator('.sidebar-user').inner_text()
         await page.wait_for_function("JSON.parse(localStorage.getItem('user_info')).name === '正确姓名'")
         await context.close()
-        for role in ['student','teacher','admin']:
+        for role in ['teacher','admin']:
             context=await browser.new_context();page=await context.new_page()
             page.on('pageerror',lambda error:errors.append(str(error)))
             await context.add_init_script('localStorage.setItem("current_session_id","fixture-session")')
             requests=[]
             async def login_api(route):
                 req=route.request;path=urllib.parse.urlparse(req.url).path
-                if req.method=='POST':
+                if path=='/api/sessions':data=[{'id':'fixture-session','title':'Fixture'}] if req.method=='GET' else {'id':'fixture-session'}
+                elif req.method=='POST':
                     assert path=='/api/login';requests.append(req.post_data_json)
                     data=dict(user_id=99,username='canonical-'+role,name='独立姓名',role=role,access_token='fixture-access',refresh_token='fixture-refresh')
                 elif path.endswith('/history'):data=dict(messages=[])
@@ -86,7 +89,7 @@ async def main():
             await page.locator('#username').fill('entered-user')
             await page.locator('#password').fill('login-fixture-secret')
             await page.get_by_role('button',name='登录',exact=True).click()
-            await expect(page).to_have_url(re.compile('/ai-assistant$' if role=='student' else '/home$'))
+            await expect(page).to_have_url(re.compile('/ai-assistant$'))
             await expect(page.locator('.sidebar-user .user-info p')).to_have_text('独立姓名')
             assert (await page.evaluate('JSON.parse(localStorage.getItem("user_info"))'))['username']=='canonical-'+role
             assert requests==[dict(username='entered-user',password='login-fixture-secret')]

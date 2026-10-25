@@ -71,7 +71,7 @@ func TestRoleAndPreflightContract(t *testing.T) {
 		{"student", "GET", "/api/admin/skills", 403},
 		{"student", "POST", "/assignments/", 403},
 		{"student", "PUT", "/submissions/1", 403},
-		{"student", "POST", "/exams/", 403},
+		{"student", "POST", "/exams/", 404},
 		{"teacher", "GET", "/api/logs/sources", 403},
 		{"student", "GET", "/api/logs/sources", 403},
 		{"admin", "GET", "/api/logs/sources", 503}, // Authorized, but no index was started.

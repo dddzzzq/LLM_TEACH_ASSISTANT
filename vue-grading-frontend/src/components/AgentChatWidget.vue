@@ -322,11 +322,11 @@ const quickCommands = {
     key: 'query_score',
     label: '查询成绩',
     icon: 'chart',
-    description: '按学号查看作业与试卷成绩',
-    template: '请查询学号“学生学号”的作业和试卷成绩。',
+    description: '按学号查看作业成绩',
+    template: '请查询学号“学生学号”的作业成绩。',
     selection: '学生学号',
     placeholder: '填写学生学号，也可补充课程或作业名称',
-    guidance: '提供学生学号，可补充课程、作业或试卷名称，缩小查询范围。',
+    guidance: '提供学生学号，可补充课程或作业名称，缩小查询范围。',
   },
 };
 
@@ -335,34 +335,21 @@ const isAuthenticated = computed(() => authApi.isAuthenticated());
 const currentUser = computed(() => authApi.getCurrentUser());
 const hasUserMessages = computed(() => messages.value.some((message) => message.role === 'user'));
 const canManageHomework = computed(() => ['teacher', 'admin'].includes(currentUser.value?.role));
-const visibleCommands = computed(() =>
-  canManageHomework.value
-    ? [quickCommands.fetch_homework, quickCommands.grade_homework, quickCommands.query_score]
-    : [
-        {
-          ...quickCommands.query_score,
-          label: '查询我的成绩',
-          description: '查看自己的作业与试卷成绩',
-        },
-      ]
-);
+const visibleCommands = computed(() => [
+  quickCommands.fetch_homework,
+  quickCommands.grade_homework,
+  quickCommands.query_score,
+]);
 const selectedEntry = computed(() =>
   selectedCommandKey.value === 'fetch_and_grade' ? 'grade_homework' : selectedCommandKey.value
 );
 const selectedCommand = computed(() => {
   if (!selectedCommandKey.value) return null;
-  if (!canManageHomework.value && selectedCommandKey.value === 'query_score')
-    return {
-      template: '请查询我的作业和试卷成绩。',
-      placeholder: '可补充课程、作业或试卷名称',
-      guidance: '只查询你本人的成绩，可补充课程或作业名称。',
-    };
   return quickCommands[selectedCommandKey.value];
 });
-const welcomeText = computed(() =>
-  canManageHomework.value
-    ? '您好！可以帮您拉取并解压作业、批改已有材料，或查询学生成绩。也可以一次完成拉取、解压和批改。'
-    : '您好！可以帮您解答学习问题，或查询您本人的作业与试卷成绩。'
+const welcomeText = computed(
+  () =>
+    '您好！可以帮您拉取并整理作业、批改已有材料，或查询学生的作业成绩。选择下方操作开始，也可以直接描述需求。'
 );
 
 // 初始化

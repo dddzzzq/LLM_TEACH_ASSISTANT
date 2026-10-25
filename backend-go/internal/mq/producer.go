@@ -11,7 +11,6 @@ import (
 const (
 	TopicRPAFetch        = "topic_rpa_fetch"
 	TopicGradingHomework = "topic_grading_homework"
-	TopicGradingExam     = "topic_grading_exam"
 )
 
 // publishMessage 通用消息发布函数
@@ -70,25 +69,6 @@ func PublishRPAFetchTask(message RPAFetchMessage) error {
 	return nil
 }
 
-// PublishExamTask 将试卷批改任务推送到 Topic: topic_grading_exam
-func PublishExamTask(jobID, examID, studentID string, imagePaths []string) error {
-	message := ExamTaskMessage{
-		JobID:      jobID,
-		ExamID:     examID,
-		StudentID:  studentID,
-		ImagePaths: imagePaths,
-	}
-
-	if err := publishMessage(TopicGradingExam, message); err != nil {
-		log.Printf("ERROR: Failed to publish exam task for job %s: %v", jobID, err)
-		return err
-	}
-
-	log.Printf("Exam task published successfully: job=%s, exam=%s, student=%s", jobID, examID, studentID)
-	return nil
-}
-
-// IsKafkaAvailable 检查 Kafka 是否可用
 func IsKafkaAvailable() bool {
 	producer := GetProducer()
 	_, _, err := producer.SendMessage(&sarama.ProducerMessage{

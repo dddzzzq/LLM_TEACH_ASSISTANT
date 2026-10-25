@@ -38,7 +38,7 @@ type RegisterRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 	Name     string `json:"name" binding:"required"`
-	Role     string `json:"role" binding:"required,oneof=student teacher admin"`
+	Role     string `json:"role" binding:"omitempty,oneof=teacher"`
 }
 
 // AuthHandler 认证处理器
@@ -88,6 +88,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	if user.Role != models.RoleTeacher && user.Role != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "当前版本仅提供教师工作区，请使用教师账号登录"})
+		return
+	}
 	// 生成双令牌
 	accessToken, refreshToken, err := auth.GenerateTokenPair(user.ID, user.Username, string(user.Role), nil)
 	if err != nil {
@@ -147,6 +151,10 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
+	if user.Role != models.RoleTeacher && user.Role != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "当前版本仅提供教师工作区"})
+		return
+	}
 	// 生成新的双令牌
 	newAccessToken, newRefreshToken, err := auth.RefreshTokenPair(req.RefreshToken, user.ID, user.Username, string(user.Role), nil)
 	if err != nil {
@@ -168,7 +176,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	})
 }
 
-// Register 处理用户注册（仅管理员可用，实际应用中应加权限控制）
+// Register creates teacher accounts; role escalation is not accepted from clients.
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -177,6 +185,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			"error": "无效的请求格式，请提供 username、password、name 和 role",
 		})
 		return
+	}
+	if req.Role == "" {
+		req.Role = "teacher"
 	}
 	if strings.TrimSpace(req.Name) == strings.TrimSpace(req.Password) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "姓名不能与密码相同，请检查姓名栏是否被自动填充"})
@@ -225,6 +236,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	if user.Role != models.RoleTeacher && user.Role != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "当前版本仅提供教师工作区，请使用教师账号登录"})
+		return
+	}
 	// 生成双令牌
 	accessToken, refreshToken, err := auth.GenerateTokenPair(user.ID, user.Username, string(user.Role), nil)
 	if err != nil {

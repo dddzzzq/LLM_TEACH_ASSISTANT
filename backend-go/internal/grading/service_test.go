@@ -101,7 +101,7 @@ func TestSubmissionWaitsForInputsAndNeverPublishesOnValidationOrPersistenceFailu
 		t.Run(test, func(t *testing.T) {
 			repo := fixtureRepo()
 			called := false
-			service := Service{Repo: repo, PublishHomework: func(string, uint, string) error { called = true; return nil }, PublishExam: func(string, string, string, []string) error { called = true; return nil }}
+			service := Service{Repo: repo, PublishHomework: func(string, uint, string) error { called = true; return nil }}
 			actor := Actor{UserID: 7, Role: "teacher"}
 			request := Request{Kind: "homework", ResourceID: "1", FilePath: fixtureZip(t, "s/report.txt")}
 			switch test {
@@ -136,22 +136,5 @@ func TestSubmissionWaitsForInputsAndNeverPublishesOnValidationOrPersistenceFailu
 				t.Fatal("invalid input produced task")
 			}
 		})
-	}
-}
-func TestExamSubmissionKeepsPageOrderAndQueueFailureIsVisible(t *testing.T) {
-	repo := fixtureRepo()
-	paths := []string{filepath.Join(t.TempDir(), "2.png"), filepath.Join(t.TempDir(), "1.png")}
-	for _, p := range paths {
-		os.WriteFile(p, []byte("image"), 0600)
-	}
-	service := Service{Repo: repo, PublishExam: func(id, exam, student string, images []string) error {
-		if images[0] != paths[0] || images[1] != paths[1] {
-			t.Fatal("page order changed")
-		}
-		return errors.New("queue unavailable")
-	}}
-	result, err := service.Submit(context.Background(), Actor{UserID: 7, Role: "teacher"}, Request{Kind: "exam", ResourceID: "2", StudentID: "20260001", ImagePaths: paths}, "turn")
-	if err != nil || result.Outcome != "failed" || result.Status != models.JobStatusFailed || repo.jobs[result.JobID].Status != models.JobStatusFailed {
-		t.Fatalf("queue error hidden: %+v %v", result, err)
 	}
 }

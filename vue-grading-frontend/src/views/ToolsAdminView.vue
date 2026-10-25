@@ -60,10 +60,6 @@
             <div class="text-sm font-medium text-gray-700 mb-2">允许角色</div>
             <div class="flex gap-3 text-sm">
               <label class="flex items-center gap-2">
-                <input type="checkbox" :value="'student'" v-model="tool.allowed_roles" />
-                student
-              </label>
-              <label class="flex items-center gap-2">
                 <input type="checkbox" :value="'teacher'" v-model="tool.allowed_roles" />
                 teacher
               </label>

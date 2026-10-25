@@ -87,21 +87,14 @@ async def main():
         assert len(posts)==1 and posts[0][0]=='/api/agent/chat' and '20260001' in posts[0][1]['message']
         chat_release.set();await expect(message).to_be_enabled()
         await page.get_by_role('button',name='新会话',exact=False).click()
-        await expect(page.locator('.agent-message')).to_contain_text('拉取并解压作业')
+        await expect(page.locator('.agent-message')).to_contain_text('拉取并整理作业')
         await context.close()
 
-        student_context,student=await open_role('student')
-        await expect(student.locator('.command-options button')).to_have_count(1)
-        await expect(student.get_by_role('button',name='批改作业',exact=True)).to_have_count(0)
-        await expect(student.get_by_role('button',name='打开作业控制台',exact=True)).to_have_count(0)
-        await student.get_by_role('button',name='查询我的成绩',exact=True).click()
-        await expect(student.get_by_role('textbox',name='消息内容')).to_have_value('请查询我的作业和试卷成绩。')
-        await student_context.close()
         admin_context,admin=await open_role('admin')
         await expect(admin.locator('.command-options button')).to_have_count(3)
         await admin_context.close();assert not errors,errors
         await browser.close()
-    print('PASS: three teacher/admin entries, extraction-only intent, grading/full-flow switch, editable selection, no automatic sends, loading locks, student-only scores and mobile layout; fixture APIs only.')
+    print('PASS: three teacher/admin entries, extraction-only intent, grading/full-flow switch, editable selection, no automatic sends, loading locks, teacher-only workspace and mobile layout; fixture APIs only.')
 
 
 asyncio.run(main())

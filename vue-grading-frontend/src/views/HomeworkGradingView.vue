@@ -3,12 +3,13 @@
     <header
       ><h1 class="page-title">作业批改工作台</h1
       ><p class="page-description"
-        >选择材料来源、填写评分配置，系统自动完成材料整理与批改。</p
+        >按三个步骤开始：选择作业、填写要求、提交批改。全部班级默认一并处理。</p
       ></header
     >
+    <p class="workflow-step">提交后可在“批改记录”查看结果，在“作业材料”处理异常。</p>
     <form class="form-surface workbench-form" @submit.prevent="submit">
       <fieldset class="source-options"
-        ><legend>材料来源</legend
+        ><legend>1. 选择作业来源</legend
         ><label v-for="option in sources" :key="option.value"
           ><input
             v-model="source"
@@ -27,7 +28,6 @@
       <template v-else>
         <div class="local-target"
           ><label>课程名称<input v-model="courseName" required maxlength="255" /></label
-          ><label>班级名称<input v-model="className" required maxlength="255" /></label
           ><label>作业名称<input v-model="taskName" required maxlength="255" /></label
         ></div>
         <label v-if="source === 'upload'"
@@ -46,22 +46,16 @@
         >
       </template>
       <label
-        >题目要求<textarea
+        >2. 填写题目要求<textarea
+          aria-label="题目要求"
           v-model="question"
           rows="5"
           required
           placeholder="描述本次作业要求，作为批改依据"
         />
       </label>
-      <label
-        >评分标准（JSON）<textarea
-          v-model="rubric"
-          rows="7"
-          required
-          class="rubric"
-          placeholder='例如 {"正确性":{"description":"程序运行正确","score":100}}'
-        />
-      </label>
+      <RubricEditor v-model="rubric" />
+      <h2 class="submission-title">3. 提交批改</h2>
       <p
         >点击开始批改后，将按本次选定范围自动下载或读取附件、整理材料并评分；需核对的异常会保留在材料批次中。</p
       >
@@ -117,6 +111,7 @@ import { createPortalApi, portalStatus } from '../services/portalApi';
 import PortalAssignmentPicker from '../components/PortalAssignmentPicker.vue';
 import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
 import RpaTaskPanel from '../components/RpaTaskPanel.vue';
+import RubricEditor from '../components/RubricEditor.vue';
 const route = useRoute(),
   router = useRouter(),
   api = createPortalApi(authApi.getClient()),
@@ -128,10 +123,16 @@ const sources = [
 ];
 const source = ref('portal'),
   courseName = ref(''),
-  className = ref(''),
+  className = ref('全部班级'),
   taskName = ref(''),
   question = ref(''),
-  rubric = ref(''),
+  rubric = ref(
+    JSON.stringify({
+      正确性: { description: '程序运行正确，符合题目要求', score: 60 },
+      完成度: { description: '功能完整，提交材料齐全', score: 20 },
+      代码质量: { description: '结构清晰，命名合理', score: 20 },
+    })
+  ),
   directory = ref(''),
   file = ref(null),
   selection = ref({ snapshot_id: '', items: [] });

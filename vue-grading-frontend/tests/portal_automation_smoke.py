@@ -118,6 +118,7 @@ async def main():
         await page.get_by_role('button',name='加入待批改列表',exact=True).click()
         await expect(page.locator('.portal-picker li')).to_have_count(2)
         await page.get_by_label('题目要求',exact=True).fill('实现课程要求')
+        await page.get_by_role('button',name='编辑 JSON（高级）',exact=True).click()
         await page.get_by_label('评分标准（JSON）',exact=True).fill('{"正确性":100}')
         await page.get_by_role('button',name='开始批改',exact=True).click()
         await expect(page.get_by_text('正在整理和评分',exact=False)).to_be_visible()
@@ -125,7 +126,7 @@ async def main():
         assert submitted['snapshot_id']=='s3' and submitted['items']==[{'homework_id':'h1'},{'homework_id':'h2'}]
         assert 'course_name' not in submitted and 'password' not in submitted
         await page.get_by_role('radio',name='上传压缩包',exact=True).check()
-        for label,value in [('课程名称','本地课程'),('班级名称','本地班级'),('作业名称','本地作业')]: await page.get_by_label(label,exact=True).fill(value)
+        for label,value in [('课程名称','本地课程'),('作业名称','本地作业')]: await page.get_by_label(label,exact=True).fill(value)
         archive=io.BytesIO()
         with zipfile.ZipFile(archive,'w') as output:output.writestr('20260001_张三/report.txt','test answer')
         await page.get_by_label('上传作业压缩包',exact=True).set_input_files({'name':'homework.zip','mimeType':'application/zip','buffer':archive.getvalue()})

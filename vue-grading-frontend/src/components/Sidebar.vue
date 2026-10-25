@@ -2,7 +2,7 @@
   <aside class="app-sidebar" aria-label="主导航">
     <div class="sidebar-brand">
       <div class="brand-symbol"><AppIcon name="book" /></div>
-      <div><h1>智能教学助理</h1><p>教学有方，批改有助</p></div>
+      <div><h1>教师作业助手</h1><p>AI 协作 · 作业批改</p></div>
     </div>
     <div class="sidebar-nav-label">工作空间</div>
     <nav class="sidebar-navigation">
@@ -10,8 +10,12 @@
         v-for="item in filteredMenuItems"
         :key="item.name"
         :to="item.path"
+        :aria-label="item.name"
         class="sidebar-link"
-        :class="{ 'is-active': $route.path === item.path }"
+        :class="{
+          'is-active':
+            item.path === '/grade-homework' ? isHomeworkPage(route.path) : route.path === item.path,
+        }"
       >
         <AppIcon :name="item.icon" /><span>{{ item.name }}</span>
         <span v-if="item.path === '/ai-assistant'" class="ai-label">AI</span>
@@ -25,7 +29,7 @@
         <div class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</div>
         <div class="user-info"
           ><p :title="hasRealName ? '真实姓名' : '登录账号'">{{ displayName }}</p
-          ><span>{{ getRoleName(currentUser.role) }}</span></div
+          ><span>{{ currentUser.username }}</span></div
         >
         <span class="user-role">{{ getRoleName(currentUser.role) }}</span>
       </div>
@@ -41,6 +45,7 @@ import { computed, ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import authApi from '../services/authApi';
 import AppIcon from './AppIcon.vue';
+import { mainNavigation, isHomeworkPage } from '../services/teacherWorkspace';
 
 const router = useRouter();
 const route = useRoute();
@@ -59,7 +64,7 @@ onMounted(async () => {
   if (!authApi.isAuthenticated()) return;
   try {
     const { data } = await authApi.getProfile();
-    if (!data?.username || !['student', 'teacher', 'admin'].includes(data.role)) return;
+    if (!data?.username || !['teacher', 'admin'].includes(data.role)) return;
     const account = {
       ...(authApi.getCurrentUser() || {}),
       user_id: data.id,
@@ -75,65 +80,13 @@ onMounted(async () => {
   }
 });
 
-// 获取角色名称
-const getRoleName = (role) => {
-  const roleMap = {
-    student: '学生',
-    teacher: '教师',
-    admin: '管理员',
-  };
-  return roleMap[role] || '用户';
-};
-
-// 图标组件
-const HomeIcon = 'home';
-
-const MagnifyingGlassIcon = 'search';
-
-const CheckBadgeIcon = 'check';
-
-const PencilSquareIcon = 'pen';
-
-const ChatBubbleLeftRightIcon = 'chat';
-
-const WrenchScrewdriverIcon = 'settings';
-
-// 完整菜单项
-const allMenuItems = [
-  { name: '主页', path: '/home', icon: HomeIcon },
-  { name: '作业批改工作台', path: '/grade-homework', icon: CheckBadgeIcon },
-  { name: '教务账号', path: '/settings/portal', icon: WrenchScrewdriverIcon },
-  { name: '作业自动查重', path: '/assignments', icon: MagnifyingGlassIcon },
-  { name: '作业自动评分', path: '/assignments', icon: CheckBadgeIcon },
-  { name: '主观题自动评分', path: '/exams', icon: PencilSquareIcon },
-  { name: 'AI教学助手', path: '/ai-assistant', icon: ChatBubbleLeftRightIcon },
-  { name: '日志查阅', path: '/logs', icon: 'history' },
-  { name: '作业材料', path: '/materials', icon: 'download' },
-  { name: '工具管理', path: '/tools-admin', icon: WrenchScrewdriverIcon },
-];
-
-// 根据角色过滤菜单项
-const filteredMenuItems = computed(() => {
-  const userRole = currentUser.value?.role || 'student';
-
-  // 学生只能看到AI教学助手
-  if (userRole === 'student') {
-    return allMenuItems.filter((item) => item.path === '/ai-assistant');
-  }
-
-  // 教师保留教学功能；日志查阅入口仅管理员可见。
-  if (userRole === 'teacher') {
-    return allMenuItems.filter((item) => !['/tools-admin', '/logs'].includes(item.path));
-  }
-  return userRole === 'admin' ? allMenuItems : [];
-});
-
+const getRoleName = () => '教师工作区';
+const filteredMenuItems = computed(() => mainNavigation);
 // 处理退出登录
 const handleLogout = async () => {
   try {
     authApi.logout();
     router.push('/login');
-    alert('已成功退出登录');
   } catch (error) {
     console.error('退出登录失败:', error);
     alert('退出登录失败，请重试');

@@ -53,6 +53,10 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		if claims.Role != "teacher" && claims.Role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前版本仅提供教师工作区，请使用教师账号登录"})
+			return
+		}
 		// 将用户信息存储到上下文中
 		c.Set(string(UserIDKey), claims.UserID)
 		c.Set(string(UsernameKey), claims.Username)

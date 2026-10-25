@@ -3,17 +3,17 @@
     <section class="login-story" aria-labelledby="login-story-title">
       <div class="login-brand"
         ><span><AppIcon name="book" /></span
-        ><div>智能教学助理<small>教学有方，批改有助</small></div></div
+        ><div>教师作业助手<small>教学有方，批改有助</small></div></div
       >
       <div class="login-story-copy">
         <div class="story-emblem" aria-hidden="true"
           ><AppIcon name="book" /><span class="emblem-spark"><AppIcon name="sparkles" /></span
         ></div>
         <h1 id="login-story-title">把时间留给<br />更有价值的教学。</h1>
-        <p>从一份作业到一次考试，<br />为每一次认真教学，提供恰到好处的帮助。</p>
+        <p>从作业获取到批改反馈，<br />为每一次认真教学，提供恰到好处的帮助。</p>
         <ul class="login-capabilities">
           <li><AppIcon name="check" /><span>作业查重与智能评分</span></li>
-          <li><AppIcon name="pen" /><span>答卷识别与逐题反馈</span></li>
+          <li><AppIcon name="pen" /><span>课程同步与作业材料整理</span></li>
           <li><AppIcon name="chat" /><span>教务作业下载与成绩查询</span></li>
         </ul>
       </div>
@@ -24,7 +24,7 @@
         <span class="login-heading-icon"><AppIcon name="book" /></span>
         <h2>{{ showRegister ? '创建您的账户' : '欢迎回来' }}</h2>
         <p>{{
-          showRegister ? '填写账户信息，开启教学工作台。' : '登录智能作业批改系统，开始今天的工作。'
+          showRegister ? '创建本系统的教师账号。' : '使用本系统账号登录；教务账号可在登录后设置。'
         }}</p>
       </div>
       <div class="login-card">
@@ -33,7 +33,7 @@
           <form name="login" class="space-y-6" @submit.prevent="handleLogin">
             <div>
               <label for="username" class="block text-sm font-medium text-gray-700">
-                登录账号／学号
+                教师账号
               </label>
               <div class="mt-1">
                 <input
@@ -45,7 +45,7 @@
                   type="text"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  placeholder="请输入登录账号或学号"
+                  placeholder="请输入教师账号"
                 />
               </div>
             </div>
@@ -120,7 +120,7 @@
           <form name="register" class="space-y-6" @submit.prevent="handleRegister">
             <div>
               <label for="reg-username" class="block text-sm font-medium text-gray-700">
-                登录账号／学号
+                教师账号
               </label>
               <div class="mt-1">
                 <input
@@ -132,7 +132,7 @@
                   type="text"
                   required
                   class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  placeholder="请输入登录账号或学号"
+                  placeholder="请输入教师账号"
                 />
               </div>
             </div>
@@ -179,25 +179,7 @@
               </div>
             </div>
 
-            <div>
-              <label for="reg-role" class="block text-sm font-medium text-gray-700"> 角色 </label>
-              <div class="mt-1">
-                <select
-                  id="reg-role"
-                  v-model="registerForm.role"
-                  name="role"
-                  :disabled="loading"
-                  required
-                  class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                >
-                  <option value="">请选择角色</option>
-                  <option value="student">学生</option>
-                  <option value="teacher">教师</option>
-                  <option value="admin">管理员</option>
-                </select>
-              </div>
-            </div>
-
+            <p class="text-sm text-gray-500">新账户将注册为教师，无需选择角色。</p>
             <div class="flex space-x-4">
               <button
                 type="button"
@@ -258,26 +240,19 @@
           </div>
         </div>
       </div>
-
-      <div class="test-accounts">
-        <p>测试账户：</p>
-        <p class="mt-1 text-xs">
-          学生：student / student123<br />
-          教师：teacher / teacher123<br />
-          管理员：admin / admin123
-        </p>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
+import { isTeacherAccount } from '../services/teacherWorkspace';
 import authApi from '../services/authApi';
 import AppIcon from '../components/AppIcon.vue';
 
 const router = useRouter();
+const route = useRoute();
 
 // 表单数据
 const loginForm = reactive({
@@ -289,14 +264,16 @@ const registerForm = reactive({
   username: '',
   password: '',
   name: '',
-  role: 'student',
+  role: 'teacher',
 });
 
 // 状态
 const loading = ref(false);
 const rememberMe = ref(true);
 const showRegister = ref(false);
-const errorMessage = ref('');
+const errorMessage = ref(
+  route.query.reason === 'teacher' ? '这是教师工作区，请使用教师账号登录。' : ''
+);
 const successMessage = ref('');
 
 // 检查是否已登录
@@ -326,6 +303,7 @@ const handleLogin = async (event) => {
     if (response.data) {
       const { access_token, refresh_token, user_id, role, name } = response.data;
 
+      if (!isTeacherAccount(role)) throw new Error('请使用教师账号登录');
       // 存储用户信息和 Token
       authApi.setUserInfo({
         user_id,
@@ -343,7 +321,7 @@ const handleLogin = async (event) => {
       successMessage.value = `欢迎回来，${name}！`;
 
       // 根据角色进行路由分流
-      const redirectPath = role === 'student' ? '/ai-assistant' : '/home';
+      const redirectPath = '/ai-assistant';
 
       // 延迟跳转
       setTimeout(() => {
@@ -366,7 +344,7 @@ const handleRegister = async (event) => {
     username: String(fields.get('username') || ''),
     password: String(fields.get('password') || ''),
     name: String(fields.get('name') || ''),
-    role: String(fields.get('role') || ''),
+    role: 'teacher',
   };
   Object.assign(registerForm, registration);
   errorMessage.value = '';
@@ -399,7 +377,7 @@ const handleRegister = async (event) => {
 
       // 延迟跳转
       setTimeout(() => {
-        router.push(role === 'student' ? '/ai-assistant' : '/home');
+        router.push('/ai-assistant');
       }, 1500);
     }
   } catch (error) {
@@ -407,24 +385,6 @@ const handleRegister = async (event) => {
     errorMessage.value = error.response?.data?.error || '注册失败，请稍后重试';
   } finally {
     loading.value = false;
-  }
-};
-
-// 快速填充测试账户
-const fillTestAccount = (role) => {
-  const testAccounts = {
-    student: { username: 'student', password: 'student123', name: '测试学生', role: 'student' },
-    teacher: { username: 'teacher', password: 'teacher123', name: '测试教师', role: 'teacher' },
-    admin: { username: 'admin', password: 'admin123', name: '测试管理员', role: 'admin' },
-  };
-
-  if (showRegister.value) {
-    Object.assign(registerForm, testAccounts[role]);
-  } else {
-    Object.assign(loginForm, {
-      username: testAccounts[role].username,
-      password: testAccounts[role].password,
-    });
   }
 };
 </script>

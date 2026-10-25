@@ -54,7 +54,7 @@ func (g *toolGateway) execute(ctx context.Context, name, args string) (string, e
 	if !ok {
 		return fail("工具执行器不存在")
 	}
-	if g.role != "teacher" && g.role != "admin" && !(g.role == "student" && name == "query_student_score") {
+	if g.role != "teacher" && g.role != "admin" {
 		return fail("当前角色不能执行该任务")
 	}
 	if err := validateToolInput(t.Schema(), args); err != nil {
@@ -73,9 +73,6 @@ func (g *toolGateway) execute(ctx context.Context, name, args string) (string, e
 				return fail("完整流程包含批改，请先加载 " + skill)
 			}
 		}
-	}
-	if g.role == "student" && name == "query_student_score" {
-		args, _ = toolJSON(map[string]string{"student_id": g.username})
 	}
 	var parsed any
 	_ = json.Unmarshal([]byte(args), &parsed)

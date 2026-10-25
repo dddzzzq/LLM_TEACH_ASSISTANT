@@ -87,7 +87,7 @@ func TestStudentCannotAcquireGradingCapabilitiesThroughSkill(t *testing.T) {
 		t.Fatal("student reached grading executor")
 	}
 }
-func TestStudentScoreArgumentsRemainServerScoped(t *testing.T) {
+func TestStudentCannotInvokeScoreExecutorInTeacherEdition(t *testing.T) {
 	tool := &runtimeTool{name: "query_student_score"}
 	registry := NewToolRegistry()
 	registry.Register(tool)
@@ -99,13 +99,13 @@ func TestStudentScoreArgumentsRemainServerScoped(t *testing.T) {
 		}
 		return &LLMResponse{Content: "done"}, nil
 	})
-	if err != nil || strings.Contains(tool.args, "another-student") || !strings.Contains(tool.args, "20260001") {
-		t.Fatal("score scope lost")
+	if err != nil || tool.calls != 0 {
+		t.Fatal("student reached a teacher-only executor")
 	}
 }
 func TestSkillCatalogVersionsAndRejectsDirectoryMismatch(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"grade-homework", "grade-exam"} {
+	for _, name := range []string{"grade-homework", "download-homework"} {
 		os.MkdirAll(filepath.Join(root, name), 0755)
 		os.WriteFile(filepath.Join(root, name, "SKILL.md"), []byte("---\nname: "+name+"\ndescription: route this task\n---\nBODY_CANARY"), 0600)
 	}
@@ -113,10 +113,10 @@ func TestSkillCatalogVersionsAndRejectsDirectoryMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(catalog.Summary(), "BODY_CANARY") || len(catalog["grade-exam"].Version) != 64 {
+	if strings.Contains(catalog.Summary(), "BODY_CANARY") || len(catalog["download-homework"].Version) != 64 {
 		t.Fatal("discovery leaked body or lost hash")
 	}
-	os.WriteFile(filepath.Join(root, "grade-exam", "SKILL.md"), []byte("---\nname: wrong\ndescription: route\n---\nbody"), 0600)
+	os.WriteFile(filepath.Join(root, "download-homework", "SKILL.md"), []byte("---\nname: wrong\ndescription: route\n---\nbody"), 0600)
 	if _, err := LoadGradingSkills(root); err == nil {
 		t.Fatal("mismatched skill accepted")
 	}
@@ -143,7 +143,7 @@ func TestModelClientPreservesNativeToolMessages(t *testing.T) {
 	client := NewDeepSeekClient("fixture")
 	t.Setenv("AGENT_MODEL_URL", server.URL)
 	client = NewDeepSeekClient("fixture")
-	_, err := client.CallMessages(context.Background(), []map[string]interface{}{{"role": "assistant", "tool_calls": []ToolCall{{ID: "call-1", Type: "function", Function: FunctionCall{Name: "load_skill", Arguments: `{"name":"grade-exam"}`}}}}, {"role": "tool", "tool_call_id": "call-1", "content": "body"}}, nil)
+	_, err := client.CallMessages(context.Background(), []map[string]interface{}{{"role": "assistant", "tool_calls": []ToolCall{{ID: "call-1", Type: "function", Function: FunctionCall{Name: "load_skill", Arguments: `{"name":"download-homework"}`}}}}, {"role": "tool", "tool_call_id": "call-1", "content": "body"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

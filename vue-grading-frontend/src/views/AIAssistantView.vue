@@ -2,12 +2,10 @@
   <div class="ai-assistant-view">
     <header class="page-heading">
       <div
-        ><h1 class="page-title">AI 教学助手</h1
-        ><p class="page-description">{{
-          canFetch
-            ? '拉取并解压、批改作业、查询成绩，按本次需求组织教学事务。'
-            : '解答学习问题，查询自己的作业与试卷成绩。'
-        }}</p></div
+        ><h1 class="page-title">AI 助手</h1
+        ><p class="page-description"
+          >用对话拉取作业、安排批改和查询成绩；需要选择具体作业时，前往作业批改。</p
+        ></div
       >
       <button
         v-if="canFetch"

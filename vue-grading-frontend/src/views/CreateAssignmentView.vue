@@ -94,7 +94,7 @@ const router = useRouter();
 
 // 数据形式
 const courseName = ref('');
-const className = ref('');
+const className = ref('全部班级');
 const taskName = ref('');
 const question = ref('');
 const rubric = ref(

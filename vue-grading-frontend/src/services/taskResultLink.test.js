@@ -6,12 +6,12 @@ test('task receipts permit portal result pages while rejecting external or extra
   for (const value of [
     '/materials',
     '/assignments/7',
-    '/exams/8',
     '/settings/portal',
     '/grade-homework?workflow=11111111-1111-4111-8111-111111111111',
   ])
     assert.equal(taskResultLink(value), value);
   for (const value of [
+    '/exams/8',
     null,
     {},
     'javascript:alert(1)',

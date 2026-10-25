@@ -50,6 +50,7 @@ func main() {
 	agent.EnsureRPATools(context.Background())
 	agent.EnsureGradingTools(context.Background())
 	agent.EnsurePortalTools(context.Background())
+	agent.EnsureTeacherEditionTools(context.Background())
 	// Install the credential/session hook before Kafka consumers can restore queued jobs.
 	portal.Start(context.Background(), database.DB)
 	rpa.PublishFetch = func(id string) error { return mq.PublishRPAFetchTask(mq.RPAFetchMessage{JobID: id}) }
@@ -62,7 +63,7 @@ func main() {
 	} else {
 		defer mq.Close()
 		// 启动 Kafka 消费者 - 批改任务
-		topics := []string{mq.TopicGradingHomework, mq.TopicGradingExam}
+		topics := []string{mq.TopicGradingHomework}
 		go func() {
 			if err := mq.StartKafkaConsumer(topics); err != nil {
 				log.Printf("ERROR: Failed to start Kafka consumer: %v", err)

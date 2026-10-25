@@ -1,6 +1,6 @@
 # 批改 Skill 实现与边界
 
-作业和试卷批改各自有独立的 Skill。Skill 告诉主助手如何核对材料、处理缺项、选择工具和解释结果；执行权限、评分配置校验、任务持久化及评分计算仍由代码负责。
+教师版只保留作业批改 Skill。Skill 告诉主助手如何核对材料、处理缺项、选择工具和解释结果；执行权限、评分配置校验、任务持久化及评分计算仍由代码负责。
 
 ## 调用链
 
@@ -23,7 +23,7 @@ flowchart TD
     R --> Q[get_grading_job / 详情页面]
 ```
 
-`skills/grade-homework/SKILL.md` 处理作业目标消歧、ZIP 材料、题目与 JSON 评分标准、提交和结果解释。`skills/grade-exam/SKILL.md` 处理试卷、学生、答卷页序、逐题标准及 OCR/评分失败。`fetch-homework` 仍由独立浏览器 Agent 使用，完成登录协作、导航和下载；下载后的材料整理进入独立材料批次；仅显式请求完整流程时接续批改，见 [材料工作流](homework-materials-workflow.md)。
+`skills/grade-homework/SKILL.md` 处理作业目标消歧、材料、题目与评分标准、提交和结果解释。`fetch-homework` 仍由独立浏览器 Agent 使用，完成登录协作、导航和下载；下载后的材料整理进入独立材料批次；仅显式请求完整流程时接续批改，见 [材料工作流](homework-materials-workflow.md)。
 
 ## 加载与执行
 

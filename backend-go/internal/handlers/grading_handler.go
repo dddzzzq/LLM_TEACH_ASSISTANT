@@ -42,5 +42,5 @@ func submitGradingUpload(c *gin.Context, actor grading.Actor, request grading.Re
 	if result.Outcome == "failed" {
 		status = http.StatusServiceUnavailable
 	}
-	c.JSON(status, gin.H{"outcome": result.Outcome, "job_id": result.JobID, "job_type": result.JobType, "status": result.Status, "message": result.Message, "missing": result.Missing, "result_url": result.ResultURL, "file_path": request.FilePath, "image_paths": request.ImagePaths})
+	c.JSON(status, gin.H{"outcome": result.Outcome, "job_id": result.JobID, "job_type": result.JobType, "status": result.Status, "message": result.Message, "missing": result.Missing, "result_url": result.ResultURL, "file_path": request.FilePath})
 }

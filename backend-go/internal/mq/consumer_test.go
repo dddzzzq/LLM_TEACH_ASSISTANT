@@ -34,7 +34,7 @@ func TestIntegrationTerminalGradingMessagesAreAcknowledgedWithoutRunning(t *test
 		t.Fatal(err)
 	}
 	for _, status := range []models.AsyncJobStatus{models.JobStatusCancelled, models.JobStatusSuccess, models.JobStatusFailed} {
-		for _, kind := range []models.AsyncJobType{models.JobTypeHomework, models.JobTypeExam} {
+		for _, kind := range []models.AsyncJobType{models.JobTypeHomework} {
 			t.Run(string(kind)+"/"+string(status), func(t *testing.T) {
 				job := models.AsyncJob{ID: uuid.NewString(), JobType: kind, ReferenceID: "test", Status: status, Message: "terminal snapshot"}
 				if err := db.Create(&job).Error; err != nil {
@@ -42,9 +42,6 @@ func TestIntegrationTerminalGradingMessagesAreAcknowledgedWithoutRunning(t *test
 				}
 				message, _ := json.Marshal(map[string]any{"job_id": job.ID, "assignment_id": 0, "zip_path": "/nonexistent/cancelled-task.zip"})
 				handler := handleHomeworkTask
-				if kind == models.JobTypeExam {
-					handler = handleExamTask
-				}
 				if err := handler(context.Background(), message); err != nil {
 					t.Fatal("terminal replay must be acknowledged, not retried:", err)
 				}

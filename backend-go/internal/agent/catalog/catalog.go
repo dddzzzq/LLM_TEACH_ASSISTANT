@@ -48,7 +48,7 @@ func Load(root, runtimeName string) (Catalog, error) {
 	}
 	out := Catalog{}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "grade-exam" {
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())

@@ -21,16 +21,6 @@
   },
   {
     "Method": "DELETE",
-    "Path": "/exams/:id",
-    "Handler": "grading-gateway/internal/handlers.DeleteExam"
-  },
-  {
-    "Method": "DELETE",
-    "Path": "/exams/:id/results/:student_exam_id",
-    "Handler": "grading-gateway/internal/handlers.DeleteStudentExamResult"
-  },
-  {
-    "Method": "DELETE",
     "Path": "/submissions/:id",
     "Handler": "grading-gateway/internal/handlers.DeleteSubmission"
   },
@@ -211,26 +201,6 @@
   },
   {
     "Method": "GET",
-    "Path": "/exams/",
-    "Handler": "grading-gateway/internal/handlers.GetExams"
-  },
-  {
-    "Method": "GET",
-    "Path": "/exams/:id",
-    "Handler": "grading-gateway/internal/handlers.GetExam"
-  },
-  {
-    "Method": "GET",
-    "Path": "/exams/:id/results",
-    "Handler": "grading-gateway/internal/handlers.GetExamResultsSummary"
-  },
-  {
-    "Method": "GET",
-    "Path": "/exams/:id/results/:student_exam_id",
-    "Handler": "grading-gateway/internal/handlers.GetStudentDetailedReport"
-  },
-  {
-    "Method": "GET",
     "Path": "/submissions/:id",
     "Handler": "grading-gateway/internal/handlers.GetSubmission"
   },
@@ -348,21 +318,6 @@
     "Method": "POST",
     "Path": "/assignments/:id/submit",
     "Handler": "grading-gateway/internal/handlers.UploadAssignment"
-  },
-  {
-    "Method": "POST",
-    "Path": "/exams/",
-    "Handler": "grading-gateway/internal/handlers.CreateExam"
-  },
-  {
-    "Method": "POST",
-    "Path": "/exams/:id/grade_submission",
-    "Handler": "grading-gateway/internal/handlers.UploadStudentExam"
-  },
-  {
-    "Method": "POST",
-    "Path": "/exams/:id/questions",
-    "Handler": "grading-gateway/internal/handlers.AddExamQuestion"
   },
   {
     "Method": "PUT",

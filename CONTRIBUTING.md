@@ -23,8 +23,8 @@
 | `backend-go/internal/execution/` | 同步保存助手执行事件，从事件重建结构化上下文及聊天展示；查询和重建不执行业务工具。详见 [执行记录设计](docs/execution-records.md)。 |
 | `backend-go/internal/portal/` | 教师凭据保管、本机一次性认证通道、官网目录快照与选择式批改流程。参见 [教务接入部署说明](docs/teacher-portal-automation.md)。 |
 | `backend-go/internal/handlers/` | 解析 HTTP 输入、调用业务能力、转换响应；文件使用 `snake_case.go`。 |
-| `backend-go/internal/models/` | 按用户、会话、作业、考试、异步任务、工具、材料和 RPA 分文件；仍属于同一 `models` 包。 |
-| `backend-go/internal/tools/` | 文件过滤、文档解析、作业/试卷流水线、响应转换和成绩池化；避免继续添加含糊的通用辅助文件。 |
+| `backend-go/internal/models/` | 按用户、会话、作业、历史考试数据、异步任务、工具、材料和 RPA 分文件；仍属于同一 `models` 包。 |
+| `backend-go/internal/tools/` | 文件过滤、文档解析、作业流水线、响应转换和成绩池化；避免继续添加含糊的通用辅助文件。 |
 | `ai_engine_python/app/grpc_server.py` | 保留原启动命令，负责模型加载、日志和 gRPC 服务启动。 |
 | `ai_engine_python/app/rpc/` | 协议导入和请求适配；依赖显式传入，不在导入时加载模型权重，便于隔离测试。 |
 | `ai_engine_python/app/services/` | OCR、查重、AIGC 和模型计算。模型导入顺序涉及本地运行时，不能随意重排。 |

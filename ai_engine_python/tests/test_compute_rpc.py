@@ -88,24 +88,6 @@ class ComputeRPCContractTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(grade.code_doc_match_report_json)["score"], 80)
         self.assertEqual(self.deepseek.grade_homework.call_args.kwargs["rubric"], {"max": 100})
-        question = self.stub.IdentifyQuestionNumber(
-            pb2.IdentifyQuestionRequest(ocr_text="第2题", question_list_str="1,2"), timeout=5
-        )
-        self.assertEqual(question.question_number, 2)
-        self.deepseek.identify_question_number.assert_awaited_once_with(
-            ocr_text="第2题", question_list="1,2"
-        )
-        exam = self.stub.GradeExamQuestion(
-            pb2.GradeExamQuestionRequest(question_text="题目", max_score=10), timeout=5
-        )
-        self.assertEqual(
-            (exam.score, exam.feedback, exam.student_answer_extracted), (8, "正确", "答案")
-        )
-        summary = self.stub.SummarizeExam(
-            pb2.SummarizeExamRequest(all_feedback=["评语"]), timeout=5
-        )
-        self.assertEqual(summary.summary_report, "整卷建议")
-        self.deepseek.summarize_exam_performance.assert_awaited_once_with(["评语"])
         pool = self.stub.PoolScores(
             pb2.PoolScoresRequest(assignment_id="42", scores_data_json="[]"), timeout=5
         )
@@ -146,9 +128,15 @@ class ComputeRPCContractTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.message, "旧入口已停用")
 
-    def test_exam_failures_keep_internal_status_and_details(self):
-        self.deepseek.identify_question_number.side_effect = ValueError("model unavailable")
-        with self.assertRaises(grpc.RpcError) as failure:
-            self.stub.IdentifyQuestionNumber(pb2.IdentifyQuestionRequest(), timeout=5)
-        self.assertEqual(failure.exception.code(), grpc.StatusCode.INTERNAL)
-        self.assertEqual(failure.exception.details(), "model unavailable")
+    def test_removed_exam_rpcs_cannot_call_ai_services(self):
+        for method, request in [
+            (self.stub.IdentifyQuestionNumber, pb2.IdentifyQuestionRequest()),
+            (self.stub.GradeExamQuestion, pb2.GradeExamQuestionRequest()),
+            (self.stub.SummarizeExam, pb2.SummarizeExamRequest()),
+        ]:
+            with self.assertRaises(grpc.RpcError) as failure:
+                method(request, timeout=5)
+            self.assertEqual(failure.exception.code(), grpc.StatusCode.UNIMPLEMENTED)
+        self.deepseek.identify_question_number.assert_not_awaited()
+        self.deepseek.grade_exam_question.assert_not_awaited()
+        self.deepseek.summarize_exam_performance.assert_not_awaited()

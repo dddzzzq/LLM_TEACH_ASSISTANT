@@ -66,7 +66,7 @@ func TestIntegrationRegistrationLoginAndRefreshReturnCanonicalAccount(t *testing
 		router.ServeHTTP(out, req)
 		return out
 	}
-	for _, role := range []string{"teacher", "student", "admin"} {
+	for _, role := range []string{"teacher"} {
 		username := "auth-fixture-" + uuid.NewString()
 		password := "fixture-different-secret"
 		name := "Fixture Person"

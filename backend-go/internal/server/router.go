@@ -141,21 +141,6 @@ func NewRouter(db *gorm.DB, logService *logbook.Service) *gin.Engine {
 		submissionGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteSubmission) // 删除单个学生作业路由
 	}
 
-	// 试卷主观题批改路由
-	examGroup := router.Group("/exams")
-	examGroup.Use(middleware.AuthMiddleware())
-	{
-		examGroup.POST("/", middleware.StudentAccessGuard(), handlers.CreateExam)                            // 步骤1：新建试卷
-		examGroup.GET("/", handlers.GetExams)                                                                // 列表
-		examGroup.GET("/:id", handlers.GetExam)                                                              // 详情(含题目)
-		examGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteExam)                       // 删除整个试卷
-		examGroup.POST("/:id/questions", middleware.StudentAccessGuard(), handlers.AddExamQuestion)          // 步骤2：添加考题
-		examGroup.POST("/:id/grade_submission", middleware.StudentAccessGuard(), handlers.UploadStudentExam) // 并发交卷核心接口
-		examGroup.GET("/:id/results", handlers.GetExamResultsSummary)                                        // 获取某次考试的所有人总分
-		examGroup.GET("/:id/results/:student_exam_id", handlers.GetStudentDetailedReport)                    // 获取某个人的详细试卷分析
-		examGroup.DELETE("/:id/results/:student_exam_id", middleware.StudentAccessGuard(), handlers.DeleteStudentExamResult)
-	}
-
 	// 静态资源服务
 	// 供前端渲染图片使用
 	router.Static("/uploads", "./uploads")
