@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"grading-gateway/internal/agent/modelclient"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/rpa"
 	"grading-gateway/internal/tools"
@@ -30,13 +30,15 @@ type DetailSource struct {
 	Error  string `json:"error,omitempty"`
 }
 type HomeworkDetail struct {
-	CourseID   string         `json:"course_id"`
-	HomeworkID string         `json:"homework_id"`
-	Title      string         `json:"title"`
-	Question   string         `json:"question"`
-	Complete   bool           `json:"complete"`
-	Sources    []DetailSource `json:"sources"`
-	Warnings   []string       `json:"warnings"`
+	CourseID    string            `json:"course_id"`
+	HomeworkID  string            `json:"homework_id"`
+	Title       string            `json:"title"`
+	Question    string            `json:"question"`
+	RawQuestion string            `json:"raw_question,omitempty"`
+	Processing  *DetailProcessing `json:"processing,omitempty"`
+	Complete    bool              `json:"complete"`
+	Sources     []DetailSource    `json:"sources"`
+	Warnings    []string          `json:"warnings"`
 }
 type detailTarget struct {
 	HomeworkID   string           `json:"homework_id"`
@@ -261,9 +263,9 @@ func (r *Runner) parseDetail(ctx context.Context, op models.PortalOperation, sta
 		if err != nil {
 			state.Status, state.Stage, state.ErrorCode, state.Message = "FAILED", "READING_DETAIL", "DETAIL_REJECTED", "作业详情核验或解析失败，请重试读取"
 		} else {
-			state.HomeworkDetail, state.Message = result, "作业要求读取完成"
+			state.HomeworkDetail, state.Message = result, "作业要求已读取并整理"
 			if !result.Complete {
-				state.Message = "作业要求已部分读取，请核对未解析的图片或附件"
+				state.Message = "作业要求未完整整理，请查看图片、附件或模型处理提示"
 			}
 		}
 		if ctx.Err() != nil {
@@ -277,6 +279,10 @@ func (r *Runner) parseDetail(ctx context.Context, op models.PortalOperation, sta
 }
 
 func resolveDetail(ctx context.Context, op models.PortalOperation, raw *HomeworkDetail) (*HomeworkDetail, error) {
+	return resolveDetailWithModel(ctx, op, raw, modelclient.NewDeepSeekClient("").CallJSONMessages)
+}
+
+func resolveDetailWithModel(ctx context.Context, op models.PortalOperation, raw *HomeworkDetail, call requirementModel) (*HomeworkDetail, error) {
 	var selected detailTarget
 	if json.Unmarshal([]byte(op.PayloadJSON), &selected) != nil || raw == nil || raw.CourseID != selected.Target.CourseID || raw.HomeworkID != selected.Target.HomeworkID || raw.Title != selected.HomeworkName || len(raw.Sources) == 0 || len(raw.Sources) > 40 {
 		return nil, errors.New("detail target mismatch")
@@ -284,7 +290,10 @@ func resolveDetail(ctx context.Context, op models.PortalOperation, raw *Homework
 	detail := *raw
 	detail.Sources = append([]DetailSource(nil), raw.Sources...)
 	detail.Warnings = append([]string(nil), raw.Warnings...)
-	var question []string
+	detail.Processing = nil
+	var images []detailImage
+	var imageBytes int
+	visionExceeded := false
 	var total int64
 	for i := range detail.Sources {
 		if ctx.Err() != nil {
@@ -311,8 +320,16 @@ func resolveDetail(ctx context.Context, op models.PortalOperation, raw *Homework
 				if total > 60<<20 || hex.EncodeToString(digest[:]) != source.SHA256 || int64(len(data)) != source.Size {
 					return nil, errors.New("question resource verification failed")
 				}
-				var warnings []string
-				source.Text, warnings = tools.ExtractRequirement(ctx, path, data)
+				text, figures, warnings := tools.ExtractRequirementWithImages(ctx, path, data)
+				source.Text = text
+				for n, figure := range figures {
+					imageBytes += len(figure.Data)
+					if imageBytes > 30<<20 || len(images) >= 40 {
+						visionExceeded = true
+						continue
+					}
+					images = append(images, detailImage{ID: fmt.Sprintf("%s.%d", source.ID, n+1), SourceID: source.ID, RequirementImage: figure})
+				}
 				for _, warning := range warnings {
 					detail.Warnings = append(detail.Warnings, source.Name+"："+warning)
 				}
@@ -322,22 +339,25 @@ func resolveDetail(ctx context.Context, op models.PortalOperation, raw *Homework
 		} else {
 			return nil, errors.New("unknown question source")
 		}
-		if strings.TrimSpace(source.Text) != "" {
-			text := source.Text
-			if source.Kind != "text" {
-				text = "[" + source.Name + "]\n" + text
-			}
-			question = append(question, text)
-		}
 	}
-	detail.Question = strings.TrimSpace(strings.Join(question, "\n\n"))
+	detail.RawQuestion = joinDetailSources(detail.Sources)
+	detail.Question = detail.RawQuestion
 	if len(detail.Question) > 100000 {
 		return nil, errors.New("question too large")
 	}
 	if detail.Question == "" {
 		detail.Warnings = append(detail.Warnings, "未提取到可用于批改的题目正文")
+	} else if visionExceeded {
+		detail.Warnings = append(detail.Warnings, "题目图片超过单次理解上限（40张或30MiB），已保留原始材料，未自动采用不完整要求")
+	} else if err := organizeRequirements(ctx, &detail, images, call); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Preserve acquired materials for inspection; a failed/incomplete model
+		// response must never silently become automatic grading requirements.
+		detail.Warnings = append(detail.Warnings, "作业要求整理失败（模型调用、原图读取或结果校验未完成），请重试读取；已保留原始材料")
 	}
-	detail.Complete = raw.Complete && len(detail.Warnings) == 0 && detail.Question != ""
+	detail.Complete = raw.Complete && len(detail.Warnings) == 0 && detail.Question != "" && detail.Processing != nil
 	return &detail, nil
 }
 
@@ -355,5 +375,11 @@ func publishDetail(tx *gorm.DB, c *models.PortalConnection, op *models.PortalOpe
 		return err
 	}
 	row := models.PortalHomeworkDetail{HomeworkID: work.ID, OwnerID: c.OwnerID, ConnectionID: c.ID, ProfileGeneration: c.ProfileGeneration, SnapshotID: selected.SnapshotID, OperationID: op.ID, Question: detail.Question, Complete: detail.Complete, ContentJSON: string(raw)}
-	return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
+	if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error; err != nil {
+		return err
+	}
+	if detail.Processing != nil {
+		return appendEvent(tx, op, "requirements.organized", map[string]any{"version": detail.Processing.Version, "model": detail.Processing.Model, "used_vision": detail.Processing.UsedVision, "complete": detail.Complete, "source_count": len(detail.Sources)})
+	}
+	return nil
 }

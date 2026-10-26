@@ -21,13 +21,43 @@ import (
 // ExtractRequirement reuses document readers and the existing OCR RPC. Unlike
 // student material parsing, missing pages/images are explicit incomplete results.
 func ExtractRequirement(ctx context.Context, filename string, data []byte) (string, []string) {
+	return extractRequirement(ctx, filename, data, requirementOCR)
+}
+
+// RequirementImage keeps the original bytes (or a rendered PDF page) for vision.
+// It is transient and must not be serialized into the public detail response.
+type RequirementImage struct {
+	Name string
+	Data []byte
+}
+
+// ExtractRequirementWithImages reuses the document readers, collecting images
+// for the configured model instead of flattening them with OCR. Placeholders
+// preserve the association between document text and its figures/pages.
+func ExtractRequirementWithImages(ctx context.Context, filename string, data []byte) (string, []RequirementImage, []string) {
+	var images []RequirementImage
+	var total int
+	text, warnings := extractRequirement(ctx, filename, data, func(_ context.Context, name string, image []byte) (string, error) {
+		total += len(image)
+		if total > 30<<20 || len(images) >= 40 {
+			return "", errors.New("requirement images exceed reading limit")
+		}
+		images = append(images, RequirementImage{Name: name, Data: image})
+		return fmt.Sprintf("[原图 %d]", len(images)), nil
+	})
+	return text, images, warnings
+}
+
+type requirementImageReader func(context.Context, string, []byte) (string, error)
+
+func extractRequirement(ctx context.Context, filename string, data []byte, readImage requirementImageReader) (string, []string) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	var text string
 	var warnings []string
 	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".png", ".jpg", ".jpeg", ".webp", ".gif":
-		value, err := requirementOCR(ctx, filename, data)
+		value, err := readImage(ctx, filename, data)
 		if err != nil {
 			return "", []string{"图片未能识别出有效文字，请核对原图"}
 		}
@@ -66,9 +96,9 @@ func ExtractRequirement(ctx context.Context, filename string, data []byte) (stri
 				warnings = append(warnings, "Word 内嵌图片无法读取")
 				continue
 			}
-			value, err := requirementOCR(ctx, filepath.Base(entry.Name), image)
+			value, err := readImage(ctx, filepath.Base(entry.Name), image)
 			if err != nil {
-				warnings = append(warnings, "Word 内嵌图片未能识别，请核对原文件")
+				warnings = append(warnings, "Word 内嵌图片未能读取或超过上限，请核对原文件")
 				continue
 			}
 			text += "\n\n[Word 内嵌图片]\n" + value
@@ -78,7 +108,7 @@ func ExtractRequirement(ctx context.Context, filename string, data []byte) (stri
 		// antiword extracts text only; do not silently claim embedded figures were read.
 		warnings = append(warnings, "旧版 Word 已提取正文，内嵌图片需要核对原文件；建议使用 DOCX 或 PDF")
 	case ".pdf":
-		return requirementPDF(ctx, data)
+		return requirementPDF(ctx, data, readImage)
 	case ".txt", ".md":
 		text = ExtractContent(filename, data, 0)
 	default:
@@ -109,7 +139,7 @@ func requirementOCR(ctx context.Context, filename string, data []byte) (string, 
 	return text, nil
 }
 
-func requirementPDF(ctx context.Context, data []byte) (string, []string) {
+func requirementPDF(ctx context.Context, data []byte, readImage requirementImageReader) (string, []string) {
 	dir, err := os.MkdirTemp("", "teaching-question-*")
 	if err != nil {
 		return "", []string{"PDF 临时目录不可用"}
@@ -162,8 +192,8 @@ func requirementPDF(ctx context.Context, data []byte) (string, []string) {
 			image, readErr := os.ReadFile(prefix + ".png")
 			if renderErr != nil || readErr != nil || len(image) > 20<<20 {
 				warnings = append(warnings, fmt.Sprintf("PDF 第%d页图片未能读取", page))
-			} else if ocr, err := requirementOCR(ctx, "page.png", image); err != nil {
-				warnings = append(warnings, fmt.Sprintf("PDF 第%d页图片未能识别，请核对原文件", page))
+			} else if ocr, err := readImage(ctx, "page-"+n+".png", image); err != nil {
+				warnings = append(warnings, fmt.Sprintf("PDF 第%d页图片未能读取或超过上限，请核对原文件", page))
 			} else if text == "" {
 				text = ocr
 			} else {

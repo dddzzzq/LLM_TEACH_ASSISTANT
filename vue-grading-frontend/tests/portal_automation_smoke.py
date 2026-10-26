@@ -71,7 +71,8 @@ async def main():
                 operation = detail_reads.get(homework_id)
                 data = {'snapshot_id':'s3','detail':None}
                 if operation:
-                    data.update(operation={**operation,'status':'SUCCEEDED'},updated_at='2026-10-26T12:00:00+08:00',detail={'complete':True,'question':'实现并发下载器' if homework_id=='h1' else '实现二叉树遍历','warnings':[],'sources':[]})
+                    question = '实现并发下载器' if homework_id=='h1' else '实现二叉树遍历'
+                    data.update(operation={**operation,'status':'SUCCEEDED'},updated_at='2026-10-26T12:00:00+08:00',detail={'complete':True,'question':'## 功能要求\n'+question+'\n\n```sh\nmultidownload ./files.json ./downloads\n```\n<img src="https://invalid.example/test.png" onerror="window.unsafeRequirement=true"><script>window.unsafeRequirement=true</script>','raw_question':'原始转写：'+question,'processing':{'model':'fixture-vision','used_vision':True,'version':'requirements.vision.v1'},'warnings':[],'sources':[]})
         elif path == "/api/grading/workflows" and request.method == "POST": data = {"id":flow_id,"status":"QUEUED"}; status = 202
         elif path == "/api/grading/workflows/"+flow_id:
             data = {"workflow":{"id":flow_id,"status":"RUNNING"},"items":[{"id":"item1","course_name":"同名课程","homework_name":"第一次作业","class_name":"全部班级","assignment_id":400,"status":"RUNNING","message":"正在整理和评分","rpa_job_id":""}]}
@@ -143,11 +144,17 @@ async def main():
         assert await picker.get_by_role('checkbox').count() == 0
         await page.get_by_role('button',name='加入待批改列表',exact=True).click()
         await expect(page.locator('.portal-picker li')).to_have_count(2)
-        await page.get_by_text('查看提取的作业要求',exact=True).first.click(timeout=15000)
+        await page.get_by_text('查看作业要求',exact=True).first.click(timeout=15000)
         await expect(page.get_by_text('实现并发下载器',exact=True)).to_be_visible(timeout=15000)
-        await expect(page.get_by_text('查看提取的作业要求',exact=True)).to_have_count(2, timeout=15000)
-        await page.get_by_text('查看提取的作业要求',exact=True).last.click()
+        await expect(page.get_by_text('查看作业要求',exact=True)).to_have_count(2, timeout=15000)
+        await page.get_by_text('查看作业要求',exact=True).last.click()
         await expect(page.get_by_text('实现二叉树遍历',exact=True)).to_be_visible(timeout=15000)
+        await expect(page.locator('.requirement-content pre code').first).to_have_text('multidownload ./files.json ./downloads\n')
+        assert await page.locator('.requirement-content img, .requirement-content script').count() == 0
+        assert not await page.evaluate('Boolean(window.unsafeRequirement)')
+        await page.get_by_text('查看原始提取文本与图片转写',exact=True).first.click()
+        await expect(page.get_by_text('原始转写：实现并发下载器',exact=True)).to_be_visible()
+        await page.screenshot(path=str(diagnostics/'homework-requirements-organized.png'),full_page=True)
         await expect(page.get_by_role('button',name='开始批改',exact=True)).to_be_enabled(timeout=15000)
         await page.get_by_role('button',name='编辑 JSON（高级）',exact=True).click()
         await page.get_by_label('评分标准（JSON）',exact=True).fill('{"正确性":100}')

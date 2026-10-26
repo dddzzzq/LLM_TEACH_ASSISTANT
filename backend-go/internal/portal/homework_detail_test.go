@@ -10,9 +10,23 @@ import (
 	"strings"
 	"testing"
 
+	"grading-gateway/internal/agent/modelclient"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/rpa"
 )
+
+func echoRequirementModel(_ context.Context, messages []map[string]interface{}) (*modelclient.LLMResponse, error) {
+	blocks := messages[1]["content"].([]map[string]any)
+	var input struct{ Sources []struct{ ID, Text string } }
+	_ = json.Unmarshal([]byte(blocks[0]["text"].(string)), &input)
+	var ids, parts []string
+	for _, source := range input.Sources {
+		ids = append(ids, source.ID)
+		parts = append(parts, source.Text)
+	}
+	result, _ := json.Marshal(map[string]any{"requirements": strings.Join(parts, "\n\n"), "source_ids": ids, "images": []any{}, "uncertainties": []string{}})
+	return &modelclient.LLMResponse{Content: string(result), FinishReason: "stop", Model: "fixture-model"}, nil
+}
 
 func detailFixture(t *testing.T) (*Runner, uint, models.PortalConnection, []models.PortalHomework) {
 	t.Helper()
@@ -65,7 +79,7 @@ func TestIntegrationHomeworkDetailsReuseAgentAndKeepQuestionsSeparate(t *testing
 		var target detailTarget
 		_ = json.Unmarshal([]byte(op.PayloadJSON), &target)
 		question := []string{"实现并发下载器", "实现二叉树遍历"}[i]
-		resolved, err := resolveDetail(ctx, op, &HomeworkDetail{CourseID: target.Target.CourseID, HomeworkID: target.Target.HomeworkID, Title: target.HomeworkName, Complete: true, Sources: []DetailSource{{Kind: "text", Text: question}}})
+		resolved, err := resolveDetailWithModel(ctx, op, &HomeworkDetail{CourseID: target.Target.CourseID, HomeworkID: target.Target.HomeworkID, Title: target.HomeworkName, Complete: true, Sources: []DetailSource{{Kind: "text", Text: question}}}, echoRequirementModel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,12 +177,12 @@ func TestRequirementResourcesRejectTraversalAndVerifyDigest(t *testing.T) {
 	op := models.PortalOperation{ID: "job", PayloadJSON: string(payload)}
 	digest := sha256.Sum256(data)
 	raw := &HomeworkDetail{CourseID: "11", HomeworkID: "33", Title: "作业", Complete: true, Sources: []DetailSource{{Kind: "attachment", Name: "题目.txt", Path: file, SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}}}
-	result, err := resolveDetail(context.Background(), op, raw)
+	result, err := resolveDetailWithModel(context.Background(), op, raw, echoRequirementModel)
 	if err != nil || !result.Complete || !strings.Contains(result.Question, string(data)) {
 		t.Fatalf("resource parse: %v", err)
 	}
 	raw.Sources[0].SHA256 = strings.Repeat("0", 64)
-	if _, err = resolveDetail(context.Background(), op, raw); err == nil {
+	if _, err = resolveDetailWithModel(context.Background(), op, raw, echoRequirementModel); err == nil {
 		t.Fatal("tampered resource accepted")
 	}
 }

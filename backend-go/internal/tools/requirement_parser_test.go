@@ -40,6 +40,10 @@ func TestRequirementDocxIncludesEmbeddedImages(t *testing.T) {
 	if len(warnings) != 0 || !strings.Contains(text, "完成程序") || !strings.Contains(text, "图片中的题目要求") || fixture.calls != 1 {
 		t.Fatalf("incomplete DOCX: %q %v", text, warnings)
 	}
+	text, images, warnings := ExtractRequirementWithImages(context.Background(), "题目.docx", buffer.Bytes())
+	if len(warnings) != 0 || len(images) != 1 || string(images[0].Data) != "synthetic-image" || !strings.Contains(text, "完成程序") || !strings.Contains(text, "[原图 1]") || fixture.calls != 1 {
+		t.Fatal("vision path lost original Word image or called OCR instead")
+	}
 }
 
 func questionPDFFixture(content string) []byte {
@@ -75,6 +79,10 @@ func TestRequirementPDFTextAndScannedPageFallback(t *testing.T) {
 	text, warnings = ExtractRequirement(context.Background(), "扫描题目.pdf", questionPDFFixture(""))
 	if len(warnings) != 0 || !strings.Contains(text, "图片中的题目要求") || fixture.calls != 1 {
 		t.Fatalf("PDF OCR fallback: %q %v", text, warnings)
+	}
+	text, images, warnings := ExtractRequirementWithImages(context.Background(), "扫描题目.pdf", questionPDFFixture(""))
+	if len(warnings) != 0 || len(images) != 1 || !bytes.HasPrefix(images[0].Data, []byte("\x89PNG")) || !strings.Contains(text, "[原图 1]") || fixture.calls != 1 {
+		t.Fatal("scanned PDF did not supply its rendered original page to vision")
 	}
 }
 

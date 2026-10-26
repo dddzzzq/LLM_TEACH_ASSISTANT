@@ -19,6 +19,7 @@ type LLMResponse struct {
 	ToolCalls    []ToolCall
 	Usage        map[string]any `json:"usage,omitempty"`
 	FinishReason string         `json:"finish_reason,omitempty"`
+	Model        string         `json:"model,omitempty"`
 }
 
 // ToolCall 表示一个工具调用请求
@@ -102,6 +103,16 @@ func (c *DeepSeekClient) CallWithTools(systemPrompt string, userMessage string, 
 
 // CallMessages preserves assistant/tool roles and call IDs across a bounded agent run.
 func (c *DeepSeekClient) CallMessages(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMResponse, error) {
+	return c.callMessages(ctx, messages, tools, false)
+}
+
+// CallJSONMessages uses the same configured provider, credentials and model.
+// Content may contain image_url blocks as well as text.
+func (c *DeepSeekClient) CallJSONMessages(ctx context.Context, messages []map[string]interface{}) (*LLMResponse, error) {
+	return c.callMessages(ctx, messages, nil, true)
+}
+
+func (c *DeepSeekClient) callMessages(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}, jsonOutput bool) (*LLMResponse, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("未配置模型 API Key")
 	}
@@ -112,6 +123,11 @@ func (c *DeepSeekClient) CallMessages(ctx context.Context, messages []map[string
 		"messages":    messages,
 		"temperature": 0.3,
 		"max_tokens":  4000,
+	}
+	if jsonOutput {
+		requestBody["response_format"] = map[string]string{"type": "json_object"}
+		requestBody["temperature"] = 0
+		requestBody["max_tokens"] = 8000
 	}
 
 	// 如果有工具，添加到请求中
@@ -179,7 +195,7 @@ func (c *DeepSeekClient) CallMessages(ctx context.Context, messages []map[string
 	}
 
 	// 构建响应结果
-	result := &LLMResponse{FinishReason: getString(choice, "finish_reason")}
+	result := &LLMResponse{FinishReason: getString(choice, "finish_reason"), Model: getString(apiResponse, "model")}
 	result.Usage, _ = apiResponse["usage"].(map[string]any)
 
 	// 提取文本内容
