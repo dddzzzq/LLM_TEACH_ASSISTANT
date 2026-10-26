@@ -49,8 +49,8 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
         context = await browser.new_context()
         try:
             page = await context.new_page()
-            body = """<script>window.currentClass=0;function selectClass(e,id){document.querySelectorAll('.classli').forEach(n=>n.classList.remove('active'));e.classList.add('active');window.currentClass=id}</script>
-            <ul style="display:none"><li class="classli active" onclick="selectClass(this,0)">全部班级</li><li class="classli" onclick="selectClass(this,22)">班级A</li><li class="classli" onclick="selectClass(this,23)">班级B</li></ul>
+            body = """<script>window.currentClass=0;function selectClass(e,id){document.querySelectorAll('.classli').forEach(n=>n.classList.remove('active'));e.classList.add('active');window.currentClass=id??Number(e.getAttribute('data'))}</script>
+            <ul style="display:none"><li class="classli active" data="0" onclick="selectClass(this)">全部班级</li><li class="classli" data="22" onclick="selectClass(this)">班级A</li><li class="classli" onclick="selectClass(this,23)">班级B</li></ul>
             <ul class=morePop><li><a onclick="window.exportedClass=window.currentClass">导出作业附件</a></li></ul><div id=downloadcenter></div>"""
             await page.route(
                 "**/*",

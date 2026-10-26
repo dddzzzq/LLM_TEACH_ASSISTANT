@@ -47,6 +47,8 @@ EXTRACT = r"""els => els.map(e => {
   const navigation=e.getAttribute('onclick')||a?.getAttribute('onclick')||row.getAttribute('onclick')||'';
   const classCall = navigation.match(/(?:changeClazz|changeClass|selectClass)\s*\(([^)]*)\)/i);
   const classArgs = classCall ? [...classCall[1].matchAll(/(?:^|,)\s*["']?(\d+)["']?(?=\s*(?:,|$))/g)].map(m=>m[1]) : [];
+  // The legacy teacher menu keeps its class ID in a bare numeric data attribute.
+  const classData = classCall && e.matches('li.classli') && /^\d+$/.test(e.getAttribute('data')||'') ? e.getAttribute('data') : '';
   const courseParam = new URL(document.baseURI).searchParams.get('courseid');
   const classCandidates = [...new Set(classArgs.length>1?classArgs.filter(value=>value!==courseParam):classArgs)];
   const literal=navigation.match(/["']((?:https:\/\/|\/)[^"']+)["']/)?.[1]||'';
@@ -65,7 +67,7 @@ EXTRACT = r"""els => els.map(e => {
     source_page:(document.querySelector('[aria-current=page],.pagination .active,.pagination .current')?.textContent||'').trim().slice(0,80),
     course_id:attr(['data-courseid','data-course-id','courseid']),
     work_id:attr(['data-workid','data-work-id','workid']),
-    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:'')||(classCandidates.length===1?classCandidates[0]:''),
+    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:'')||classData||(classCandidates.length===1?classCandidates[0]:''),
     class_name:e.getAttribute('data-clazzname')||e.getAttribute('data-class-name')||row.getAttribute('data-class-name')||'',
     href,
     title:((e.tagName==='OPTION'?e.textContent:'')||row.getAttribute('cname')||e.getAttribute('data-title')||title?.getAttribute('data-title')||title?.innerText||e.getAttribute('title')||a?.getAttribute('title')||e.innerText||'').trim().replace(/\s+/g,' ').slice(0,255),
