@@ -42,6 +42,42 @@ async def wait_until(predicate, timeout=10):
 
 
 class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
+    async def test_custom_class_dropdown_is_read_and_switched_before_export(self):
+        from app.rpa.portal_adapter import PortalAdapter
+
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            body = """<script>window.currentClass=0;function selectClass(e,id){document.querySelectorAll('.classli').forEach(n=>n.classList.remove('active'));e.classList.add('active');window.currentClass=id}</script>
+            <ul style="display:none"><li class="classli active" onclick="selectClass(this,0)">全部班级</li><li class="classli" onclick="selectClass(this,22)">班级A</li><li class="classli" onclick="selectClass(this,23)">班级B</li></ul>
+            <ul class=morePop><li><a onclick="window.exportedClass=window.currentClass">导出作业附件</a></li></ul><div id=downloadcenter></div>"""
+            await page.route(
+                "**/*",
+                lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=body),
+            )
+            await page.goto("https://mooc1.chaoxing.com/work?courseid=11&clazzid=22")
+            classes = await PortalCatalog(context, lambda **kw: None).classes(page, {})
+            self.assertEqual(
+                {c["platform_id"]: c["name"] for c in classes}, {"22": "班级A", "23": "班级B"}
+            )
+            adapter = PortalAdapter(
+                context,
+                {"course_name": "课", "assignment_name": "作业", "portal": {"class_id": "23"}},
+            )
+            self.assertEqual(await adapter.current_class_id(page), "0")
+            await adapter.select_target_class(page, "22")
+            self.assertEqual(await page.evaluate("window.currentClass"), 22)
+            adapter.assignment_confirmed = True
+            await adapter.open_export()
+            self.assertEqual(await adapter.current_class_id(page), "23")
+            self.assertEqual(await page.evaluate("window.exportedClass"), 23)
+            with self.assertRaises(RpaIssue):
+                await adapter.select_target_class(page, "999")
+            self.assertEqual(await page.evaluate("window.currentClass"), 23)
+        finally:
+            await browser.close()
+
     async def test_catalog_reads_native_and_scripted_classes_without_all_option(self):
         browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
         context = await browser.new_context()

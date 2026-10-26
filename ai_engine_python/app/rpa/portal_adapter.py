@@ -315,6 +315,13 @@ class PortalAdapter:
         if not self.assignment_confirmed or not entry:
             raise ValueError("作业导出入口尚未核验")
         page, link = entry
+        target = self.target.get("portal") or {}
+        if target.get("class_id"):
+            await self.select_target_class(page, target["class_id"])
+            entry = await self.export_entry()
+            if not entry:
+                raise RpaIssue("CLASS_CHANGED", "切换班级后导出入口尚未就绪")
+            page, link = entry
         self.pre_export_baseline = await self.export_baseline()
         if await link.is_visible():
             await link.click(timeout=8000)
@@ -322,6 +329,65 @@ class PortalAdapter:
             # Same site-owned action as the previously working script, never model-supplied JS.
             await link.evaluate("element => element.click()")
         return page
+
+    async def class_options(self, page, include_all=False):
+        from .portal_catalog import CLASS_SELECTOR, EXTRACT, portal_surface
+
+        options = []
+        for frame in page.frames:
+            if not portal_surface(page.url) or not (
+                portal_surface(frame.url) or frame.url in {"about:blank", "about:srcdoc"}
+            ):
+                continue
+            nodes = frame.locator(CLASS_SELECTOR)
+            for i, row in enumerate(await nodes.evaluate_all(EXTRACT)):
+                identity = row.get("class_id")
+                if identity not in (None, "") and (
+                    include_all or identity not in ("0", "-1", "all")
+                ):
+                    options.append((nodes.nth(i), identity))
+        return options
+
+    async def current_class_id(self, page):
+        from .portal_catalog import query_id
+
+        selected = []
+        for locator, identity in await self.class_options(page, include_all=True):
+            if await locator.evaluate(
+                "e=>e.matches('option:checked,.active,.selected,[aria-selected=true]')"
+            ):
+                selected.append(identity)
+        if len(set(selected)) == 1:
+            return selected[0]
+        identities = {query_id(frame.url, ("clazzid", "classid")) for frame in page.frames}
+        identities.discard("")
+        return next(iter(identities)) if len(identities) == 1 else ""
+
+    async def select_target_class(self, page, identity):
+        if await self.current_class_id(page) == identity:
+            return
+        options = await self.class_options(page)
+        if not options:
+            return  # Export dialogs with concrete classes validate the scope there.
+        candidates = [locator for locator, key in options if key == identity]
+        if len(candidates) != 1:
+            raise RpaIssue("CLASS_CHANGED", "当前作业页没有唯一匹配的班级入口，请更新课程与作业")
+        option = candidates[0]
+        if await option.evaluate("e=>e.tagName==='OPTION'"):
+            await option.locator("..").select_option(value=identity)
+        else:
+            # This exact official class ID was selected by the teacher. The
+            # legacy popup's hidden list items use the site's selectClass handler.
+            await option.evaluate("e=>e.click()")
+        await option.evaluate("""e=>new Promise((resolve,reject)=>{
+            const ready=()=>e.matches('option:checked,.active,.selected,[aria-selected=true]');
+            if(ready())return resolve(true);
+            const observer=new MutationObserver(()=>{if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}});
+            observer.observe(e.parentElement,{attributes:true,subtree:true});
+            const timer=setTimeout(()=>{observer.disconnect();reject(new Error('Class selection not acknowledged'))},5000);
+        })""")
+        if await self.current_class_id(page) != identity:
+            raise RpaIssue("CLASS_CHANGED", "官网未确认所选班级，未继续导出")
 
     async def record_navigation(self, locator, item, page):
         from .target_confirmation import proof

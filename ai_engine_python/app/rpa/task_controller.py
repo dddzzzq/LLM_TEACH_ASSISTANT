@@ -1086,11 +1086,8 @@ class Task:
         target = self.state["target"].get("portal")
         if target and target.get("class_id"):
             from .portal_download import selected_scope
-            from .portal_catalog import query_id
 
-            current_ids = {query_id(frame.url, ("clazzid", "classid")) for frame in page.frames}
-            current_ids.discard("")
-            current_id = next(iter(current_ids)) if len(current_ids) == 1 else ""
+            current_id = await self.adapter.current_class_id(page)
             self.scope_request = selected_scope(self.state["target"]["portal"], options, current_id)
             self.update(requested_scope=self.scope_request)
         elif target or not self.scope_request:

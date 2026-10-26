@@ -37,7 +37,7 @@ CLASS_SELECTOR = (
     "[data-clazzid],[data-clazz-id],[data-classid],[data-class-id],[clazzid],[classid],"
     "select[name*='clazz' i] option,select[name*='class' i] option,"
     "select[id*='clazz' i] option,select[id*='class' i] option,"
-    "li[onclick*='changeClass' i],li[onclick*='changeClazz' i]"
+    "li[onclick*='changeClass' i],li[onclick*='changeClazz' i],li[onclick*='selectClass' i]"
 )
 EXTRACT = r"""els => els.map(e => {
   const row = e.closest('[cname],.myde_course_item') || e.closest('li,tr,article,[data-courseid],[data-workid],[courseid],[workid],.courseItem,.course-item,.workList') || e;
@@ -45,6 +45,10 @@ EXTRACT = r"""els => els.map(e => {
   const title = row.querySelector('[data-title],h1,h2,h3,h4,.course-name,.myde_course_name,.workName,.work-name');
   const attr = names => [e,a,row].filter(Boolean).flatMap(n => names.map(k=>n.getAttribute(k))).find(Boolean)||'';
   const navigation=e.getAttribute('onclick')||a?.getAttribute('onclick')||row.getAttribute('onclick')||'';
+  const classCall = navigation.match(/(?:changeClazz|changeClass|selectClass)\s*\(([^)]*)\)/i);
+  const classArgs = classCall ? [...classCall[1].matchAll(/(?:^|,)\s*["']?(\d+)["']?(?=\s*(?:,|$))/g)].map(m=>m[1]) : [];
+  const courseParam = new URL(document.baseURI).searchParams.get('courseid');
+  const classCandidates = [...new Set(classArgs.length>1?classArgs.filter(value=>value!==courseParam):classArgs)];
   const literal=navigation.match(/["']((?:https:\/\/|\/)[^"']+)["']/)?.[1]||'';
   const candidates=[a?.getAttribute('href'),e.getAttribute('data-url'),row.getAttribute('data-url'),literal].filter(Boolean);
   let href='';
@@ -61,7 +65,7 @@ EXTRACT = r"""els => els.map(e => {
     source_page:(document.querySelector('[aria-current=page],.pagination .active,.pagination .current')?.textContent||'').trim().slice(0,80),
     course_id:attr(['data-courseid','data-course-id','courseid']),
     work_id:attr(['data-workid','data-work-id','workid']),
-    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:'')||navigation.match(/(?:changeClazz|changeClass)\(\s*["']?(\d+)/i)?.[1]||'',
+    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:'')||(classCandidates.length===1?classCandidates[0]:''),
     class_name:e.getAttribute('data-clazzname')||e.getAttribute('data-class-name')||row.getAttribute('data-class-name')||'',
     href,
     title:((e.tagName==='OPTION'?e.textContent:'')||row.getAttribute('cname')||e.getAttribute('data-title')||title?.getAttribute('data-title')||title?.innerText||e.getAttribute('title')||a?.getAttribute('title')||e.innerText||'').trim().replace(/\s+/g,' ').slice(0,255),
