@@ -45,7 +45,7 @@ func NewBuiltinToolRegistry(userID uint, roles ...string) *ToolRegistry {
 	}
 	r := NewToolRegistry()
 	r.Register(&QueryStudentScoreTool{UserID: userID, Role: role})
-	for _, op := range []string{"connection", "courses", "homeworks", "sync", "create", "workflow"} {
+	for _, op := range []string{"connection", "courses", "homeworks", "detail", "read_detail", "sync", "create", "workflow"} {
 		r.Register(&PortalTool{UserID: userID, Role: role, Operation: op})
 	}
 	r.Register(&TriggerPipelineTool{UserID: userID, Role: role})

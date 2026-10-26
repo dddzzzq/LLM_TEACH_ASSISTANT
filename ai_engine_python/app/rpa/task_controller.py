@@ -76,6 +76,13 @@ class Task:
         self.verified_subject = ""
         self.catalog_course_pages = {}
         self.catalog_collection = None
+        self.detail_reader = None
+        self.detail_page = None
+        self.detail_operation = None
+        if state.get("task_type") == "HOMEWORK_DETAIL":
+            from .homework_detail import HomeworkDetailReader
+
+            self.detail_reader = HomeworkDetailReader(self)
         if state.get("task_type") == "CATALOG_SYNC":
             from .portal_catalog import CatalogCollection
 
@@ -306,6 +313,8 @@ class Task:
                                 continue
                             if self.catalog_collection:
                                 continue  # The same page Agent navigates and reads each list.
+                        if self.detail_reader:
+                            continue  # Read-only detail jobs never enter export mechanics.
                         if await self.prepare_captcha():
                             continue  # Go's page Agent chooses the bounded slider tool.
                         if await self.adapter.login_required():
@@ -351,6 +360,10 @@ class Task:
             self.update(status="FAILED", control_mode="HUMAN", error_code=type(exc).__name__)
             self.event("浏览器任务启动或执行失败，请检查网络及 Worker 配置")
         finally:
+            if self.detail_operation:
+                self.detail_operation.cancel()
+                await asyncio.gather(self.detail_operation, return_exceptions=True)
+                self.detail_operation = None
             if self.portal_auth:
                 self.portal_auth.credentials.clear()
                 self.portal_auth = None
@@ -449,6 +462,8 @@ class Task:
         return auth
 
     async def navigation_view(self):
+        if self.detail_operation and not self.detail_operation.done():
+            return None  # Resource reads outlive a single page Agent HTTP action.
         auth = await self.authentication_view() if self.portal_auth else None
         captcha = (
             not (auth and auth["login_form"] and not auth["credentials_filled"])
@@ -460,7 +475,7 @@ class Task:
         self.adapter.active_page = self.page
         if not self.catalog_collection and (not auth or auth["authenticated"]):
             await self.adapter.reconcile()
-            if not captcha and await self.adapter.export_area():
+            if not captcha and not self.detail_reader and await self.adapter.export_area():
                 return None
         stage = (
             "SOLVE_CAPTCHA"
@@ -469,6 +484,8 @@ class Task:
             if auth and not auth["authenticated"]
             else "READING_CATALOG"
             if self.catalog_collection
+            else "READING_DETAIL"
+            if self.detail_reader and (await self.detail_reader.observation())["ready"]
             else "EXPORT"
             if self.adapter.assignment_confirmed
             else "LOCATE_ASSIGNMENT"
@@ -485,6 +502,9 @@ class Task:
             view["catalog"] = self.catalog_collection.observation()
             if not captcha and (not auth or auth["authenticated"]):
                 view["catalog"]["viewport"] = await self.catalog_collection.viewport().observation()
+        if self.detail_reader:
+            view["homework_detail"] = await self.detail_reader.observation()
+            view["can_open_export"] = False
         return view
 
     def portal_result(self):
@@ -503,6 +523,11 @@ class Task:
             "state_version": self.state.get("state_version", 0),
             **({"verified_subject": self.verified_subject} if self.verified_subject else {}),
             **({"catalog": self.state["portal_catalog"]} if "portal_catalog" in self.state else {}),
+            **(
+                {"homework_detail": self.state["homework_detail"]}
+                if "homework_detail" in self.state
+                else {}
+            ),
         }
 
     async def observation_fingerprint(self, view):
@@ -725,6 +750,15 @@ class Task:
     async def execute(self, decision):
         validate_action(decision)
         tool = decision["tool"]
+        if tool == "read_homework_detail":
+            if not self.detail_reader or not self.automatic():
+                raise ValueError("当前任务不处于作业详情读取流程")
+            if not (await self.authentication_view())["authenticated"]:
+                raise ValueError("请先完成教务身份认证")
+            self.update(stage="READING_DETAIL", message="正在读取题目正文、图片和附件")
+            self.detail_operation = asyncio.create_task(self.read_detail_resources())
+            self.recent.append({"tool": tool})
+            return
         if tool in {
             "fill_portal_credentials",
             "request_login_code",
@@ -863,7 +897,11 @@ class Task:
             self.wait_human(waiting_reason, reason)
             return
         if tool == "open_export_settings":
-            if self.catalog_collection or self.state.get("task_type") == "AUTH_BOOTSTRAP":
+            if (
+                self.catalog_collection
+                or self.detail_reader
+                or self.state.get("task_type") == "AUTH_BOOTSTRAP"
+            ):
                 raise ValueError("账号连接和目录采集任务不能导出附件")
             self.page = await self.adapter.open_export()
         elif tool == "switch_page":
@@ -897,6 +935,10 @@ class Task:
                 raise ValueError("提交动作必须由任务控制器核验")
             if self.catalog_collection and re.search("导出|下载", item["name"]):
                 raise ValueError("目录采集只允许读取，不导出或下载")
+            if self.detail_reader and re.search(
+                "导出|下载|查重|批阅|批改|发布|编辑|删除", item["name"]
+            ):
+                raise ValueError("详情读取只允许进入作业名称，不查重、批阅或修改作业")
             if (
                 item.get("semester_kind")
                 or SEMESTER.fullmatch(item["name"].strip())
@@ -958,9 +1000,43 @@ class Task:
                     self.event(
                         "已进入新打开的页面 page=" + str(self.context.pages.index(self.page))
                     )
+                if (
+                    self.detail_reader
+                    and item["name"].strip() == self.state["target"]["assignment_name"]
+                    and self.adapter.assignment_confirmed
+                ):
+                    self.detail_page = self.page
                 if catalog_course:
                     self.catalog_course_pages[self.page] = catalog_course
         self.recent.append({k: v for k, v in decision.items() if k != "value"})
+
+    async def read_detail_resources(self):
+        try:
+            for attempt in range(3):
+                try:
+                    await self.detail_reader.read()
+                    break
+                except RpaIssue as exc:
+                    if (
+                        exc.code
+                        not in {
+                            "DETAIL_EMPTY",
+                            "DETAIL_CONTENT_MISSING",
+                            "DETAIL_TARGET_UNVERIFIED",
+                        }
+                        or attempt == 2
+                        or not self.automatic()
+                    ):
+                        raise
+                    await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if self.automatic():
+                report = self.record_failure(exc, "read_homework_detail")
+                self.wait_human("DETAIL_READ", report["message"] + "；请核对作业详情后重试")
+        finally:
+            self.detail_operation = None
 
     async def return_to_course_list(self):
         collection = self.catalog_collection
@@ -1218,6 +1294,9 @@ class Task:
             raise ValueError("任务已结束")
         self.gate.clear()
         self.update(control_mode="PAUSING", control_epoch=self.state["control_epoch"] + 1)
+        if self.detail_operation:
+            self.detail_operation.cancel()
+            await asyncio.gather(self.detail_operation, return_exceptions=True)
         if self.startup_operation:
             self.startup_operation.cancel()
             await asyncio.gather(self.startup_operation, return_exceptions=True)

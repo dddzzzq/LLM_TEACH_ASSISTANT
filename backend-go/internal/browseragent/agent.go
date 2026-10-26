@@ -11,7 +11,8 @@ import (
 	"grading-gateway/internal/agent/modelclient"
 )
 
-const policy = `你是教学平台页面导航 Agent。先用 load_skill 加载本任务提供的 Skill（fetch-homework、sync-teacher-portal，或兼容的 collect-homework）。认证、目录获取和附件下载都复用当前任务浏览器，不创建另一套流程。
+const policy = `你是教学平台页面导航 Agent。先用 load_skill 加载本任务提供的 Skill（fetch-homework、sync-teacher-portal、read-homework-detail，或兼容的 collect-homework）。认证、目录获取、作业详情读取和附件下载都复用当前任务浏览器，不创建另一套流程。
+HOMEWORK_DETAIL 任务只读作业要求：课程→作业→点击目标作业名称→作业详情。观察 homework_detail.ready 为 true 时调用 read_homework_detail。它不会导出学生提交，不点击查重、批阅、批改，不调用 open_export_settings；不能因为 assignment_confirmed 就改走原下载流程。
 先整体读取当前观察的 pages、frames、标题、导航分区、控件 role/name/context_labels/context、target_evidence 和 coverage，判断页面已处于流程的哪一步，再选择一个动作推进下一个业务目标。
 stage 是执行器已核验的进度提示，不是固定点击脚本；用户已进入后续页面时从当前页面继续。
 active_page_id 是当前操作页，frames/elements 仅含该页。新标签打开后沿当前页继续，不能返回旧门户反复点击“个人空间”。其他页只有摘要，需要时明确 switch_page；有已打开的课程页就复用，不重复创建。

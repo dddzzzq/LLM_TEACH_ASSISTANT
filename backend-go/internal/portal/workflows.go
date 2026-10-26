@@ -23,11 +23,12 @@ type Selection struct {
 	ClassID    string `json:"class_id,omitempty"` // Optional compatibility for existing explicit selections.
 }
 type WorkflowRequest struct {
-	Source     string          `json:"source"`
-	SnapshotID string          `json:"snapshot_id"`
-	Items      []Selection     `json:"items"`
-	Question   string          `json:"question"`
-	Rubric     json.RawMessage `json:"rubric"`
+	Source                string          `json:"source"`
+	SnapshotID            string          `json:"snapshot_id"`
+	Items                 []Selection     `json:"items"`
+	Question              string          `json:"question"`
+	UsePortalRequirements bool            `json:"use_portal_requirements,omitempty"`
+	Rubric                json.RawMessage `json:"rubric"`
 }
 
 func (s *Service) CreateWorkflow(ctx context.Context, owner uint, req WorkflowRequest, key string) (models.PortalWorkflow, error) {
@@ -38,10 +39,10 @@ func (s *Service) CreateWorkflow(ctx context.Context, owner uint, req WorkflowRe
 	if strings.TrimSpace(key) == "" {
 		return flow, errors.New("请提供本次批改请求的 Idempotency-Key")
 	}
-	if req.Source != "portal" || req.SnapshotID == "" || len(req.Items) == 0 || len(req.Items) > 50 || strings.TrimSpace(req.Question) == "" || len(req.Question) > 100000 || len(req.Rubric) > 100000 || len(key) > 128 {
+	if req.Source != "portal" || req.SnapshotID == "" || len(req.Items) == 0 || len(req.Items) > 50 || (!req.UsePortalRequirements && strings.TrimSpace(req.Question) == "") || len(req.Question) > 100000 || len(req.Rubric) > 100000 || len(key) > 128 {
 		return flow, errors.New("请选择官网作业并填写题目与评分标准")
 	}
-	if len(grading.HomeworkMissing(models.Assignment{Question: req.Question, Rubric: string(req.Rubric)})) > 0 {
+	if len(grading.HomeworkMissing(models.Assignment{Question: "validated per homework below", Rubric: string(req.Rubric)})) > 0 {
 		return flow, errors.New("评分标准必须为非空 JSON 对象或数组")
 	}
 	raw, _ := json.Marshal(req)
@@ -98,7 +99,15 @@ func (s *Service) CreateWorkflow(ctx context.Context, owner uint, req WorkflowRe
 			if selected.ClassID != "" {
 				className = class.Name
 			}
-			a := models.Assignment{OwnerID: owner, CourseName: course.Title, ClassName: className, TaskName: work.Title, Question: req.Question, Rubric: string(req.Rubric)}
+			question := req.Question
+			if req.UsePortalRequirements {
+				var detail models.PortalHomeworkDetail
+				if tx.Where("homework_id = ? AND owner_id = ? AND connection_id = ? AND snapshot_id = ? AND profile_generation = ? AND complete = ?", work.ID, owner, c.ID, req.SnapshotID, c.ProfileGeneration, true).First(&detail).Error != nil || strings.TrimSpace(detail.Question) == "" {
+					return fmt.Errorf("作业“%s”的官网要求尚未完整读取，请读取后重试或改为手动填写", work.Title)
+				}
+				question = detail.Question
+			}
+			a := models.Assignment{OwnerID: owner, CourseName: course.Title, ClassName: className, TaskName: work.Title, Question: question, Rubric: string(req.Rubric)}
 			if err = tx.Create(&a).Error; err != nil {
 				return err
 			}
@@ -108,7 +117,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, owner uint, req WorkflowRe
 			}
 			target := rpa.PortalTarget{CourseID: course.PlatformID, HomeworkID: work.PlatformID, ClassID: class.PlatformID, ClassName: className, CourseURL: course.URL, HomeworkURL: work.URL}
 			data, _ := json.Marshal(target)
-			item := models.PortalWorkflowItem{ID: uuid.NewString(), WorkflowID: flow.ID, OwnerID: owner, SnapshotID: req.SnapshotID, HomeworkID: work.ID, ClassID: class.ID, AssignmentID: a.ID, CourseName: course.Title, HomeworkName: work.Title, ClassName: className, Question: req.Question, Rubric: string(req.Rubric), TargetJSON: string(data), Status: "QUEUED", Message: "等待官网附件下载"}
+			item := models.PortalWorkflowItem{ID: uuid.NewString(), WorkflowID: flow.ID, OwnerID: owner, SnapshotID: req.SnapshotID, HomeworkID: work.ID, ClassID: class.ID, AssignmentID: a.ID, CourseName: course.Title, HomeworkName: work.Title, ClassName: className, Question: question, Rubric: string(req.Rubric), TargetJSON: string(data), Status: "QUEUED", Message: "等待官网附件下载"}
 			if err = tx.Create(&item).Error; err != nil {
 				return err
 			}

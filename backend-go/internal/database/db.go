@@ -45,6 +45,7 @@ func InitDB(dsn string) {
 		&models.PortalCatalogSnapshot{},
 		&models.PortalCourse{},
 		&models.PortalHomework{},
+		&models.PortalHomeworkDetail{},
 		&models.PortalCourseClass{},
 		&models.PortalAssignmentBinding{},
 		&models.PortalWorkflow{},

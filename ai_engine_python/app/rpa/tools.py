@@ -23,6 +23,9 @@ BROWSER_TOOLS = {
     "apply_device_trust": BrowserTool("按教师保存的信任设备设置处理当前官网可信浏览器弹窗", {}),
     "read_course_list": BrowserTool("只读取当前课程列表的真实标识和名称；不跳转、不下载", {}),
     "read_homework_list": BrowserTool("只读取当前已核验课程的班级和作业列表", {"course_id": str}),
+    "read_homework_detail": BrowserTool(
+        "只读取当前所选作业详情的题目文字、图片和附件；不读取学生答案、不批改、不查重", {}
+    ),
     "finish_catalog": BrowserTool("所有课程与作业页面读取完整后，提交本次目录结果", {}),
     "return_to_course_list": BrowserTool(
         "返回 read_course_list 记录的原课程列表页；无作业也须返回并继续下一门课程", {}

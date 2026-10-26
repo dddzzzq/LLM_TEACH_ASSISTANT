@@ -4,7 +4,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ $EUID == 0 ]] || { echo 'Run bootstrap as the WSL root user.' >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl sudo python3 antiword mysql-server redis-server \
+apt-get install -y ca-certificates curl sudo python3 antiword poppler-utils mysql-server redis-server \
   openjdk-21-jre-headless build-essential unzip fonts-noto-cjk libgomp1
 id teacher >/dev/null 2>&1 || useradd --create-home --shell /bin/bash teacher
 RUNTIME=/opt/teaching-runtime

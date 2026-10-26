@@ -4,7 +4,7 @@
     <header
       ><h1 class="page-title">导入与自动批改</h1
       ><p class="page-description"
-        >按三个步骤开始：选择作业、填写要求、提交批改。全部班级默认一并处理。</p
+        >按三个步骤开始：选择作业、获取要求、提交批改。全部班级默认一并处理。</p
       ></header
     >
     <p class="workflow-step">提交后可返回作业列表查看内容与结果，也可在作业详情中处理材料。</p>
@@ -46,8 +46,24 @@
           /><small>填写运行本系统的服务器可读取的绝对路径。</small></label
         >
       </template>
-      <label
-        >2. 填写题目要求<textarea
+      <h2 class="submission-title">2. 获取题目要求</h2>
+      <label v-if="source === 'portal'" class="requirement-mode">
+        <input
+          v-model="usePortalRequirements"
+          type="checkbox"
+          :disabled="busy"
+        />自动读取官网要求，每份作业分别使用自己的题目
+      </label>
+      <PortalHomeworkRequirements
+        v-if="source === 'portal' && usePortalRequirements"
+        :items="selection.titles || []"
+        :snapshot-id="selection.snapshot_id"
+        :disabled="busy"
+        @ready="requirementsReady = $event"
+        @active-task="activeRequirementTask = $event"
+      />
+      <label v-else
+        >填写题目要求<textarea
           aria-label="题目要求"
           v-model="question"
           rows="5"
@@ -63,10 +79,18 @@
       <button
         class="primary"
         type="submit"
-        :disabled="busy || (source === 'portal' && !selection.items.length)"
+        :disabled="
+          busy ||
+          (source === 'portal' &&
+            (!selection.items.length || (usePortalRequirements && !requirementsReady)))
+        "
         >{{ busy ? '正在提交…' : '开始批改' }}</button
       >
     </form>
+    <section v-if="activeRequirementTask" id="requirement-browser" class="form-surface">
+      <h2>官网作业要求读取</h2>
+      <RpaTaskPanel :task-id="activeRequirementTask" embedded />
+    </section>
     <p v-if="error" role="alert" class="error">{{ error }}</p
     ><p v-if="notice" role="status">{{ notice }}</p>
     <section v-if="workflow" class="form-surface workflow-progress" aria-live="polite">
@@ -113,6 +137,7 @@ import gradingApi from '../services/gradingApi';
 import { createMaterialsApi } from '../services/materialsApi';
 import { createPortalApi, portalStatus } from '../services/portalApi';
 import PortalAssignmentPicker from '../components/PortalAssignmentPicker.vue';
+import PortalHomeworkRequirements from '../components/PortalHomeworkRequirements.vue';
 import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
 import RpaTaskPanel from '../components/RpaTaskPanel.vue';
 import RubricEditor from '../components/RubricEditor.vue';
@@ -130,6 +155,9 @@ const source = ref('portal'),
   className = ref('全部班级'),
   taskName = ref(''),
   question = ref(''),
+  usePortalRequirements = ref(true),
+  requirementsReady = ref(false),
+  activeRequirementTask = ref(''),
   rubric = ref(
     JSON.stringify({
       正确性: { description: '程序运行正确，符合题目要求', score: 60 },
@@ -178,8 +206,10 @@ async function submit() {
     if (source.value === 'portal') {
       const body = {
           source: 'portal',
-          ...selection.value,
-          question: question.value,
+          snapshot_id: selection.value.snapshot_id,
+          items: selection.value.items,
+          question: usePortalRequirements.value ? '' : question.value,
+          use_portal_requirements: usePortalRequirements.value,
           rubric: parsed,
         },
         serialized = JSON.stringify(body);
@@ -284,7 +314,7 @@ label {
   display: grid;
   gap: 8px;
 }
-input:not([type='radio']),
+input:not([type='radio']):not([type='checkbox']),
 textarea {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -295,6 +325,15 @@ textarea {
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
+}
+.requirement-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+.requirement-mode input {
+  flex-shrink: 0;
 }
 .source-options label {
   display: flex;

@@ -86,7 +86,7 @@ class Manager:
     ):
         UUID(job_id)
         if (
-            task_type not in {"", "AUTH_BOOTSTRAP", "CATALOG_SYNC"}
+            task_type not in {"", "AUTH_BOOTSTRAP", "CATALOG_SYNC", "HOMEWORK_DETAIL"}
             or task_type
             and not portal_session
         ):
@@ -276,6 +276,7 @@ async def health():
         "portal_automation": "teacher.portal.agent.v2",
         "catalog_reader": "homework.dom.v2",
         "catalog_navigation": "catalog.viewport.v1",
+        "homework_detail": "question.resources.v1",
     }
 
 
@@ -327,7 +328,7 @@ async def start(job_id: str, request: Request):
 @app.get("/tasks/{job_id}/portal-result")
 async def portal_result(job_id: str, request: Request):
     task = task_for(request, job_id)
-    if task.state.get("task_type") not in {"AUTH_BOOTSTRAP", "CATALOG_SYNC"}:
+    if task.state.get("task_type") not in {"AUTH_BOOTSTRAP", "CATALOG_SYNC", "HOMEWORK_DETAIL"}:
         raise HTTPException(404, "不是教务连接任务")
     return task.portal_result()
 

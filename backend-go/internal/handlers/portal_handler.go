@@ -27,7 +27,11 @@ func (h *PortalHandler) Register(g *gin.RouterGroup) {
 	g.POST("/catalog-syncs", h.Sync)
 	g.GET("/courses", h.Courses)
 	g.GET("/courses/:id/homeworks", h.Homeworks)
+	g.GET("/homeworks/:id/detail", h.HomeworkDetail)
+	g.POST("/homeworks/:id/detail-reads", h.ReadHomeworkDetail)
+	g.GET("/homeworks/:id/detail/sources/:source", h.HomeworkDetailFile)
 	g.GET("/operations/:id", h.Operation)
+	g.POST("/operations/:id/cancel", h.CancelDetailRead)
 	g.GET("/operations/:id/events", h.Events)
 	g.GET("/operations/:id/browser", h.Browser)
 	g.POST("/auth-runs/:id/:action", h.AuthAction)
@@ -123,6 +127,44 @@ func (h *PortalHandler) Homeworks(c *gin.Context) {
 		return
 	}
 	c.JSON(200, data)
+}
+func (h *PortalHandler) HomeworkDetail(c *gin.Context) {
+	data, err := h.Runner.Service.HomeworkDetail(c.Request.Context(), portalOwner(c), c.Param("id"))
+	if err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, data)
+}
+func (h *PortalHandler) ReadHomeworkDetail(c *gin.Context) {
+	var req struct {
+		SnapshotID string `json:"snapshot_id"`
+	}
+	if !portalBody(c, &req) {
+		return
+	}
+	op, err := h.Runner.Service.QueueHomeworkDetail(c.Request.Context(), portalOwner(c), c.Param("id"), req.SnapshotID)
+	if err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(202, gin.H{"operation_id": op.ID, "operation": op})
+}
+func (h *PortalHandler) HomeworkDetailFile(c *gin.Context) {
+	path, name, err := h.Runner.Service.HomeworkDetailFile(c.Request.Context(), portalOwner(c), c.Param("id"), c.Param("source"))
+	if err != nil {
+		portalError(c, err)
+		return
+	}
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.FileAttachment(path, name)
+}
+func (h *PortalHandler) CancelDetailRead(c *gin.Context) {
+	if err := h.Runner.CancelDetailRead(c.Request.Context(), portalOwner(c), c.Param("id")); err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"message": "作业要求读取已取消"})
 }
 func (h *PortalHandler) Operation(c *gin.Context) {
 	op, err := h.Runner.Service.OwnedOperation(c.Request.Context(), portalOwner(c), c.Param("id"))

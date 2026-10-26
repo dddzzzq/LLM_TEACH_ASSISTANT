@@ -35,7 +35,7 @@ func Start(ctx context.Context, db *gorm.DB) {
 		if err := db.WithContext(ctx).Where("id = ? AND user_id = ? AND portal_connection_id = ?", job, owner, connection).First(&task).Error; err != nil {
 			return nil, ErrNotFound
 		}
-		if task.TaskType == "AUTH_BOOTSTRAP" || task.TaskType == "CATALOG_SYNC" {
+		if task.TaskType == "AUTH_BOOTSTRAP" || task.TaskType == "CATALOG_SYNC" || task.TaskType == "HOMEWORK_DETAIL" {
 			return r.Session(ctx, owner, connection, job, "")
 		}
 		return r.Session(ctx, owner, connection, "", job)

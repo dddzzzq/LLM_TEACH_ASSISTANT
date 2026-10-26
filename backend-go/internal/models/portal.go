@@ -64,6 +64,21 @@ type PortalHomework struct {
 	URL          string `json:"-" gorm:"type:text"`
 }
 
+// Detail cache is separate from catalog rows, which are replaced on every sync.
+// Original resource paths are private; only owner-checked handlers serve them.
+type PortalHomeworkDetail struct {
+	HomeworkID        string    `json:"homework_id" gorm:"type:char(36);primaryKey"`
+	OwnerID           uint      `json:"-" gorm:"not null;index"`
+	ConnectionID      string    `json:"-" gorm:"size:36;not null;index"`
+	ProfileGeneration uint64    `json:"-"`
+	SnapshotID        string    `json:"snapshot_id" gorm:"size:36;not null"`
+	OperationID       string    `json:"operation_id" gorm:"size:36;not null"`
+	Question          string    `json:"question" gorm:"type:longtext"`
+	Complete          bool      `json:"complete"`
+	ContentJSON       string    `json:"-" gorm:"type:longtext"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 type PortalCourseClass struct {
 	ID         string `json:"id" gorm:"type:char(36);primaryKey"`
 	CourseID   string `json:"course_id" gorm:"size:36;not null;index"`

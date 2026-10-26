@@ -96,6 +96,16 @@
   },
   {
     "Method": "GET",
+    "Path": "/api/portal/homeworks/:id/detail",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).HomeworkDetail-fm"
+  },
+  {
+    "Method": "GET",
+    "Path": "/api/portal/homeworks/:id/detail/sources/:source",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).HomeworkDetailFile-fm"
+  },
+  {
+    "Method": "GET",
     "Path": "/api/portal/legacy-assignments",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).LegacyAssignments-fm"
   },
@@ -283,6 +293,16 @@
     "Method": "POST",
     "Path": "/api/portal/connection/reauth",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Reauth-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/homeworks/:id/detail-reads",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).ReadHomeworkDetail-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/operations/:id/cancel",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).CancelDetailRead-fm"
   },
   {
     "Method": "POST",

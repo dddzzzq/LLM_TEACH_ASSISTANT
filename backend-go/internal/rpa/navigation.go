@@ -247,6 +247,9 @@ func launchNavigation(ctx context.Context, job models.RPAJob) {
 }
 
 func pageSkill(job models.RPAJob) string {
+	if job.TaskType == "HOMEWORK_DETAIL" {
+		return "read-homework-detail"
+	}
 	if job.TaskType == "CATALOG_SYNC" || job.TaskType == "AUTH_BOOTSTRAP" {
 		return "sync-teacher-portal"
 	}
@@ -290,7 +293,7 @@ func portalToolExtension(old, current json.RawMessage) bool {
 	if len(before) == 0 || len(after) <= len(before) {
 		return false
 	}
-	allowed := map[string]bool{"solve_slider_captcha": true, "fill_portal_credentials": true, "request_login_code": true, "submit_login_code": true, "apply_device_trust": true, "read_course_list": true, "read_homework_list": true, "finish_catalog": true, "return_to_course_list": true}
+	allowed := map[string]bool{"solve_slider_captcha": true, "fill_portal_credentials": true, "request_login_code": true, "submit_login_code": true, "apply_device_trust": true, "read_course_list": true, "read_homework_list": true, "read_homework_detail": true, "finish_catalog": true, "return_to_course_list": true}
 	for name, spec := range before {
 		if !sameJSON(spec, after[name]) {
 			return false

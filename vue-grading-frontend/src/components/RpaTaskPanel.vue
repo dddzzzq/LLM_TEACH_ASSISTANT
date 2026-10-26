@@ -410,6 +410,7 @@ const stages = {
   AUTHENTICATE: '登录与验证',
   SOLVE_CAPTCHA: '处理滑块验证',
   READING_CATALOG: '获取课程与作业',
+  READING_DETAIL: '读取作业要求',
   FILLING_CREDENTIALS: '填写已保存账号',
   TRUST_DECISION: '应用可信设备设置',
   LOCATE_COURSE: '定位课程',

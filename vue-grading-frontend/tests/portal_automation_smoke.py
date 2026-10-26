@@ -27,6 +27,7 @@ async def main():
     connection = {"id":"connection-1","account_mask":"te****st","trust_device":True,"active_snapshot_id":"s1","last_synced_at":"2026-10-23T12:00:00+08:00","last_authenticated_at":"2026-10-23T11:00:00+08:00"}
     state = {"status":"READY","operation":{"id":"sync-first","type":"CATALOG_SYNC","status":"SUCCEEDED","message":"目录已更新"},"snapshot":"s1"}
     calls, errors = [], []
+    detail_reads = {}
     async def api(route):
         request = route.request
         path = urllib.parse.urlsplit(request.url).path
@@ -59,6 +60,18 @@ async def main():
         elif path.startswith("/api/portal/courses/"):
             idx = path.split("/")[-2][-1]
             data = {"course":courses[int(idx)-1],"snapshot_id":state["snapshot"],"homeworks":[{"id":"h"+idx,"title":"第一次作业"}],"classes":[]}
+        elif path.startswith('/api/portal/homeworks/'):
+            homework_id = path.split('/')[4]
+            if path.endswith('/detail-reads'):
+                assert body == {'snapshot_id':'s3'}
+                operation = {'id':'detail-'+homework_id,'type':'HOMEWORK_DETAIL','status':'RUNNING','message':'读取题目'}
+                detail_reads[homework_id] = operation
+                data = {'operation_id':operation['id'],'operation':operation}; status = 202
+            else:
+                operation = detail_reads.get(homework_id)
+                data = {'snapshot_id':'s3','detail':None}
+                if operation:
+                    data.update(operation={**operation,'status':'SUCCEEDED'},updated_at='2026-10-26T12:00:00+08:00',detail={'complete':True,'question':'实现并发下载器' if homework_id=='h1' else '实现二叉树遍历','warnings':[],'sources':[]})
         elif path == "/api/grading/workflows" and request.method == "POST": data = {"id":flow_id,"status":"QUEUED"}; status = 202
         elif path == "/api/grading/workflows/"+flow_id:
             data = {"workflow":{"id":flow_id,"status":"RUNNING"},"items":[{"id":"item1","course_name":"同名课程","homework_name":"第一次作业","class_name":"全部班级","assignment_id":400,"status":"RUNNING","message":"正在整理和评分","rpa_job_id":""}]}
@@ -130,15 +143,23 @@ async def main():
         assert await picker.get_by_role('checkbox').count() == 0
         await page.get_by_role('button',name='加入待批改列表',exact=True).click()
         await expect(page.locator('.portal-picker li')).to_have_count(2)
-        await page.get_by_label('题目要求',exact=True).fill('实现课程要求')
+        await page.get_by_text('查看提取的作业要求',exact=True).first.click(timeout=15000)
+        await expect(page.get_by_text('实现并发下载器',exact=True)).to_be_visible(timeout=15000)
+        await expect(page.get_by_text('查看提取的作业要求',exact=True)).to_have_count(2, timeout=15000)
+        await page.get_by_text('查看提取的作业要求',exact=True).last.click()
+        await expect(page.get_by_text('实现二叉树遍历',exact=True)).to_be_visible(timeout=15000)
+        await expect(page.get_by_role('button',name='开始批改',exact=True)).to_be_enabled(timeout=15000)
         await page.get_by_role('button',name='编辑 JSON（高级）',exact=True).click()
         await page.get_by_label('评分标准（JSON）',exact=True).fill('{"正确性":100}')
         await page.get_by_role('button',name='开始批改',exact=True).click()
         await expect(page.get_by_text('正在整理和评分',exact=False)).to_be_visible()
         submitted=next(body for method,path,body,_ in calls if path=='/api/grading/workflows')
         assert submitted['snapshot_id']=='s3' and submitted['items']==[{'homework_id':'h1'},{'homework_id':'h2'}]
+        assert submitted['use_portal_requirements'] is True and submitted['question']==''
+        assert len([path for _,path,_,_ in calls if path.endswith('/detail-reads')])==2
         assert 'course_name' not in submitted and 'password' not in submitted
         await page.get_by_role('radio',name='上传压缩包',exact=True).check()
+        await page.get_by_label('题目要求',exact=True).fill('本地作业要求')
         for label,value in [('课程名称','本地课程'),('作业名称','本地作业')]: await page.get_by_label(label,exact=True).fill(value)
         archive=io.BytesIO()
         with zipfile.ZipFile(archive,'w') as output:output.writestr('20260001_张三/report.txt','test answer')

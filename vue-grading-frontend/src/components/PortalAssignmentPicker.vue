@@ -82,6 +82,11 @@ function publish() {
   emit('change', {
     snapshot_id: snapshotId.value,
     items: selected.value.map(({ homework_id }) => ({ homework_id })),
+    titles: selected.value.map(({ homework_id, course_title, homework_title }) => ({
+      homework_id,
+      course_title,
+      homework_title,
+    })),
   });
 }
 async function load() {

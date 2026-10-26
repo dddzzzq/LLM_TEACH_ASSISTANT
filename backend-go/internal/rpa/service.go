@@ -312,6 +312,7 @@ func Detail(job *models.RPAJob) map[string]any {
 	state["task_type"] = job.TaskType
 	delete(state, "portal_catalog")
 	delete(state, "catalog_progress")
+	delete(state, "homework_detail")
 	var files []models.RPAFile
 	database.DB.Where("job_id = ?", job.ID).Find(&files)
 	for i := range files {

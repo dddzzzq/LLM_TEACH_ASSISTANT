@@ -5,6 +5,8 @@ description: 组织课程作业批改：定位作业、核对提交批次与评�
 
 你负责组织作业批改，实际解析、查重、评分和保存由业务工作流完成。
 
+官网作业要求可以自动获取：先用 get_portal_homework_detail 查询所选 homework_id 的要求与 complete 状态；尚未读取时用 read_portal_homework_detail 携带目录中真实的 homework_id、snapshot_id 创建只读详情任务。读取文字、图片和文档由原页面 Agent 与解析器完成，不需要教师逐字填写。读取任务受理后报告进度入口，不循环轮询或立即重复创建。每份作业 complete=true 后，create_portal_grading_workflow 可传 use_portal_requirements=true，省略 question，服务端分别使用各份作业的真实要求。complete=false 时不能把部分题目当成完整要求；说明未解析部分，支持教师在页面改为手动补全。不要依据作业名称编造题目。
+
 官网作业优先使用教师已经连接的目录：get_portal_connection 查询本人状态，list_portal_courses 与 list_portal_homeworks 获取课程、作业 ID 和 snapshot_id。请教师在 /grade-homework 选择目标，或使用教师已经明确选择的目录 ID；不得猜测名称或 ID；新任务 items 只传 homework_id，默认批改全部班级，不要求教师选择班级。评分配置齐备且教师明确要求批改后，create_portal_grading_workflow 创建工作流，get_portal_grading_workflow 查询进度。该流程会自动下载、整理并批改，不再单独调用 fetch_homework 或 start_grading_job。认证引导至 /settings/portal，不索取账号密码、验证码或 Cookie。sync_portal_catalog 只刷新目录，不触发批改。
 
 - 用 inspect_grading_target 查找或检查 homework 目标。优先使用用户指定的 resource_id；按名称查找返回多个候选时，让用户结合课程、班级、作业名称选择，不猜测 ID。

@@ -42,6 +42,7 @@ class BrowserStartup:
         self.epoch = task.state["control_epoch"]
         self.phase = "portal_load"
         self.http_status = None
+        self.detail_entry_tried = False
 
     def check_owner(self):
         s = self.task.state
@@ -88,6 +89,28 @@ class BrowserStartup:
         if ready:
             return ready
         self.check_owner()
+        # Detail tasks already have a teacher-selected, verified catalog URL.
+        # Try it in the same saved profile before revisiting the public portal.
+        # Failed/expired routes fall back to the unchanged authentication flow.
+        selected = self.task.state.get("target", {}).get("portal") or {}
+        if self.task.state.get("task_type") == "HOMEWORK_DETAIL" and not self.detail_entry_tried:
+            from .portal_catalog import portal_url
+
+            self.detail_entry_tried = True
+            entry = selected.get("course_url", "")
+            if entry and portal_url(entry):
+                self.task.event("正在复用已保存的课程入口及教师登录会话")
+                try:
+                    response = await self.task.page.goto(
+                        entry, wait_until="domcontentloaded", timeout=10000
+                    )
+                    self.check_owner()
+                    if response and response.status < 400:
+                        ready = await self.probe()
+                        if ready:
+                            return ready
+                except Error:
+                    self.check_owner()
         self.phase = "portal_load"
         login = self.task.page.locator(".denglu")
         existing_portal = (

@@ -49,6 +49,7 @@ test-results/
 !/docs/go-eino-python-implementation.md
 !/docs/rpa-implementation.md
 !/docs/homework-materials-workflow.md
+!/docs/homework-requirements.md
 !/docs/logbook.md
 !/docs/execution-records.md
 !/docs/teacher-portal-automation-design.md

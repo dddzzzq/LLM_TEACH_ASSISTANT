@@ -65,6 +65,8 @@ func RunDialogue(ctx context.Context, system, user, role, username string, regis
 		if g.submitted && g.result.JobID != "" {
 			if g.result.JobType == "portal_catalog_sync" {
 				g.result.Reply = fmt.Sprintf("已提交教务目录同步任务，任务 ID：%s。请在教务接入设置页查看进度；本次仅同步目录，尚未提交下载或批改任务。", g.result.JobID)
+			} else if g.result.JobType == "portal_homework_detail" {
+				g.result.Reply = fmt.Sprintf("已提交官网作业要求读取任务，任务 ID：%s。请在教务接入设置页查看浏览器进度；本次只读取题目，不下载学生提交或批改。", g.result.JobID)
 			} else {
 				g.result.Reply = fmt.Sprintf("任务已受理，任务 ID：%s。请在任务面板查看进度，是否完成以实际任务状态为准。", g.result.JobID)
 			}

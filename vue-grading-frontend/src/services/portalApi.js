@@ -9,7 +9,15 @@ export function createPortalApi(client) {
     sync: () => client.post(`${base}/catalog-syncs`),
     courses: () => client.get(`${base}/courses`),
     homeworks: (courseId) => client.get(`${base}/courses/${id(courseId)}/homeworks`),
+    homeworkDetail: (homeworkId) => client.get(`${base}/homeworks/${id(homeworkId)}/detail`),
+    readHomeworkDetail: (homeworkId, snapshotId) =>
+      client.post(`${base}/homeworks/${id(homeworkId)}/detail-reads`, { snapshot_id: snapshotId }),
+    homeworkDetailSource: (homeworkId, sourceId) =>
+      client.get(`${base}/homeworks/${id(homeworkId)}/detail/sources/${id(sourceId)}`, {
+        responseType: 'blob',
+      }),
     operation: (operationId) => client.get(`${base}/operations/${id(operationId)}`),
+    cancelDetailRead: (operationId) => client.post(`${base}/operations/${id(operationId)}/cancel`),
     events: (operationId, after = 0) =>
       client.get(`${base}/operations/${id(operationId)}/events`, { params: { after } }),
     createWorkflow: (body, key) =>

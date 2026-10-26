@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,21 +21,25 @@ import (
 
 type WorkerCall func(context.Context, string, string, any) ([]byte, error)
 type Runner struct {
-	Service *Service
-	Broker  *Broker
-	Worker  WorkerCall
+	Service       *Service
+	Broker        *Broker
+	Worker        WorkerCall
+	detailParsers sync.Map
 }
 
-func NewRunner(s *Service, b *Broker) *Runner { return &Runner{s, b, rpa.WorkerRequest} }
+func NewRunner(s *Service, b *Broker) *Runner {
+	return &Runner{Service: s, Broker: b, Worker: rpa.WorkerRequest}
+}
 
 type operationState struct {
-	Status          string   `json:"status"`
-	Stage           string   `json:"stage"`
-	Message         string   `json:"message"`
-	ErrorCode       string   `json:"error_code"`
-	StateVersion    uint64   `json:"state_version"`
-	VerifiedSubject string   `json:"verified_subject"`
-	Catalog         *Catalog `json:"catalog"`
+	Status          string          `json:"status"`
+	Stage           string          `json:"stage"`
+	Message         string          `json:"message"`
+	ErrorCode       string          `json:"error_code"`
+	StateVersion    uint64          `json:"state_version"`
+	VerifiedSubject string          `json:"verified_subject"`
+	Catalog         *Catalog        `json:"catalog"`
+	HomeworkDetail  *HomeworkDetail `json:"homework_detail,omitempty"`
 }
 
 func (r *Runner) Session(ctx context.Context, owner uint, connectionID, opID, jobID string) (map[string]any, error) {
@@ -103,6 +108,10 @@ func (r *Runner) Tick(ctx context.Context) {
 			var we *rpa.WorkerError
 			var task models.RPAJob
 			if r.Service.DB.WithContext(ctx).First(&task, "id = ?", op.ID).Error == nil && terminal(task.Status) {
+				if op.Type == "HOMEWORK_DETAIL" && task.Status == "SUCCEEDED" {
+					_ = r.apply(ctx, op, operationState{Status: "INTERRUPTED", Stage: "READING_DETAIL", Message: "作业详情结果暂不可用，请重新读取", StateVersion: op.StateVersion + 1})
+					continue
+				}
 				_ = r.apply(ctx, op, operationState{Status: task.Status, Stage: task.Stage, Message: task.Message, StateVersion: op.StateVersion + 1})
 				continue
 			}
@@ -113,6 +122,10 @@ func (r *Runner) Tick(ctx context.Context) {
 		}
 		var state operationState
 		if json.Unmarshal(raw, &state) != nil {
+			continue
+		}
+		if op.Type == "HOMEWORK_DETAIL" && state.Status == "SUCCEEDED" {
+			r.parseDetail(ctx, op, state)
 			continue
 		}
 		if err = r.apply(ctx, op, state); err != nil {
@@ -129,7 +142,11 @@ func (r *Runner) ensureTask(ctx context.Context, op models.PortalOperation) erro
 	if err != nil {
 		return err
 	}
-	doc, ok := skills["sync-teacher-portal"]
+	skill := "sync-teacher-portal"
+	if op.Type == "HOMEWORK_DETAIL" {
+		skill = "read-homework-detail"
+	}
+	doc, ok := skills[skill]
 	if !ok || doc.Instructions == "" {
 		return errors.New("missing portal page skill")
 	}
@@ -152,6 +169,16 @@ func (r *Runner) ensureTask(ctx context.Context, op models.PortalOperation) erro
 			Status: "QUEUED", Stage: "OPEN_PORTAL", Message: "等待页面 Agent 打开教务平台", NavigationJSON: string(snapshot)}
 		if op.Type == "CATALOG_SYNC" {
 			job.CourseName, job.AssignmentName = "课程目录", "获取课程与作业"
+		}
+		if op.Type == "HOMEWORK_DETAIL" {
+			var selected detailTarget
+			if json.Unmarshal([]byte(op.PayloadJSON), &selected) != nil || selected.HomeworkID == "" {
+				return errors.New("invalid detail target")
+			}
+			job.CourseName, job.AssignmentName, job.Term = selected.CourseName, selected.HomeworkName, selected.Term
+			target, _ := json.Marshal(selected.Target)
+			job.PortalTargetJSON = string(target)
+			job.Message = "等待页面 Agent 读取所选作业要求"
 		}
 		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&job).Error
 	})
@@ -195,6 +222,11 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 			}
 		}
 		if state.Status == "SUCCEEDED" {
+			if op.Type == "HOMEWORK_DETAIL" {
+				if err := publishDetail(tx, &c, &op, state.HomeworkDetail); err != nil {
+					return err
+				}
+			}
 			if op.Type == "CATALOG_SYNC" || op.Type == "AUTH_BOOTSTRAP" && state.Catalog != nil {
 				if state.Catalog == nil {
 					return errors.New("missing catalog")
