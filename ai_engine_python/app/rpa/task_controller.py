@@ -1081,6 +1081,7 @@ class Task:
                 "TARGET_CONFIRMATION", "请先进入目标课程与作业，当前导出页面归属尚未核验"
             )
             return
+        await self.adapter.close_export_centers()
         options = await self.adapter.classes(modal)
         target = self.state["target"].get("portal")
         if target and target.get("class_id"):
@@ -1128,9 +1129,22 @@ class Task:
             baseline if baseline and baseline[1] else await self.adapter.export_baseline()
         )
         scope["baseline_observed"] = observed
+        if scope.get("mode") == "all":
+            from .portal_catalog import PortalCatalog
+
+            expected = await PortalCatalog(self.context, self.update).classes(page, {})
+            if expected:
+                scope["expected_classes"] = expected
+        await self.adapter.close_export_centers()
+        confirm = modal.locator("a.confirmDown").filter(has_text="确定")
+        if not await confirm.count():
+            confirm = modal.get_by_role("button", name="确定", exact=True)
+        if await confirm.count() != 1 or not await confirm.is_visible():
+            raise RpaIssue("EXPORT_CONFIRM_UNAVAILABLE", "未找到唯一可见的导出确认按钮")
         self.update(
             class_scope=scope,
             export_baseline=[r["ref"] for r in before],
+            export_baseline_rows=before,
             export_attempted=True,
             stage="EXPORT",
             export_started_at=time.time(),
@@ -1138,10 +1152,18 @@ class Task:
         )
         self.event("班级范围和附件导出选项已核验，正在提交导出")
         # Persist intent BEFORE clicking; an uncertain result can never blindly submit again.
-        confirm = modal.locator("a.confirmDown").filter(has_text="确定")
-        if not await confirm.count():
-            confirm = modal.get_by_role("button", name="确定", exact=True)
-        await confirm.click(timeout=8000)
+        # Activate only this already-verified, site-owned confirmation control.
+        # Avoid a coordinate action blocked by a floating download-center panel.
+        activated = await confirm.evaluate("""e => {
+            if(!e.isConnected || !e.getClientRects().length || e.disabled ||
+               e.closest('[hidden],[aria-hidden=true],[aria-disabled=true],.disabled,.is-disabled')) return false;
+            e.click(); return true;
+        }""")
+        if not activated:
+            # The executor proved click() was never called, so retrying navigation
+            # is safe. Exceptions after activation retain the uncertain checkpoint.
+            self.update(export_attempted=False)
+            raise RpaIssue("EXPORT_CONFIRM_UNAVAILABLE", "导出确认按钮已失效，尚未提交导出")
         self.update(stage="WAIT_EXPORT")
         self.event("已提交导出，正在关联下载中心任务")
 
@@ -1174,6 +1196,11 @@ class Task:
                 self.wait_human("LOGIN", "等待导出期间会话过期，请重新登录")
                 return
             rows = await self.adapter.export_rows()
+            from .portal_adapter import refreshed_export_rows, fresh_export, assignment_export_row
+
+            rows = refreshed_export_rows(
+                rows, self.state.get("export_baseline_rows", []), self.state["export_started_at"]
+            )
             if not rows:
                 for page in self.context.pages:
                     center = page.get_by_text("下载中心", exact=True)
@@ -1187,14 +1214,25 @@ class Task:
                 return
             exports = self.state.get("exports", [])
             if not exports:
+                scope = dict(self.state["class_scope"])
+                # Re-exporting all classes can replace each previous class row.
+                # Require every previously observed matching row to be refreshed.
+                title = self.state["target"]["assignment_name"]
+                expected = [
+                    row["ref"]
+                    for row in self.state.get("export_baseline_rows", [])
+                    if assignment_export_row(row, title) and row.get("status") == "READY"
+                ]
+                if expected:
+                    scope["expected_export_refs"] = expected
                 exports = match_new_exports(
                     rows,
                     self.state["export_baseline"],
                     self.state["target"]["assignment_name"],
-                    self.state["class_scope"],
+                    scope,
                 )
                 if not exports:
-                    candidates = [r for r in rows if r["ref"] not in self.state["export_baseline"]]
+                    candidates = [r for r in rows if fresh_export(r, self.state["export_baseline"])]
                     self.update(export_candidates=candidates)
                     elapsed = time.time() - self.state["export_started_at"]
                     collecting_all = self.state["class_scope"].get("mode") == "all"

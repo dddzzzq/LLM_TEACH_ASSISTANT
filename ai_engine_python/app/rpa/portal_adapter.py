@@ -3,6 +3,8 @@
 import hashlib
 import re
 import asyncio
+import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from .errors import RpaIssue
 from .page_snapshot import HEADINGS, EXPORT_LABEL, inventory
@@ -25,6 +27,64 @@ EXPORT_TIME = re.compile(
     r"(?<!\d)(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?(?!\d)"
 )
 EXPORT_STATE = r"重新下载|导出中|等待|导出成功|下载|失败|处理中|已完成|重新导出|已过期|排队中"
+
+
+def refreshed_export_rows(rows, baseline_rows, started_at):
+    """The site may replace an old same-name record instead of adding a row.
+
+    Time is freshness evidence only; it is never the stable download identity.
+    An old pending export completing now cannot become this task's export.
+    """
+    previous = {row["ref"]: row for row in baseline_rows}
+    zone = timezone(timedelta(hours=8))
+    start = datetime.fromtimestamp(started_at, zone)
+
+    def stamp(row):
+        match = EXPORT_TIME.search(row.get("text", ""))
+        if not match:
+            return None
+        value = match.group().replace("/", "-")
+        if not re.match(r"^\d{4}-", value):
+            value = f"{start.year}-" + value
+        try:
+            parsed = datetime.strptime(
+                value, "%Y-%m-%d %H:%M:%S" if value.count(":") == 2 else "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=zone)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+
+    output = []
+    for row in rows:
+        old = previous.get(row["ref"])
+        now, before = stamp(row), stamp(old or {})
+        changed = bool(
+            old
+            and old.get("status") == "READY"
+            and now is not None
+            and before is not None
+            and now > before
+            and now >= int(started_at // 60) * 60
+            and now <= time.time() + 300
+            and export_identity(row) == export_identity(old)
+        )
+        output.append({**row, **({"generation_verified": True} if changed else {})})
+    return output
+
+
+def fresh_export(row, baseline):
+    return row["ref"] not in baseline or row.get("generation_verified", False)
+
+
+def assignment_export_row(row, assignment):
+    return bool(
+        re.search(
+            r"(?:^|[\s_\-/【\[(（:：])"
+            + re.escape(assignment)
+            + r"(?=$|[\s_.\-/【\[(（】\])）:：])",
+            row["text"],
+        )
+    )
 
 
 def export_identity(row):
@@ -72,12 +132,13 @@ def reconcile_exports(exports, rows, baseline):
 
 def match_new_exports(rows, baseline, assignment, scope):
     """Never associate by list position or by a transient 'exporting' status."""
-    fresh = [r for r in rows if r["ref"] not in baseline and not r.get("ambiguous")]
+    fresh = [r for r in rows if fresh_export(r, baseline) and not r.get("ambiguous")]
     names = [c["name"] for c in scope.get("classes", [])] if scope.get("mode") == "selected" else []
     matched = [
         r
         for r in fresh
-        if assignment in r["text"] and (not names or any(name in r["text"] for name in names))
+        if assignment_export_row(r, assignment)
+        and (not names or any(name in r["text"] for name in names))
     ]
     # A unique fresh record for an explicitly selected all-class export can be
     # associated without asking for an otherwise redundant second confirmation.
@@ -85,14 +146,24 @@ def match_new_exports(rows, baseline, assignment, scope):
         if not scope.get("baseline_observed"):
             return []  # An unopened download center cannot prove which records are new.
         title = re.compile(
-            r"(?:^|[\s_\-/【\[(（:：])" + re.escape(assignment) + r"(?=$|[\s_.\-/】\])）:：])"
+            r"(?:^|[\s_\-/【\[(（:：])"
+            + re.escape(assignment)
+            + r"(?=$|[\s_.\-/【\[(（】\])）:：])"
         )
-        exact = [r for r in rows if r["ref"] not in baseline and title.search(r["text"])]
+        exact = [r for r in rows if fresh_export(r, baseline) and title.search(r["text"])]
         if any(row.get("ambiguous") for row in exact):
             return []
+        expected_refs = set(scope.get("expected_export_refs", []))
+        refreshed = {row["ref"] for row in exact if row.get("generation_verified")}
+        if expected_refs and refreshed:
+            return exact if expected_refs <= refreshed else []
         # A checkbox-only dialog can produce one archive per concrete class.
         # Require one fresh record for each applied class, without guessing rows.
-        concrete = [c["name"] for c in scope.get("classes", []) if not c.get("all")]
+        concrete = [
+            c["name"]
+            for c in scope.get("expected_classes", scope.get("classes", []))
+            if not c.get("all")
+        ]
         if len(exact) > 1 and concrete and len(exact) == len(concrete):
             if all(sum(name in row["text"] for row in exact) == 1 for name in concrete) and all(
                 sum(name in row["text"] for name in concrete) == 1 for row in exact
@@ -707,6 +778,7 @@ class PortalAdapter:
         """Read the existing center before submitting, including an empty center."""
         rows = await self.export_rows()
         if rows or await self.export_center_visible():
+            await self.close_export_centers()
             return rows, True
         for page in self.context.pages:
             if page.is_closed():
@@ -729,12 +801,48 @@ class PortalAdapter:
                     state="visible", timeout=5000
                 )
                 rows = await self.export_rows()
-                close = center.get_by_role("button", name=re.compile("关闭|close", re.I))
-                if not await close.count():
-                    close = center.locator(".close,.close_btn,.closeDown")
-                if await close.count() == 1 and await close.is_visible():
-                    await close.click(timeout=5000)
-                else:
-                    await visible[0].click(timeout=5000)
+                await self.close_export_centers()
                 return rows, True
         return [], False
+
+    async def close_export_centers(self):
+        """Close the site's download overlay before operating export settings.
+
+        A 'download center' entry is often open-only, not a toggle. Never click
+        it again and assume the overlay has closed.
+        """
+        for page in self.context.pages:
+            if page.is_closed():
+                continue
+            for frame in page.frames:
+                centers = frame.locator("#downloadcenter:visible,.downloadCenter:visible")
+                for n in range(await centers.count()):
+                    center = centers.nth(n)
+                    controls = center.locator(
+                        "button,a,[role=button],[onclick],.close,.close_btn,.closeDown"
+                    )
+                    candidates = []
+                    for i in range(await controls.count()):
+                        control = controls.nth(i)
+                        if not await control.is_visible():
+                            continue
+                        info = await control.evaluate("""e => {
+                            const attrs=n=>[n.getAttribute('aria-label'),n.getAttribute('title'),n.className,n.getAttribute('onclick')].filter(Boolean).join(' ');
+                            const parent=e.parentElement?.closest('a,button,[role=button],[onclick]');
+                            return {description:attrs(e),text:(e.innerText||'').trim(),nested:!!parent && !!e.closest('#downloadcenter,.downloadCenter')?.contains(parent) && /关闭|close|hideDownload/i.test(attrs(parent))};
+                        }""")
+                        if not info["nested"] and (
+                            re.search(r"关闭|close|hideDownload", info["description"], re.I)
+                            or info["text"] in {"关闭", "×", "✕"}
+                        ):
+                            candidates.append(control)
+                    if len(candidates) == 1:
+                        await candidates[0].click(timeout=5000)
+                        await center.wait_for(state="hidden", timeout=5000)
+                    elif await center.evaluate(
+                        "e => ['absolute','fixed','sticky'].includes(getComputedStyle(e).position) || e.getAttribute('role') === 'dialog'"
+                    ):
+                        raise RpaIssue(
+                            "EXPORT_CENTER_CLOSE_UNVERIFIED",
+                            "下载中心遮挡导出设置，未核验到唯一关闭控件，请先关闭下载中心",
+                        )

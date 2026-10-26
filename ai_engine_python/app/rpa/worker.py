@@ -452,6 +452,27 @@ async def frame(job_id: str, request: Request):
     }
 
 
+@app.get("/tasks/{job_id}/export-diagnostics")
+async def export_diagnostics(job_id: str, request: Request):
+    task = task_for(request, job_id)
+    async with task.lock:
+        if not task.context or not task.adapter or not task.adapter.assignment_confirmed:
+            return {"available": False}
+        frames = []
+        for page in task.context.pages:
+            if page.is_closed():
+                continue
+            for frame in page.frames:
+                controls = await frame.locator(
+                    "select,option,li[onclick],[role=option],[class*='select' i],[class*='sel_' i]"
+                ).evaluate_all(
+                    """els => els.slice(0,80).map(e=>({tag:e.tagName,id:e.id,classes:String(e.className).slice(0,80),text:(e.textContent||'').trim().slice(0,80),attributes:[...e.attributes].filter(a=>/^(?:value|name|data-(?:class|clazz|value|id))$/i.test(a.name)).map(a=>[a.name,a.value.slice(0,80)]),handler:(e.getAttribute('onclick')||'').match(/^\s*([\w.]+)/)?.[1]||'',numeric_arguments:[...(e.getAttribute('onclick')||'').matchAll(/["'](\d+)["']/g)].map(m=>m[1]).slice(0,8)}))"""
+                )
+                if controls:
+                    frames.append({"controls": controls})
+        return {"available": True, "frames": frames, "exports": await task.adapter.export_rows()}
+
+
 @app.websocket("/tasks/{job_id}/stream")
 async def browser_stream(job_id: str, socket: WebSocket):
     # HTTP middleware does not protect WebSocket upgrades.

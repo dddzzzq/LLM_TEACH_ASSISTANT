@@ -21,13 +21,77 @@ from websockets.exceptions import InvalidStatus
 from playwright.async_api import async_playwright
 
 from app.rpa.download_manager import safe_filename, verify_zip, save_download
-from app.rpa.portal_adapter import fingerprint, match_new_exports, reconcile_exports, PortalAdapter
+from app.rpa.portal_adapter import (
+    fingerprint,
+    match_new_exports,
+    reconcile_exports,
+    refreshed_export_rows,
+    PortalAdapter,
+)
 from app.rpa.task_controller import Task, allowed_url
 from app.rpa.worker import Manager, app
 from tests.fixtures.export_dialog import PORTAL_EXPORT_OPTIONS
 
 
 class FileAndEvidenceTests(unittest.TestCase):
+    def test_reexport_replaces_ready_rows_without_new_fingerprints(self):
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone(timedelta(hours=8)))
+        old = (now - timedelta(days=4)).strftime("%m-%d %H:%M")
+        current = now.strftime("%m-%d %H:%M")
+        baseline = [
+            {"ref": name, "status": "READY", "text": f"班级{name}-编程小作业1(附件) {old} 导出成功"}
+            for name in ["A", "B"]
+        ]
+        rows = [{**r, "text": r["text"].replace(old, current)} for r in baseline]
+        fresh = refreshed_export_rows(rows, baseline, now.timestamp() - 1)
+        scope = {
+            "mode": "all",
+            "baseline_observed": True,
+            "classes": [{"name": "全部班级", "all": True}],
+            "expected_export_refs": ["A", "B"],
+        }
+        self.assertEqual(match_new_exports(fresh, ["A", "B"], "编程小作业1", scope), fresh)
+        partial = refreshed_export_rows([rows[0], baseline[1]], baseline, now.timestamp() - 1)
+        self.assertFalse(match_new_exports(partial, ["A", "B"], "编程小作业1", scope))
+        pending = [{**r, "status": "PENDING"} for r in baseline]
+        self.assertFalse(
+            any(
+                r.get("generation_verified")
+                for r in refreshed_export_rows(rows, pending, now.timestamp() - 1)
+            )
+        )
+        self.assertFalse(
+            any(
+                r.get("generation_verified")
+                for r in refreshed_export_rows(baseline, baseline, now.timestamp() - 1)
+            )
+        )
+
+    def test_all_class_exports_match_attachment_suffix_and_complete_class_set(self):
+        rows = [
+            {"ref": "new-a", "text": "班级124CS512601-编程小作业1(附件) 10-26 19:30 导出成功"},
+            {"ref": "new-b", "text": "班级124CS512602-编程小作业1(附件) 10-26 19:30 导出成功"},
+        ]
+        scope = {
+            "mode": "all",
+            "baseline_observed": True,
+            "classes": [{"name": "全部班级", "all": True}],
+            "expected_classes": [{"name": "124CS512601"}, {"name": "124CS512602"}],
+        }
+        self.assertEqual(match_new_exports(rows, [], "编程小作业1", scope), rows)
+        self.assertFalse(match_new_exports(rows[:1], [], "编程小作业1", scope))
+        self.assertFalse(match_new_exports(rows, ["new-a"], "编程小作业1", scope))
+        self.assertFalse(
+            match_new_exports(
+                [{**r, "text": r["text"].replace("编程小作业1(", "编程小作业10(")} for r in rows],
+                [],
+                "编程小作业1",
+                scope,
+            )
+        )
+
     def test_completed_export_keeps_identity_when_download_link_appears(self):
         pending = {"text": "第一次作业 班级A 2026-10-07 10:00 导出中"}
         ready = {
@@ -230,6 +294,32 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(observed)
         self.assertEqual(len(rows), 1)
         self.assertTrue(await task.page.locator("#downloadcenter").is_hidden())
+
+    async def test_open_only_download_overlay_is_closed_before_single_export_submit(self):
+        task = await self.bare_task()
+        await task.page.set_content(
+            """<script>window.exports=0;window.openOnlyClicks=0</script>
+            <button onclick="window.openOnlyClicks++;document.querySelector('#downloadcenter').hidden=false">下载中心</button>
+            <div role=dialog>选择格式"""
+            + PORTAL_EXPORT_OPTIONS
+            + """
+            <a class=confirmDown onclick="if(!document.querySelector('#downloadcenter').hidden){window.blocked=true;return};window.exports++;this.closest('[role=dialog]').hidden=true">确定</a></div>
+            <div id=downloadcenter style="position:fixed;inset:0;z-index:99999;background:white">
+            <a class=closeDown onclick="this.parentElement.hidden=true"><span class=close>×</span></a>
+            <button class=close hidden>关闭</button><table><tbody><tr data-id=old><td>第一次作业 全部班级 已完成</td></tr></tbody></table></div>"""
+        )
+        task.adapter.pre_export_baseline = await task.adapter.export_baseline()
+        self.assertTrue(await task.page.locator("#downloadcenter").is_hidden())
+        self.assertEqual(await task.page.evaluate("window.openOnlyClicks"), 0)
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        task.scope_request = {"mode": "all"}
+        task.gate.set()
+        await task.prepare_export(
+            (task.page, task.page.main_frame, task.page.locator("[role=dialog]"))
+        )
+        self.assertEqual(task.state["stage"], "WAIT_EXPORT")
+        self.assertEqual(await task.page.evaluate("window.exports"), 1)
+        self.assertIsNone(await task.page.evaluate("window.blocked"))
 
     async def test_pause_waits_for_action_boundary_and_invalidates_old_decision(self):
         task = await self.bare_task()

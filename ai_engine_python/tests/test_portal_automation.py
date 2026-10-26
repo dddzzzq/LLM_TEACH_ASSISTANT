@@ -852,7 +852,10 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_classes_download_without_catalog_class_ids(self):
         await self.download_flow(True)
 
-    async def download_flow(self, all_classes):
+    async def test_reexport_updates_existing_rows_and_downloads_each_class(self):
+        await self.download_flow(True, replace_rows=True)
+
+    async def download_flow(self, all_classes, replace_rows=False):
         await self.trusted()
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as output:
@@ -868,6 +871,28 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
                 "<div id=downloadcenter><p class=empty>暂无下载记录</p></div>",
             )
             html = html.replace("第一次作业 A班 导出成功", "第一次作业 全部班级 导出成功")
+        if replace_rows:
+            from datetime import datetime, timedelta, timezone
+
+            now = datetime.now(timezone(timedelta(hours=8)))
+            old = (now - timedelta(days=4)).strftime("%m-%d %H:%M")
+            current = now.strftime("%m-%d %H:%M")
+            old_rows = "".join(
+                f"<tr data-id=old-{name}><td>班级{name}-第一次作业(附件) {old} 导出成功</td></tr>"
+                for name in ["A班", "B班"]
+            )
+            new_rows = "".join(
+                f"<tr data-id=old-{name}><td>班级{name}-第一次作业(附件) {current} 导出成功 <a class=download_ic href=/download>下载</a></td></tr>"
+                for name in ["A班", "B班"]
+            )
+            html = html.replace(
+                "<div id=downloadcenter><p class=empty>暂无下载记录</p></div>",
+                "<div id=downloadcenter><table><tbody>" + old_rows + "</tbody></table></div>",
+            )
+            html = html.replace(
+                "<tr data-id=task-a><td>第一次作业 全部班级 导出成功 <a class=download_ic href=/download>下载</a></td></tr>",
+                new_rows,
+            )
 
         async def fixture(task, route):
             nonlocal exports
@@ -923,6 +948,9 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             if not all_classes:
                 self.assertEqual(task.state["files"][0]["class_name"], "A班")
             self.assertEqual(task.state["files"][0]["status"], "VERIFIED")
+            if replace_rows:
+                self.assertEqual(len(task.state["files"]), 2)
+                self.assertEqual({f["class_name"] for f in task.state["files"]}, {"A班", "B班"})
 
     async def test_credentials_not_filled_into_unconfigured_origin_or_mismatched_identity(self):
         async with self.sessions.open(self.session, self.root / "downloads") as context:
