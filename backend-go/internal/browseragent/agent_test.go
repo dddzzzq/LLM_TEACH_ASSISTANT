@@ -11,6 +11,54 @@ import (
 
 const fixtureContract = `{"oneOf":[{"description":"点击控件","properties":{"tool":{"type":"string","enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`
 
+func TestEveryRegisteredPageSkillCanDriveAuthentication(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"type":"string","enum":["fill_portal_credentials"]}},"required":["tool"],"additionalProperties":false}]}`)
+	for _, name := range skills.Names() {
+		t.Run(name, func(t *testing.T) {
+			rounds := 0
+			action, err := Decide(context.Background(), json.RawMessage(`{"stage":"AUTHENTICATE","observation":{"authentication":{"login_form":true,"credentials_saved":true,"credentials_filled":false}}}`), skills[name], contract, func(_ context.Context, messages []map[string]interface{}, _ []map[string]interface{}) (*modelclient.LLMResponse, error) {
+				rounds++
+				if rounds == 1 {
+					args, _ := json.Marshal(map[string]string{"skill": name})
+					return modelResponse("load_skill", string(args)), nil
+				}
+				return modelResponse("fill_portal_credentials", `{}`), nil
+			})
+			if err != nil || string(action) != `{"tool":"fill_portal_credentials"}` || rounds != 2 {
+				t.Fatalf("registered Skill rejected before login: action=%s model_calls=%d err=%v", action, rounds, err)
+			}
+		})
+	}
+}
+
+func TestHomeworkDetailSkillReachesQuestionReader(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := skills["read-homework-detail"]
+	contract := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"type":"string","enum":["read_homework_detail"]}},"required":["tool"],"additionalProperties":false}]}`)
+	rounds := 0
+	action, err := Decide(context.Background(), json.RawMessage(`{"stage":"READING_DETAIL","observation":{"task_type":"HOMEWORK_DETAIL","homework_detail":{"ready":true}}}`), doc, contract, func(_ context.Context, messages []map[string]interface{}, _ []map[string]interface{}) (*modelclient.LLMResponse, error) {
+		rounds++
+		if rounds == 1 {
+			return modelResponse("load_skill", `{"skill":"read-homework-detail"}`), nil
+		}
+		raw, _ := json.Marshal(messages)
+		if !strings.Contains(doc.Instructions, "不要自行改写、概括或补全题目") || !strings.Contains(string(raw), "不要自行改写、概括或补全题目") {
+			t.Fatal("detail instructions missing from the actual decision")
+		}
+		return modelResponse("read_homework_detail", `{}`), nil
+	})
+	if err != nil || string(action) != `{"tool":"read_homework_detail"}` || rounds != 2 {
+		t.Fatalf("detail reader decision failed: action=%s model_calls=%d err=%v", action, rounds, err)
+	}
+}
+
 func TestSamePageAgentLoadsCatalogSkillAndCallsReader(t *testing.T) {
 	contract := json.RawMessage(`{"oneOf":[{"description":"读取课程","type":"object","properties":{"tool":{"type":"string","enum":["read_course_list"]}},"required":["tool"],"additionalProperties":false}]}`)
 	round := 0

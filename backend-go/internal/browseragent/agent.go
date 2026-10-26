@@ -47,7 +47,7 @@ func Decide(ctx context.Context, input json.RawMessage, doc catalog.Document, co
 	if err := json.Unmarshal(contract, &descriptor); err != nil {
 		return nil, err
 	}
-	if len(descriptor.OneOf) == 0 || (doc.Name != "fetch-homework" && doc.Name != "collect-homework" && doc.Name != "sync-teacher-portal") || doc.Instructions == "" {
+	if len(descriptor.OneOf) == 0 || (doc.Name != "fetch-homework" && doc.Name != "collect-homework" && doc.Name != "sync-teacher-portal" && doc.Name != "read-homework-detail") || doc.Instructions == "" {
 		return nil, fmt.Errorf("页面工具或 Skill 协议缺失")
 	}
 	loaded, visible := false, false
