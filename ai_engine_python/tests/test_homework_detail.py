@@ -14,6 +14,7 @@ from app.rpa.errors import RpaIssue
 from app.rpa.browser_startup import BrowserStartup
 from app.rpa.homework_detail import HomeworkDetailReader, resource_url
 from app.rpa.task_controller import Task
+from app.rpa.portal_adapter import PortalAdapter
 from app.rpa.tools import validate_action
 
 
@@ -63,6 +64,54 @@ class HomeworkDetailTests(unittest.IsolatedAsyncioTestCase):
         )
         await self.page.goto("https://mooc2-ans.chaoxing.com/work/library/view-work?" + query)
 
+    async def test_legacy_published_work_click_binds_its_library_detail_page(self):
+        target = self.state["target"]
+
+        async def route(request):
+            if "/view-work" in request.request.url:
+                body = '<h2>编程作业</h2><div class="mark_item"><p>实现并发下载</p></div>'
+            else:
+                body = """<script>function showWork(libraryId,workId){window.open('/work/library/view-work?courseid=11&workId='+libraryId)}function gradeWork(workId){}</script><ul><li><div class="list_li_tit"><a title="编程作业" href="javascript:void(0)" onclick="showWork('library_abc','33')">编程作业</a></div><a class="piyueBtn" onclick="gradeWork('33')">批阅</a></li></ul>"""
+            await request.fulfill(body='<meta charset="utf-8">' + body, content_type="text/html")
+
+        await self.context.route("**/*", route)
+        await self.page.goto("https://mooc2-ans.chaoxing.com/course?courseid=11&clazzid=22")
+        task = Task(
+            SimpleNamespace(download_root=Path(self.temp.name), persist=lambda state: None),
+            {
+                "job_id": "fixture",
+                "task_type": "HOMEWORK_DETAIL",
+                "status": "RUNNING",
+                "stage": "LOCATE_ASSIGNMENT",
+                "control_mode": "AUTO",
+                "control_epoch": 1,
+                "target": target,
+            },
+        )
+        task.context, task.page = self.context, self.page
+        task.adapter = PortalAdapter(self.context, target)
+        task.adapter.course_confirmed = True
+        task.gate.set()
+        view = await task.adapter.observe()
+        entry = next(item for item in view["elements"] if item["name"] == "编程作业")
+        await task.execute({"tool": "click", "element_ref": entry["ref"]})
+        await task.page.wait_for_load_state()
+        self.assertNotEqual(task.page, self.page)
+        self.assertTrue(
+            task.adapter.assignment_confirmed,
+            "published work ID was lost before entering its library detail",
+        )
+        self.assertIs(task.detail_page, task.page)
+        self.assertTrue((await task.detail_reader.observation())["ready"])
+        destination = task.page.url
+        await task.page.goto(destination.replace("library_abc", "library_other"))
+        self.assertIsNone(
+            await task.detail_reader.frame(), "a later library navigation reused stale entry proof"
+        )
+        await task.page.goto(destination)
+        await task.detail_reader.read()
+        self.assertEqual(task.state["homework_detail"]["homework_id"], "33")
+
     async def test_mixed_sources_preserve_order_and_exclude_answers(self):
         image = "data:image/png;base64," + base64.b64encode(PNG).decode()
         await self.load(
@@ -101,7 +150,17 @@ class HomeworkDetailTests(unittest.IsolatedAsyncioTestCase):
         await self.load('<div class="mark_item">题目</div>', "courseid=11")
         self.assertIsNone(await self.reader.frame())
         self.task.detail_page = self.page
+        self.task.detail_page_url = self.page.url
         self.assertIsNotNone(await self.reader.frame())
+
+    async def test_unverified_detail_explains_missing_entry_and_same_tab_is_not_progress(self):
+        await self.load('<div class="mark_item">题目</div>', "courseid=11&id=library_abc")
+        self.assertEqual((await self.reader.observation())["reason"], "DETAIL_ENTRY_UNVERIFIED")
+        task = Task(None, {"task_type": "HOMEWORK_DETAIL"})
+        task.context, task.page = self.context, self.page
+        with self.assertRaises(RpaIssue) as error:
+            await task.execute({"tool": "switch_page", "page_id": "0"})
+        self.assertEqual(error.exception.code, "PAGE_ALREADY_ACTIVE")
 
     async def test_page_body_is_never_a_question_fallback(self):
         await self.load("<p>整个页面还有学生答案，不能当成题目</p>")

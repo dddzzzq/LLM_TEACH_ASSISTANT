@@ -291,6 +291,17 @@ class PortalAdapter:
             if self.course_confirmed and (
                 item["name"] == assignment or assignment in item.get("context_labels", [])
             ):
+                # Legacy title links pass a published work ID to a site-owned
+                # handler, then open a library preview with a different ID.
+                # Reuse the catalog reader's DOM evidence before clicking;
+                # the generic course extractor cannot read those handlers.
+                from .homework_dom import homework_extract
+
+                works = await locator.evaluate("e => (" + homework_extract(EXTRACT) + ")([e])")
+                if len(works) == 1:
+                    raw = works[0]
+                    if raw.get("identity_conflict"):
+                        raise RpaIssue("TARGET_ID_MISMATCH", "该作业入口包含冲突的官网作业标识")
                 row = normalize_record(raw, "homework", page.url, allow_unresolved=True)
                 if row and row["platform_id"] and row["platform_id"] != selected["homework_id"]:
                     raise RpaIssue("TARGET_ID_MISMATCH", "该作业与选定官网标识不一致")

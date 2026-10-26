@@ -7,7 +7,7 @@
 1. `PortalAssignmentPicker.vue` 提供目录中的真实作业 ID 与快照版本，`PortalHomeworkRequirements.vue` 按顺序读取，避免同一教师浏览器并发启动。
 2. `POST /api/portal/homeworks/:id/detail-reads` 创建 `HOMEWORK_DETAIL` 操作。仍由原 `portal.Runner` 和 `rpa` 调度任务，并使用原教师持久浏览器、自动认证、暂停/接管和取消机制。
 3. 详情任务先在原教师浏览器尝试目录中已保存的课程入口；现有登录会话可用就继续，入口失效则回到原认证流程。页面 Agent 加载 `skills/read-homework-detail/SKILL.md`，沿“课程 → 作业 → 点击作业名称 → 作业详情”导航。右侧“查重”和“批阅”不属于本流程。
-4. 观察中的 `homework_detail.ready=true` 后，调用无参数 `read_homework_detail`。执行器核验课程 ID、作业 ID、标题及详情页来源，读取题目区域的正文、图片和附件。学生答案、答案解析、评分和导航区域不会作为题目提取。
+4. 观察中的 `homework_detail.ready=true` 后，调用无参数 `read_homework_detail`。执行器核验课程 ID、作业 ID、标题及详情页来源，读取题目区域的正文、图片和附件。旧版列表的已发布作业 ID 与作业库预览 ID 是不同标识：点击名称前复用目录 DOM 解析器核验已发布 ID，再绑定实际打开的页与地址；库预览只在该绑定仍有效且课程、标题一致时读取。地址改变或缺少入口证据不能沿用绑定。学生答案、答案解析、评分和导航区域不会作为题目提取。
 5. 资源读取是异步操作，避免超过页面 Agent 单次请求时限。只跟随已支持平台域名的 HTTPS 资源和跳转，使用当前登录上下文；图片获取失败可截取该题目图片。
 6. 后端复用现有文档解析器和 OCR RPC，按题目中的资源顺序整理正文；保留资源哈希和私有原件。`PortalHomeworkDetail` 缓存独立于课程目录，绑定教师、浏览器代次、目录快照与本次操作。
 7. 批改请求设置 `use_portal_requirements=true` 时，服务端分别读取所选作业的完整要求，写入各自的 `Assignment.question` 与流程项。客户端不能以“已读取”的标记替代服务端校验。

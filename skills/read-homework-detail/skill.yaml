@@ -1,6 +1,6 @@
 api_version: teaching.skills/v1
 id: teaching/read-homework-detail
-version: 1.0.0
+version: 1.0.1
 entry: SKILL.md
 runtimes:
   - portal-browser

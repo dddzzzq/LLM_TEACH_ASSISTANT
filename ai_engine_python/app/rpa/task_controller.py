@@ -78,6 +78,7 @@ class Task:
         self.catalog_collection = None
         self.detail_reader = None
         self.detail_page = None
+        self.detail_page_url = ""
         self.detail_operation = None
         if state.get("task_type") == "HOMEWORK_DETAIL":
             from .homework_detail import HomeworkDetailReader
@@ -906,6 +907,11 @@ class Task:
             self.page = await self.adapter.open_export()
         elif tool == "switch_page":
             idx = int(decision["page_id"])
+            if self.detail_reader and self.context.pages[idx] is self.page:
+                raise RpaIssue(
+                    "PAGE_ALREADY_ACTIVE",
+                    "该标签已是当前页，请读取详情或根据详情核验原因返回原作业列表，不要重复切换同一页",
+                )
             self.page = self.context.pages[idx]
         elif tool == "scroll":
             delta = max(-1000, min(1000, int(decision.get("delta_y", 600))))
@@ -1005,7 +1011,12 @@ class Task:
                     and item["name"].strip() == self.state["target"]["assignment_name"]
                     and self.adapter.assignment_confirmed
                 ):
+                    try:
+                        await self.page.wait_for_load_state("domcontentloaded", timeout=2500)
+                    except Exception:
+                        pass  # The bound URL is checked again after loading.
                     self.detail_page = self.page
+                    self.detail_page_url = self.page.url
                 if catalog_course:
                     self.catalog_course_pages[self.page] = catalog_course
         self.recent.append({k: v for k, v in decision.items() if k != "value"})

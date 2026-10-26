@@ -12,4 +12,6 @@ description: 复用当前页面 Agent 与教师浏览器，打开指定作业详
 3. 当前观察 homework_detail.ready 为 true 时，调用无参数 read_homework_detail。工具核验当前课程、作业身份和题目区域，获取正文及图片、附件并结束浏览器任务；后台自动完成 OCR 和文档解析。不要自行改写、概括或补全题目。
 4. 已显示“作业详情”但 ready 为 false 时，先核对所选作业名称和当前标签页；页面未加载完成时重新观察。读取工具报题目区域未定位时，不把作业列表、学生答案或查重窗口当成作业要求。
 
+旧版官网的“已发布作业 ID”与“作业库详情 ID”可能不同。执行器会在点击名称前复用目录解析器核验已发布 ID，再绑定这次真实打开的详情页，不要求两个不同业务标识相等。reason=DETAIL_ENTRY_UNVERIFIED 表示缺少这条入口证据：返回原课程的作业列表，从准确的作业名称重新进入一次。不要点击“重新编辑”，也不要反复 switch_page 到 active_page_id；当前页 ready=true 就直接读取。
+
 禁止调用 open_export_settings、read_course_list、read_homework_list、finish_catalog。不要因为已核验作业而进入原来的附件导出流程。只有页面无法继续或真实目标存在歧义时请求人工处理。

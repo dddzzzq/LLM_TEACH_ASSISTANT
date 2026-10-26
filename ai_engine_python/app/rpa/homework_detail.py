@@ -83,20 +83,25 @@ def resource_url(value):
 class HomeworkDetailReader:
     def __init__(self, task):
         self.task = task
+        self.reason = "DETAIL_PAGE_NOT_FOUND"
 
     async def frame(self):
         task = self.task
         selected = task.state["target"].get("portal") or {}
         if not selected.get("homework_id") or not task.adapter.course_confirmed:
+            self.reason = "COURSE_UNVERIFIED"
             return None
         page = task.page
         if not page or page.is_closed():
+            self.reason = "DETAIL_PAGE_UNAVAILABLE"
             return None
+        self.reason = "DETAIL_PAGE_NOT_FOUND"
         for frame in page.frames:
             if not resource_url(frame.url):
                 continue
             course = query_id(frame.url, ("courseid",))
             if course and course != selected["course_id"].split(":", 1)[0]:
+                self.reason = "COURSE_ID_MISMATCH"
                 continue
             work = query_id(frame.url, ("workid", "homeworkid", "taskid"))
             hidden = await frame.locator(
@@ -106,7 +111,18 @@ class HomeworkDetailReader:
                 "els=>els.map(e=>e.value||e.getAttribute('data-workid')).filter(Boolean)"
             )
             ids = set(hidden + ([work] if work else []))
-            if ids and ids != {selected["homework_id"]}:
+            linked = (
+                getattr(task, "detail_page", None) is page
+                and getattr(task, "detail_page_url", "") == page.url
+            )
+            library_preview = (
+                urlsplit(frame.url).path.rstrip("/").endswith("/work/library/view-work")
+            )
+            # This route identifies the library question, not the published
+            # assignment. Only a verified source click + unchanged destination
+            # can establish that relationship; title alone is insufficient.
+            if ids and ids != {selected["homework_id"]} and not (linked and library_preview):
+                self.reason = "HOMEWORK_ID_MISMATCH"
                 continue
             titles = await frame.locator(
                 "h1,h2,h3,.mark_title,.work-title,.workTitle"
@@ -116,15 +132,18 @@ class HomeworkDetailReader:
             )
             title = task.state["target"]["assignment_name"]
             if title not in titles:
+                self.reason = "DETAIL_TITLE_MISSING"
                 continue
             # A linked title navigation may omit the work ID from its destination.
-            linked = getattr(task, "detail_page", None) is page
             if ids == {selected["homework_id"]} or linked:
+                self.reason = ""
                 return frame
+            self.reason = "DETAIL_ENTRY_UNVERIFIED"
         return None
 
     async def observation(self):
-        return {"ready": bool(await self.frame()), "read_only": True}
+        ready = bool(await self.frame())
+        return {"ready": ready, "read_only": True, "reason": self.reason}
 
     async def fetch(self, url):
         # Validate each redirect before the shared authenticated request context
