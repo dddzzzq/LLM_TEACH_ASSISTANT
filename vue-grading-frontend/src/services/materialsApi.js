@@ -2,11 +2,12 @@
 export function createMaterialsApi(client) {
   const base = '/api/materials';
   return {
-    list({ assignmentId, sourceJobId } = {}) {
+    list({ assignmentId, sourceJobId, classId } = {}) {
       return client.get(base, {
         params: {
           assignment_id: assignmentId || undefined,
           source_job_id: sourceJobId || undefined,
+          ...(classId ? { class_id: classId } : {}),
         },
       });
     },

@@ -150,7 +150,7 @@ const sources = [
   { value: 'directory', label: '指定目录' },
   { value: 'portal', label: '选择官网作业' },
 ];
-const source = ref('portal'),
+const source = ref('upload'),
   courseName = ref(''),
   className = ref('全部班级'),
   taskName = ref(''),

@@ -39,9 +39,12 @@ export default {
     });
   },
 
-  getResultsForAssignment(assignmentId, batchId = '') {
+  getResultsForAssignment(assignmentId, batchId = '', classId = '') {
     return apiClient.get(`/assignments/${assignmentId}/results`, {
-      params: batchId ? { batch_id: batchId } : {},
+      params: {
+        ...(batchId ? { batch_id: batchId } : {}),
+        ...(classId ? { class_id: classId } : {}),
+      },
     });
   },
 
@@ -57,10 +60,13 @@ export default {
     return apiClient.put(`/submissions/${submissionId}`, updateData);
   },
 
-  exportAssignment(assignmentId, batchId = '') {
+  exportAssignment(assignmentId, batchId = '', classId = '') {
     return apiClient.get(`/assignments/${assignmentId}/export`, {
       responseType: 'blob', // 重要：告诉axios期望一个blob
-      params: batchId ? { batch_id: batchId } : {},
+      params: {
+        ...(batchId ? { batch_id: batchId } : {}),
+        ...(classId ? { class_id: classId } : {}),
+      },
     });
   },
 };

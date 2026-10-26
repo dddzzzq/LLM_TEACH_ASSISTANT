@@ -115,6 +115,13 @@ func publishCatalog(tx *gorm.DB, c *models.PortalConnection, catalog Catalog) er
 		}
 		for _, value := range entry.Homeworks {
 			row := models.PortalHomework{ID: stableID(c.ID, "homework", entry.PlatformID+":"+value.PlatformID), ConnectionID: c.ID, CourseID: course.ID, SnapshotID: snapshot.ID, PlatformID: value.PlatformID, Title: value.Title, State: value.State, Deadline: value.Deadline, URL: value.URL}
+			a, err := ensureImportedAssignment(tx, c, course, &row)
+			if err != nil {
+				return err
+			}
+			if err = tx.Model(&a).Update("requirements_status", "PENDING").Error; err != nil {
+				return err
+			}
 			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error; err != nil {
 				return err
 			}
@@ -123,5 +130,5 @@ func publishCatalog(tx *gorm.DB, c *models.PortalConnection, catalog Catalog) er
 	now := time.Now()
 	c.ActiveSnapshotID = snapshot.ID
 	c.LastSyncedAt = &now
-	return tx.Model(c).Updates(map[string]any{"active_snapshot_id": snapshot.ID, "last_synced_at": now}).Error
+	return tx.Model(c).Updates(map[string]any{"active_snapshot_id": snapshot.ID, "last_synced_at": now, "imports_paused": false}).Error
 }

@@ -2,14 +2,17 @@ package models
 
 // Assignment 作业表
 type Assignment struct {
-	OwnerID     uint         `json:"owner_id" gorm:"not null;default:0;index"`
-	ID          uint         `gorm:"primaryKey"`                                           // 主键
-	CourseName  string       `gorm:"size:255;index;not null"`                              // 课程名称
-	ClassName   string       `gorm:"size:255;index;not null"`                              // 班级名称
-	TaskName    string       `gorm:"size:255;index"`                                       // 作业名称
-	Question    string       `gorm:"type:longtext"`                                        // 任务描述 (升级为 longtext)
-	Rubric      string       `gorm:"column:rubric;type:longtext"`                          // 任务评分标准 (升级为 longtext)
-	Submissions []Submission `gorm:"foreignKey:AssignmentID;constraint:OnDelete:CASCADE;"` // 学生提交，外键
+	PortalConnectionID string       `json:"portal_connection_id,omitempty" gorm:"size:36;index"`
+	PortalHomeworkID   string       `json:"portal_homework_id,omitempty" gorm:"size:36;index"`
+	RequirementsStatus string       `json:"requirements_status,omitempty" gorm:"size:32"`
+	OwnerID            uint         `json:"owner_id" gorm:"not null;default:0;index"`
+	ID                 uint         `gorm:"primaryKey"`                                           // 主键
+	CourseName         string       `gorm:"size:255;index;not null"`                              // 课程名称
+	ClassName          string       `gorm:"size:255;index;not null"`                              // 班级名称
+	TaskName           string       `gorm:"size:255;index"`                                       // 作业名称
+	Question           string       `gorm:"type:longtext"`                                        // 任务描述 (升级为 longtext)
+	Rubric             string       `gorm:"column:rubric;type:longtext"`                          // 任务评分标准 (升级为 longtext)
+	Submissions        []Submission `gorm:"foreignKey:AssignmentID;constraint:OnDelete:CASCADE;"` // 学生提交，外键
 }
 
 // Submission 学生提交记录表

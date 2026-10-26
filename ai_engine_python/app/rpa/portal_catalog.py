@@ -33,7 +33,12 @@ COURSE_SELECTOR = (
     "a[href*='courseid=' i],[data-courseid],[data-course-id],[courseid],[cname],.myde_course_item"
 )
 WORK_SELECTOR = HOMEWORK_SELECTOR
-CLASS_SELECTOR = "[data-clazzid],[data-clazz-id],[data-classid],[data-class-id],[clazzid],[classid],select[name=clazzId] option,select[name=classId] option,select#clazzId option"
+CLASS_SELECTOR = (
+    "[data-clazzid],[data-clazz-id],[data-classid],[data-class-id],[clazzid],[classid],"
+    "select[name*='clazz' i] option,select[name*='class' i] option,"
+    "select[id*='clazz' i] option,select[id*='class' i] option,"
+    "li[onclick*='changeClass' i],li[onclick*='changeClazz' i]"
+)
 EXTRACT = r"""els => els.map(e => {
   const row = e.closest('[cname],.myde_course_item') || e.closest('li,tr,article,[data-courseid],[data-workid],[courseid],[workid],.courseItem,.course-item,.workList') || e;
   const a = e.matches('a') ? e : row.querySelector('a[href],a[onclick]');
@@ -56,10 +61,10 @@ EXTRACT = r"""els => els.map(e => {
     source_page:(document.querySelector('[aria-current=page],.pagination .active,.pagination .current')?.textContent||'').trim().slice(0,80),
     course_id:attr(['data-courseid','data-course-id','courseid']),
     work_id:attr(['data-workid','data-work-id','workid']),
-    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:''),
+    class_id:attr(['data-clazzid','data-clazz-id','data-classid','data-class-id','clazzid','classid'])||(e.tagName==='OPTION'?e.value:'')||navigation.match(/(?:changeClazz|changeClass)\(\s*["']?(\d+)/i)?.[1]||'',
     class_name:e.getAttribute('data-clazzname')||e.getAttribute('data-class-name')||row.getAttribute('data-class-name')||'',
     href,
-    title:(row.getAttribute('cname')||e.getAttribute('data-title')||title?.getAttribute('data-title')||title?.innerText||e.getAttribute('title')||a?.getAttribute('title')||e.innerText||'').trim().replace(/\s+/g,' ').slice(0,255),
+    title:((e.tagName==='OPTION'?e.textContent:'')||row.getAttribute('cname')||e.getAttribute('data-title')||title?.getAttribute('data-title')||title?.innerText||e.getAttribute('title')||a?.getAttribute('title')||e.innerText||'').trim().replace(/\s+/g,' ').slice(0,255),
     term:(row.getAttribute('data-term')||row.querySelector('[data-term],.term,.semester')?.textContent||(new Set(terms).size===1?terms[0]: '')||'').trim().slice(0,128),
     state:(row.getAttribute('data-state')||row.querySelector('.status,.state')?.textContent||'').trim().slice(0,64),
     deadline:(row.getAttribute('data-deadline')||row.querySelector('.deadline')?.textContent||'').trim().slice(0,128)
@@ -204,7 +209,11 @@ class PortalCatalog:
             for value in await frame.locator(
                 os.environ.get("PORTAL_CLASS_SELECTOR", CLASS_SELECTOR)
             ).evaluate_all(EXTRACT):
-                if value["class_id"] and value["title"]:
+                if (
+                    value["class_id"] not in ("", "0", "-1", "all")
+                    and value["title"]
+                    and not re.fullmatch(r"(?:全部|所有|请选择)(?:班级)?", value["title"])
+                ):
                     classes[value["class_id"]] = {
                         "platform_id": value["class_id"],
                         "name": value["class_name"] or value["title"],

@@ -33,6 +33,7 @@ type SaveRequest struct {
 	TrustDevice bool   `json:"trust_device"`
 }
 type ConnectionView struct {
+	Import                 ImportSummary            `json:"import"`
 	Connection             *models.PortalConnection `json:"connection"`
 	Status                 string                   `json:"status"`
 	HasPassword            bool                     `json:"has_password"`
@@ -80,6 +81,7 @@ func (s *Service) View(ctx context.Context, owner uint) (ConnectionView, error) 
 		return view, err
 	}
 	view.Connection, view.Status, view.HasPassword = &c, string(c.Status), len(c.CredentialCiphertext) > 0
+	view.Import = s.importSummary(ctx, c)
 	if c.ActiveOperationID != "" {
 		var op models.PortalOperation
 		if s.DB.WithContext(ctx).Where("id = ? AND owner_id = ?", c.ActiveOperationID, owner).First(&op).Error == nil {

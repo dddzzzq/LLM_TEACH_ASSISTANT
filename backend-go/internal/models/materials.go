@@ -4,6 +4,7 @@ import "time"
 
 // MaterialBatch is a durable preparation task. Preparing files never implies grading.
 type MaterialBatch struct {
+	PortalClassID  string     `json:"portal_class_id,omitempty" gorm:"size:36;index"`
 	ID             string     `json:"id" gorm:"size:36;primaryKey"`
 	OwnerID        uint       `json:"-" gorm:"index;not null"`
 	AssignmentID   uint       `json:"assignment_id" gorm:"index"`

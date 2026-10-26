@@ -23,13 +23,15 @@ type AssignmentCreate struct {
 
 // AssignmentResponse 对应返回给前端的作业数据
 type AssignmentResponse struct {
-	Summary    *AssignmentSummary     `json:"summary,omitempty"`
-	ID         uint                   `json:"id"`
-	CourseName string                 `json:"course_name"`
-	ClassName  string                 `json:"class_name"`
-	TaskName   string                 `json:"task_name"`
-	Question   string                 `json:"question"`
-	Rubric     map[string]interface{} `json:"rubric"`
+	PortalHomeworkID   string                 `json:"portal_homework_id,omitempty"`
+	RequirementsStatus string                 `json:"requirements_status,omitempty"`
+	Summary            *AssignmentSummary     `json:"summary,omitempty"`
+	ID                 uint                   `json:"id"`
+	CourseName         string                 `json:"course_name"`
+	ClassName          string                 `json:"class_name"`
+	TaskName           string                 `json:"task_name"`
+	Question           string                 `json:"question"`
+	Rubric             map[string]interface{} `json:"rubric"`
 }
 
 // 更新Submission 对应前端发送的 JSON

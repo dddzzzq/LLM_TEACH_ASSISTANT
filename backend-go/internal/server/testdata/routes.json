@@ -81,6 +81,11 @@
   },
   {
     "Method": "GET",
+    "Path": "/api/portal/assignments/:id",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).AssignmentPortal-fm"
+  },
+  {
+    "Method": "GET",
     "Path": "/api/portal/connection",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Connection-fm"
   },
@@ -281,6 +286,11 @@
   },
   {
     "Method": "POST",
+    "Path": "/api/portal/assignments/:id/grade",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).GradeAssignmentClasses-fm"
+  },
+  {
+    "Method": "POST",
     "Path": "/api/portal/auth-runs/:id/:action",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).AuthAction-fm"
   },
@@ -351,8 +361,18 @@
   },
   {
     "Method": "PUT",
+    "Path": "/api/portal/assignments/:id/rubric",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).AssignmentRubric-fm"
+  },
+  {
+    "Method": "PUT",
     "Path": "/api/portal/connection",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).Save-fm"
+  },
+  {
+    "Method": "PUT",
+    "Path": "/api/portal/imports",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).PauseImports-fm"
   },
   {
     "Method": "PUT",

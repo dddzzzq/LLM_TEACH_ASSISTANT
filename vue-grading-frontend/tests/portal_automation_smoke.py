@@ -107,7 +107,7 @@ async def main():
         await page.route(base+"/portal-smoke",lambda route:route.fulfill(content_type="text/html; charset=utf-8",body=harness))
         await page.route_web_socket("**/api/rpa/jobs/*/stream", socket)
         await page.goto(base+"/portal-smoke")
-        await expect(page.get_by_text("已同步 2 门课程。更新课程只刷新目录。",exact=True)).to_be_visible()
+        await expect(page.get_by_text("已同步 2 门课程。更新课程会直接创建或更新本地作业，并自动读取官网要求。",exact=True)).to_be_visible()
         await page.get_by_label("教师教务账号",exact=True).fill("teacher-test")
         await page.get_by_label("教务密码",exact=True).fill("test-only-password")
         await page.get_by_role("button",name="保存并连接",exact=True).click()
@@ -134,6 +134,7 @@ async def main():
         assert any(path.endswith('/cooldown-test/cancel') for _,path,_,_ in calls)
 
         await page.evaluate("window.fixtureRouter.push('/grade-homework')")
+        await page.get_by_role('radio',name='选择官网作业',exact=True).check()
         picker=page.get_by_role('region',name='官网课程和作业选择')
         await page.get_by_label("课程",exact=True).select_option('c1')
         await page.get_by_label("作业",exact=True).select_option(['h1'])

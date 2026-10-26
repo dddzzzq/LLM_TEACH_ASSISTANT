@@ -133,6 +133,8 @@ func (r *Runner) Tick(ctx context.Context) {
 		}
 	}
 	r.tickWorkflows(ctx)
+	r.reconcileImportedAssignments(ctx)
+	r.tickImportedRequirements(ctx)
 }
 
 // The operation is a business receipt; its browser is an ordinary RPA job.
@@ -237,6 +239,14 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 			}
 		}
 		op.Status, op.Stage, op.Message, op.ErrorCode, op.StateVersion = state.Status, state.Stage, state.Message, state.ErrorCode, state.StateVersion
+		if op.Type == "HOMEWORK_DETAIL" && terminal(state.Status) && state.Status != "SUCCEEDED" {
+			var target detailTarget
+			if json.Unmarshal([]byte(op.PayloadJSON), &target) == nil {
+				if err := tx.Model(&models.Assignment{}).Where("owner_id = ? AND portal_connection_id = ? AND portal_homework_id = ?", op.OwnerID, c.ID, target.HomeworkID).Update("requirements_status", state.Status).Error; err != nil {
+					return err
+				}
+			}
+		}
 		if err := tx.Save(&op).Error; err != nil {
 			return err
 		}

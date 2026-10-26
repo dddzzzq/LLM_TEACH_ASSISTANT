@@ -28,6 +28,7 @@ type PortalConnection struct {
 
 	ProfileGeneration uint64     `json:"-" gorm:"not null;default:1"`
 	ActiveSnapshotID  string     `json:"active_snapshot_id" gorm:"size:36"`
+	ImportsPaused     bool       `json:"imports_paused" gorm:"not null;default:false"`
 	ActiveOperationID string     `json:"-" gorm:"size:36"`
 	LastSyncedAt      *time.Time `json:"last_synced_at"`
 

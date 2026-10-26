@@ -72,6 +72,19 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 	payload := Request{Kind: "homework", ResourceID: fmt.Sprint(batch.AssignmentID), BatchID: batch.ID, FilePath: batch.ManifestPath, SkillName: r.SkillName, SkillVersion: r.SkillVersion}
 	raw, _ := json.Marshal(payload)
 	job := models.AsyncJob{ID: id, OwnerID: actor.UserID, JobType: models.JobTypeHomework, ReferenceID: fmt.Sprint(batch.AssignmentID), MaterialBatchID: batch.ID, Status: models.JobStatusPending, Message: "材料已确认，等待批改队列", PayloadJSON: string(raw), DispatchState: "READY", SkillName: r.SkillName, SkillVersion: r.SkillVersion, QuestionSnapshot: a.Question, RubricSnapshot: a.Rubric}
+	if batch.SourceJobID != "" {
+		var download models.RPAJob
+		if database.DB.WithContext(ctx).First(&download, "id = ? AND user_id = ? AND assignment_id = ?", batch.SourceJobID, actor.UserID, a.ID).Error == nil && download.PortalWorkflowItemID != "" {
+			var item models.PortalWorkflowItem
+			if database.DB.First(&item, "id = ? AND owner_id = ? AND assignment_id = ?", download.PortalWorkflowItemID, actor.UserID, a.ID).Error != nil {
+				return Result{}, fmt.Errorf("官网批改配置快照不可用")
+			}
+			if len(HomeworkMissing(models.Assignment{Question: item.Question, Rubric: item.Rubric})) > 0 {
+				return Result{}, fmt.Errorf("官网批改配置快照不完整")
+			}
+			job.QuestionSnapshot, job.RubricSnapshot = item.Question, item.Rubric
+		}
+	}
 	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked models.MaterialBatch
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", batch.ID).Error; err != nil {

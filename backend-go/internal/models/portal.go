@@ -53,6 +53,7 @@ type PortalCourse struct {
 }
 
 type PortalHomework struct {
+	AssignmentID uint   `json:"assignment_id" gorm:"not null;default:0;index"`
 	ID           string `json:"id" gorm:"type:char(36);primaryKey"`
 	ConnectionID string `json:"-" gorm:"size:36;not null;index"`
 	CourseID     string `json:"course_id" gorm:"size:36;not null;index"`

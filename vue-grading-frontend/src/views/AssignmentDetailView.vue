@@ -20,7 +20,7 @@
           v-if="activeTab === 'content'"
           class="workspace-button primary"
           @click="selectTab('materials')"
-          >导入学生作业 →</button
+          >{{ assignment.portal_homework_id ? '按班级批改 →' : '导入学生作业 →' }}</button
         >
       </header>
       <nav class="detail-tabs" aria-label="作业详情导航">
@@ -36,17 +36,51 @@
       <section v-if="activeTab === 'content'" class="assignment-content-grid">
         <div class="surface content-section"
           ><div class="content-section-heading"><h2>题目要求</h2><span>作业内容</span></div
-          ><p class="full-question">{{ assignment.question || '尚未填写题目要求。' }}</p></div
+          ><p
+            v-if="assignment.portal_homework_id && assignment.requirements_status !== 'READY'"
+            role="status"
+            >官网要求正在同步或尚未完整读取，完成后才能按班级批改。</p
+          ><RequirementContent
+            v-if="assignment.portal_homework_id && assignment.question"
+            class="full-question"
+            :text="assignment.question"
+          /><p v-else class="full-question">{{
+            assignment.question ||
+            (assignment.portal_homework_id ? '等待自动读取官网要求…' : '尚未填写题目要求。')
+          }}</p></div
         >
         <aside class="surface content-section"
           ><div class="content-section-heading"><h2>评分标准</h2></div
           ><RubricSummary :rubric="assignment.rubric" /><p class="grading-scope"
             >批改范围：{{ assignment.class_name || '全部班级' }}</p
+          ><button
+            v-if="assignment.portal_homework_id"
+            class="workspace-button"
+            @click="selectTab('materials')"
+            >编辑评分标准 / 选择班级</button
           ></aside
         >
       </section>
       <section v-show="activeTab === 'materials'" class="p-5 md:p-7 surface">
+        <AssignmentPortalPanel
+          v-if="assignment.portal_homework_id"
+          :key="props.id"
+          :assignment-id="props.id"
+          :rubric="assignment.rubric"
+          @context="updatePortalContext"
+          @rubric="assignment.rubric = $event"
+          @results="showBatchResults('')"
+        />
         <h2 class="mb-4 text-2xl font-bold text-gray-800">导入学生作业</h2>
+        <label v-if="portalClasses.length" class="result-class-filter"
+          >本地材料所属班级 / 筛选材料
+          <select v-model="resultsClass" aria-label="材料班级"
+            ><option value="">全部班级</option
+            ><option v-for="item in portalClasses" :key="item.id" :value="item.id">{{
+              item.name
+            }}</option></select
+          >
+        </label>
         <form @submit.prevent="submitBatchFile">
           <label for="file-upload" class="block text-sm font-medium text-gray-700">
             上传学生作业 ZIP / RAR / 7z 压缩包
@@ -82,6 +116,7 @@
         <MaterialBatchPanel
           v-if="activeTab === 'materials'"
           :assignment-id="props.id"
+          :class-id="resultsClass"
           :refresh-key="materialsVersion"
           @results="showBatchResults"
         />
@@ -109,7 +144,7 @@
             </button>
             <button
               @click="deleteAllResults"
-              v-if="!resultsBatchId"
+              v-if="!resultsBatchId && !resultsClass"
               :disabled="isLoadingResults || results.length === 0"
               class="text-sm font-semibold text-red-600 hover:text-red-800 disabled:text-gray-400 disabled:cursor-not-allowed"
             >
@@ -126,6 +161,15 @@
         </div>
 
         <p v-if="resultsError" class="workspace-error" role="alert">{{ resultsError }}</p>
+        <label v-if="portalClasses.length" class="result-class-filter"
+          >筛选班级
+          <select v-model="resultsClass" aria-label="结果班级" @change="fetchResults">
+            <option value="">全部班级</option
+            ><option v-for="item in portalClasses" :key="item.id" :value="item.id">{{
+              item.name
+            }}</option>
+          </select>
+        </label>
         <div v-if="isLoadingResults" class="py-5 text-center">
           <Loader />
         </div>
@@ -322,6 +366,8 @@ import ReportModal from '../components/ReportModal.vue';
 import ReviewModal from '../components/ReviewModal.vue';
 import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
 import RubricSummary from '../components/RubricSummary.vue';
+import AssignmentPortalPanel from '../components/AssignmentPortalPanel.vue';
+import RequirementContent from '../components/RequirementContent.vue';
 const route = useRoute(),
   router = useRouter();
 const tabs = [
@@ -336,6 +382,15 @@ const selectTab = (tab: string) => router.replace({ query: { ...route.query, tab
 const autoGrade = ref(false);
 const materialsVersion = ref(0);
 const resultsBatchId = ref('');
+const resultsClass = ref('');
+const portalClasses = ref<Array<{ id: string; name: string }>>([]);
+function updatePortalContext(data: any) {
+  portalClasses.value = data.classes || [];
+  if (assignment.value && data.available) {
+    assignment.value.question = data.question || '';
+    assignment.value.requirements_status = data.requirements_status;
+  }
+}
 
 // --- 接口 ---
 interface CodeDocMatchReport {
@@ -373,6 +428,8 @@ interface SubmissionResult {
   human_score?: number;
 }
 interface Assignment {
+  portal_homework_id?: string;
+  requirements_status?: string;
   course_name: string;
   class_name: string;
   task_name: string;
@@ -409,7 +466,11 @@ const exportResults = async () => {
   }
   isExporting.value = true;
   try {
-    const response = await gradingApi.exportAssignment(props.id, resultsBatchId.value);
+    const response = await gradingApi.exportAssignment(
+      props.id,
+      resultsBatchId.value,
+      resultsClass.value
+    );
     const blob = new Blob([response.data], { type: response.headers['content-type'] });
 
     const contentDisposition = response.headers['content-disposition'];
@@ -466,7 +527,11 @@ const fetchResults = async () => {
   isLoadingResults.value = true;
   resultsError.value = '';
   try {
-    const response = await gradingApi.getResultsForAssignment(props.id, resultsBatchId.value);
+    const response = await gradingApi.getResultsForAssignment(
+      props.id,
+      resultsBatchId.value,
+      resultsClass.value
+    );
     // 添加 || []，防止 Go 后端返回 null 导致前端崩溃
     results.value = response.data || [];
   } catch (e) {
@@ -490,6 +555,7 @@ const submitBatchFile = async () => {
   const formData = new FormData();
   formData.append('batch_file', file.value);
   formData.append('auto_grade', String(autoGrade.value));
+  if (resultsClass.value) formData.append('class_id', resultsClass.value);
   try {
     const response = await gradingApi.submitBatch(props.id, formData);
     submissionMessage.value = response.data.message;
@@ -703,6 +769,9 @@ onMounted(fetchAssignmentDetails);
   overflow-wrap: anywhere;
   min-height: 220px;
   color: #4b5670;
+}
+.full-question.requirement-content {
+  white-space: normal;
 }
 .grading-scope {
   margin-top: 20px;

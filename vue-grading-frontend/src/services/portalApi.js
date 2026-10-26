@@ -7,8 +7,18 @@ export function createPortalApi(client) {
     disconnect: () => client.delete(`${base}/connection`),
     reauth: () => client.post(`${base}/connection/reauth`),
     sync: () => client.post(`${base}/catalog-syncs`),
+    pauseImports: (paused) => client.put(`${base}/imports`, { paused }),
     courses: () => client.get(`${base}/courses`),
     homeworks: (courseId) => client.get(`${base}/courses/${id(courseId)}/homeworks`),
+    assignment: (assignmentId) => client.get(`${base}/assignments/${id(assignmentId)}`),
+    saveRubric: (assignmentId, rubric) =>
+      client.put(`${base}/assignments/${id(assignmentId)}/rubric`, { rubric }),
+    gradeClasses: (assignmentId, classIds, key) =>
+      client.post(
+        `${base}/assignments/${id(assignmentId)}/grade`,
+        { class_ids: classIds },
+        { headers: { 'Idempotency-Key': key } }
+      ),
     homeworkDetail: (homeworkId) => client.get(`${base}/homeworks/${id(homeworkId)}/detail`),
     readHomeworkDetail: (homeworkId, snapshotId) =>
       client.post(`${base}/homeworks/${id(homeworkId)}/detail-reads`, { snapshot_id: snapshotId }),

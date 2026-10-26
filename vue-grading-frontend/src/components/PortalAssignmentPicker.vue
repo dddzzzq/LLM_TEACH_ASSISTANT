@@ -34,7 +34,16 @@
           ></select
         ></label
       >
-      <p>默认批改所选作业的全部班级，无需选择班级。</p>
+      <p>官网作业已自动创建。进入作业可按班级批改；此处的批量入口处理全部班级。</p>
+      <p
+        v-for="work in detail.homeworks.filter(
+          (w) => w.assignment_id && homeworkIds.includes(w.id)
+        )"
+        :key="work.id"
+        ><router-link :to="`/assignments/${work.assignment_id}?tab=materials`"
+          >进入“{{ work.title }}”按班级批改 →</router-link
+        ></p
+      >
       <button type="button" :disabled="!homeworkIds.length || disabled" @click="add"
         >加入待批改列表</button
       >

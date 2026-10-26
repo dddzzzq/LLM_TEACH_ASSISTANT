@@ -3,16 +3,19 @@
     <header class="assignment-heading">
       <div
         ><div class="eyebrow">ASSIGNMENTS</div><h1 class="page-title">作业批改</h1
-        ><p class="page-description">查看作业内容，整理学生材料，跟进每一次批改。</p></div
+        ><p class="page-description"
+          >同步官网作业后，进入作业查看要求、调整评分标准，再按班级批改。</p
+        ></div
       >
       <div class="heading-actions"
         ><router-link class="workspace-button" to="/grade-homework"
-          ><AppIcon name="download" />导入与自动批改</router-link
+          ><AppIcon name="download" />导入本地作业</router-link
         ><router-link class="workspace-button primary" to="/assignments/new"
           ><AppIcon name="plus" />新建作业</router-link
         ></div
       >
     </header>
+    <PortalSyncBar @updated="loadAssignments" />
     <div class="workspace-metrics" aria-label="作业概况">
       <div
         ><span>全部作业</span><strong>{{ assignments.length }}</strong></div
@@ -149,7 +152,12 @@
               ><span>材料批次</span></div
             ></div
           ><h3>题目要求</h3
-          ><p class="question-preview">{{ selected.question || '尚未填写题目要求。' }}</p
+          ><p class="question-preview">{{
+            selected.question ||
+            (selected.portal_homework_id
+              ? '作业已创建，正在自动读取官网要求…'
+              : '尚未填写题目要求。')
+          }}</p
           ><h3>评分标准</h3><RubricSummary :rubric="selected.rubric" /><router-link
             class="workspace-button primary preview-open"
             :to="`/assignments/${selected.id}`"
@@ -181,6 +189,7 @@ import gradingApi from '../services/gradingApi';
 import AppIcon from '../components/AppIcon.vue';
 import Loader from '../components/Loader.vue';
 import RubricSummary from '../components/RubricSummary.vue';
+import PortalSyncBar from '../components/PortalSyncBar.vue';
 import {
   assignmentStates,
   assignmentState,

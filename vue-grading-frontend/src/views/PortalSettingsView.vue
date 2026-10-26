@@ -80,7 +80,10 @@
       >
     </section>
     <section class="form-surface"
-      ><h2>课程和作业</h2><p>已同步 {{ courses.length }} 门课程。更新课程只刷新目录。</p
+      ><h2>课程和作业</h2
+      ><p
+        >已同步
+        {{ courses.length }} 门课程。更新课程会直接创建或更新本地作业，并自动读取官网要求。</p
       ><router-link to="/grade-homework">去选择作业并批改 →</router-link
       ><ul
         ><li v-for="course in courses" :key="course.id"

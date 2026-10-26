@@ -33,7 +33,7 @@ func TestIntegrationPreparedBatchGradingIsExplicitIdempotentAndRecoverable(t *te
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old; sql, _ := db.DB(); sql.Close() })
-	if err := db.AutoMigrate(&models.MaterialBatch{}, &models.AsyncJob{}, &models.Assignment{}, &models.RPAJob{}, &models.RPAFile{}); err != nil {
+	if err := db.AutoMigrate(&models.MaterialBatch{}, &models.AsyncJob{}, &models.Assignment{}, &models.RPAJob{}, &models.RPAFile{}, &models.PortalWorkflowItem{}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -56,6 +56,23 @@ func TestIntegrationPreparedBatchGradingIsExplicitIdempotentAndRecoverable(t *te
 	batch, _ = s.Owned(ctx, materials.Actor{UserID: actor.UserID, Role: actor.Role}, batch.ID)
 	if batch.GradingJobID != "" {
 		t.Fatal("preparation submitted grading")
+	}
+	// Class grading keeps the configuration selected at submission time even
+	// when the teacher edits the shared assignment during material preparation.
+	selectedQuestion, selectedRubric := a.Question, a.Rubric
+	item := models.PortalWorkflowItem{ID: uuid.NewString(), WorkflowID: uuid.NewString(), OwnerID: actor.UserID, AssignmentID: a.ID, Question: selectedQuestion, Rubric: selectedRubric}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	download := models.RPAJob{ID: uuid.NewString(), UserID: actor.UserID, AssignmentID: a.ID, PortalWorkflowItemID: item.ID, Status: "SUCCEEDED"}
+	if err := db.Create(&download).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&batch).Update("source_job_id", download.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&a).Updates(map[string]any{"question": "修改后的官网题目", "rubric": `{"新标准":100}`}).Error; err != nil {
+		t.Fatal(err)
 	}
 	oldPublish := PublishMaterialTask
 	defer func() { PublishMaterialTask = oldPublish }()
@@ -80,7 +97,7 @@ func TestIntegrationPreparedBatchGradingIsExplicitIdempotentAndRecoverable(t *te
 	}
 	var job models.AsyncJob
 	db.First(&job, "id = ?", first.JobID)
-	if job.DispatchState != "READY" || job.QuestionSnapshot != a.Question || job.RubricSnapshot != a.Rubric || job.MaterialBatchID != batch.ID {
+	if job.DispatchState != "READY" || job.QuestionSnapshot != selectedQuestion || job.RubricSnapshot != selectedRubric || job.MaterialBatchID != batch.ID {
 		t.Fatal("snapshot or outbox missing")
 	}
 	second, err := SubmitBatch(ctx, actor, Request{BatchID: batch.ID})

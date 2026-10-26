@@ -114,7 +114,7 @@ func portalDB(t *testing.T) (*Service, uint) {
 	}
 	t.Setenv("RPA_CONTROL_URL", worker.URL)
 	t.Setenv("RPA_CONTROL_TOKEN_FILE", tokenFile)
-	if err := db.AutoMigrate(&models.PortalConnection{}, &models.PortalOperation{}, &models.PortalOperationEvent{}, &models.PortalCatalogSnapshot{}, &models.PortalCourse{}, &models.PortalHomework{}, &models.PortalCourseClass{}, &models.PortalAssignmentBinding{}, &models.PortalWorkflow{}, &models.PortalWorkflowItem{}, &models.Assignment{}, &models.RPAJob{}, &models.RPAFile{}, &models.MaterialBatch{}, &models.AsyncJob{}); err != nil {
+	if err := db.AutoMigrate(&models.PortalConnection{}, &models.PortalOperation{}, &models.PortalOperationEvent{}, &models.PortalCatalogSnapshot{}, &models.PortalCourse{}, &models.PortalHomework{}, &models.PortalHomeworkDetail{}, &models.PortalCourseClass{}, &models.PortalAssignmentBinding{}, &models.PortalWorkflow{}, &models.PortalWorkflowItem{}, &models.Assignment{}, &models.RPAJob{}, &models.RPAFile{}, &models.MaterialBatch{}, &models.AsyncJob{}); err != nil {
 		t.Fatal(err)
 	}
 	c := testCipher(t)

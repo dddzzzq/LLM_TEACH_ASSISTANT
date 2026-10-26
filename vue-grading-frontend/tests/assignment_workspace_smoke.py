@@ -79,6 +79,9 @@ async def main():
             (15, "软件工程", "综合实践报告", "提交小组实践总结。", "EMPTY", 0),
         ]
     ]
+    items[0].update(portal_homework_id='h1',requirements_status='READY')
+    class_requests, result_queries = [], []
+    workflow_id = '22222222-2222-4222-8222-222222222222'
     submissions = [
         dict(
             id=1,
@@ -102,6 +105,20 @@ async def main():
                 data = dict(
                     id=7, username="teacher-demo", name="陈老师", role="teacher"
                 )
+            elif path == '/api/portal/connection':
+                data = {'status':'READY','connection':{'active_snapshot_id':'s1'},'import':{'total':5,'ready':5,'pending':0,'reading':0,'attention':0}}
+            elif path == '/api/portal/assignments/11':
+                data = {'linked':True,'available':True,'snapshot_id':'s1','requirements_status':'READY','question':items[0]['question'],'homework':{'id':'h1','assignment_id':11},'classes':[{'id':'class-a','name':'A班'},{'id':'class-b','name':'B班'}]}
+            elif path == '/api/portal/assignments/11/rubric':
+                body = req.post_data_json
+                items[0]['rubric'] = body['rubric']
+                data = {'message':'已保存'}
+            elif path == '/api/portal/assignments/11/grade':
+                class_requests.append(req.post_data_json)
+                assert req.headers.get('idempotency-key')
+                data = {'id':workflow_id}
+            elif path == '/api/grading/workflows/'+workflow_id:
+                data = {'workflow':{'id':workflow_id,'status':'RUNNING'},'items':[{'id':'i1','assignment_id':11,'class_name':'A班','status':'RUNNING','message':'正在处理本班级'}]}
             elif path.endswith("/attention"):
                 data = []
             elif path == "/api/materials":
@@ -134,6 +151,7 @@ async def main():
                 uploads.append(req.post_data_buffer.decode("utf-8", errors="replace"))
                 data = {"message": "材料已受理"}
             elif path.endswith("/results"):
+                result_queries.append(urllib.parse.parse_qs(urllib.parse.urlsplit(req.url).query))
                 data = submissions
             elif re.fullmatch(r"/assignments/\d+", path):
                 data = dict(
@@ -204,6 +222,19 @@ async def main():
             path=str(diagnostics / "assignment-content-desktop.png"), full_page=True
         )
         await page.get_by_role("button", name="材料与批改", exact=True).click()
+        panel = page.get_by_role('region',name='按班级批改官网作业')
+        await expect(panel.get_by_role('checkbox',name='A班',exact=True)).to_be_visible()
+        await panel.get_by_text('编辑评分标准（默认模板可修改）',exact=True).click()
+        await panel.get_by_label('评分项1分值',exact=True).fill('65')
+        await panel.get_by_role('button',name='保存评分标准',exact=True).click()
+        await expect(panel.get_by_text('评分标准已保存，后续批改使用此标准',exact=True)).to_be_visible()
+        assert items[0]['rubric']['功能实现']['score']==65
+        await panel.get_by_role('checkbox',name='A班',exact=True).check()
+        await panel.get_by_role('button',name='按所选班级开始批改',exact=True).click()
+        await expect(panel.get_by_text('正在处理本班级',exact=False)).to_be_visible()
+        assert class_requests == [{'class_ids':['class-a']}] and not mutations
+        await page.get_by_label('材料班级',exact=True).select_option('class-a')
+        await page.screenshot(path=str(diagnostics/'assignment-class-grading-desktop.png'),full_page=True)
         await expect(
             page.get_by_role("checkbox", name="材料整理完成后自动批改")
         ).not_to_be_checked()
@@ -213,8 +244,10 @@ async def main():
         await page.get_by_role("button", name="上传并整理材料", exact=True).click()
         await expect(page.get_by_text("材料已受理", exact=True)).to_be_visible()
         assert 'name="auto_grade"\r\n\r\nfalse' in uploads[-1]
+        assert 'name="class_id"\r\n\r\nclass-a' in uploads[-1]
         await page.get_by_role("button", name="查看本批成绩", exact=True).click()
         await expect(page.get_by_text("20260001 - 张三", exact=True)).to_be_visible()
+        assert result_queries[-1].get('class_id') == ['class-a']
         await expect(
             page.get_by_role("button", name="导出为Excel", exact=True)
         ).to_be_enabled()

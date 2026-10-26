@@ -34,11 +34,10 @@
         </p>
         <details :open="items.length === 1">
           <summary>查看作业要求</summary>
-          <div
+          <RequirementContent
             v-if="records[item.homework_id].detail.processing"
-            class="requirement-content"
-            v-html="renderRequirements(records[item.homework_id].detail.question)"
-          ></div>
+            :text="records[item.homework_id].detail.question"
+          />
           <pre v-else>{{ records[item.homework_id].detail.question || '尚未提取到正文' }}</pre>
           <ul v-if="records[item.homework_id].detail.warnings?.length" class="error">
             <li v-for="warning in records[item.homework_id].detail.warnings" :key="warning">{{
@@ -69,8 +68,7 @@
 </template>
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import RequirementContent from './RequirementContent.vue';
 import authApi from '../services/authApi';
 import { createPortalApi, operationActive, portalStatus } from '../services/portalApi';
 
@@ -112,14 +110,6 @@ function label(record) {
     return `${portalStatus(record.operation.status)} · ${record.operation.message || '正在读取'}`;
   if (record?.error) return '读取未完成';
   return record?.detail ? (record.detail.complete ? '要求已读取' : '要求未完整整理') : '等待读取';
-}
-function renderRequirements(text) {
-  return DOMPurify.sanitize(marked.parse(text || '', { breaks: true }), {
-    // Original media is available through the authenticated download buttons.
-    // Model-generated Markdown must not load external images or embedded pages.
-    FORBID_TAGS: ['img', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'video', 'audio'],
-    FORBID_ATTR: ['style'],
-  });
 }
 function delay() {
   return new Promise((resolve) => {
@@ -267,56 +257,6 @@ pre {
   line-height: 1.7;
   max-height: 480px;
   overflow-y: auto;
-}
-.requirement-content {
-  line-height: 1.8;
-  overflow-wrap: anywhere;
-  max-height: 600px;
-  overflow: auto;
-}
-.requirement-content :deep(pre) {
-  padding: 12px;
-  border-radius: 6px;
-  background: #eef2f7;
-  white-space: pre-wrap;
-  font-family: ui-monospace, monospace;
-}
-.requirement-content :deep(h1),
-.requirement-content :deep(h2),
-.requirement-content :deep(h3),
-.requirement-content :deep(h4) {
-  font-weight: 600;
-  margin: 16px 0 8px;
-}
-.requirement-content :deep(h1) {
-  font-size: 20px;
-}
-.requirement-content :deep(h2) {
-  font-size: 18px;
-}
-.requirement-content :deep(h3) {
-  font-size: 16px;
-}
-.requirement-content :deep(p) {
-  margin: 8px 0;
-}
-.requirement-content :deep(ol),
-.requirement-content :deep(ul) {
-  padding-left: 24px;
-}
-.requirement-content :deep(ol) {
-  list-style: decimal;
-}
-.requirement-content :deep(ul) {
-  list-style: disc;
-}
-.requirement-content :deep(table) {
-  border-collapse: collapse;
-}
-.requirement-content :deep(td),
-.requirement-content :deep(th) {
-  border: 1px solid #cbd5e1;
-  padding: 6px 10px;
 }
 summary {
   cursor: pointer;

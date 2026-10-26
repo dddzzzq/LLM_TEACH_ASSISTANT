@@ -81,6 +81,12 @@ func (r *Runner) CancelDetailRead(ctx context.Context, owner uint, id string) er
 			return err
 		}
 		cancelled = true
+		var target detailTarget
+		if json.Unmarshal([]byte(op.PayloadJSON), &target) == nil {
+			if err := tx.Model(&models.Assignment{}).Where("owner_id = ? AND portal_connection_id = ? AND portal_homework_id = ?", owner, c.ID, target.HomeworkID).Update("requirements_status", "CANCELLED").Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -147,6 +153,9 @@ func (s *Service) QueueHomeworkDetail(ctx context.Context, owner uint, homeworkI
 		op.PayloadJSON = string(payload)
 		op.Message = "等待读取官网作业要求"
 		if err = tx.Create(&op).Error; err != nil {
+			return err
+		}
+		if err = tx.Model(&models.Assignment{}).Where("id = ? AND owner_id = ?", work.AssignmentID, owner).Update("requirements_status", "READING").Error; err != nil {
 			return err
 		}
 		if err = tx.Model(&c).Update("active_operation_id", op.ID).Error; err != nil {
@@ -372,6 +381,13 @@ func publishDetail(tx *gorm.DB, c *models.PortalConnection, op *models.PortalOpe
 	}
 	raw, err := json.Marshal(detail)
 	if err != nil {
+		return err
+	}
+	updates := map[string]any{"requirements_status": "REVIEW_REQUIRED"}
+	if detail.Complete {
+		updates["requirements_status"], updates["question"] = "READY", detail.Question
+	}
+	if err := tx.Model(&models.Assignment{}).Where("id = ? AND owner_id = ? AND portal_homework_id = ?", work.AssignmentID, c.OwnerID, work.ID).Updates(updates).Error; err != nil {
 		return err
 	}
 	row := models.PortalHomeworkDetail{HomeworkID: work.ID, OwnerID: c.OwnerID, ConnectionID: c.ID, ProfileGeneration: c.ProfileGeneration, SnapshotID: selected.SnapshotID, OperationID: op.ID, Question: detail.Question, Complete: detail.Complete, ContentJSON: string(raw)}

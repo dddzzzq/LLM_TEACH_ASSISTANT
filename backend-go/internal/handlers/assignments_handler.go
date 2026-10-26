@@ -115,6 +115,7 @@ func GetAssignments(c *gin.Context) {
 			summary = &value
 		}
 		res = append(res, schemas.AssignmentResponse{
+			PortalHomeworkID: ass.PortalHomeworkID, RequirementsStatus: ass.RequirementsStatus,
 			Summary:    summary,
 			ID:         ass.ID,
 			CourseName: ass.CourseName,
@@ -145,7 +146,10 @@ func GetAssignment(c *gin.Context) {
 	username, usernameErr := middleware.GetUsernameFromContext(c)
 
 	// 1. 【动静分离 - 静态部分】：从 Redis 缓存中获取作业基础信息（带防穿透、防击穿保护）
-	assignmentBase, err := cache.GetAssignmentWithCache(c.Request.Context(), uint(assignmentID))
+	// Portal requirements are completed in the background; read the current
+	// assignment so an earlier empty cache cannot hide newly synchronized text.
+	assignmentBase := &models.Assignment{}
+	err = database.DB.WithContext(c.Request.Context()).First(assignmentBase, uint(assignmentID)).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			log.Printf("获取单个作业未找到：%v", err)
@@ -223,6 +227,7 @@ func GetAssignment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"portal_homework_id": assignmentBase.PortalHomeworkID, "requirements_status": assignmentBase.RequirementsStatus,
 		"id":          assignmentBase.ID,
 		"course_name": assignmentBase.CourseName,
 		"class_name":  assignmentBase.ClassName,
@@ -244,6 +249,9 @@ func GetAssignmentSubmissions(c *gin.Context) {
 	query := database.DB.Where("assignment_id = ?", assignmentID)
 	if batch := c.Query("batch_id"); batch != "" {
 		query = query.Where("material_batch_id = ?", batch)
+	}
+	if class := c.Query("class_id"); class != "" {
+		query = query.Where("material_batch_id IN (?)", database.DB.Model(&models.MaterialBatch{}).Select("id").Where("assignment_id = ? AND portal_class_id = ?", assignmentID, class))
 	}
 
 	// 如果是学生，只能查看自己的提交
@@ -341,7 +349,7 @@ func UploadAssignment(c *gin.Context) {
 	if autoGrade && !checkGradingTarget(c, actor, "homework", assignmentID) {
 		return
 	}
-	batch, err := materials.Default().Create(c.Request.Context(), materials.Actor{UserID: actor.UserID, Role: actor.Role}, materials.Request{SourcePath: path, AssignmentID: id, AutoGrade: autoGrade}, c.GetHeader("Idempotency-Key"))
+	batch, err := materials.Default().Create(c.Request.Context(), materials.Actor{UserID: actor.UserID, Role: actor.Role}, materials.Request{ClassID: c.PostForm("class_id"), SourcePath: path, AssignmentID: id, AutoGrade: autoGrade}, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		c.JSON(400, gin.H{"detail": err.Error()})
 		return
@@ -375,6 +383,13 @@ func ExportAssignmentExcel(c *gin.Context) {
 	preload := database.DB.Preload("Submissions")
 	if batch := c.Query("batch_id"); batch != "" {
 		preload = database.DB.Preload("Submissions", "material_batch_id = ?", batch)
+	}
+	if class := c.Query("class_id"); class != "" {
+		query := database.DB.Where("material_batch_id IN (?)", database.DB.Model(&models.MaterialBatch{}).Select("id").Where("assignment_id = ? AND portal_class_id = ?", id, class))
+		if batch := c.Query("batch_id"); batch != "" {
+			query = query.Where("material_batch_id = ?", batch)
+		}
+		preload = database.DB.Preload("Submissions", query)
 	}
 	if err := preload.First(&assignment, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到该作业"})

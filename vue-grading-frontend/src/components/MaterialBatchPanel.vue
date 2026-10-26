@@ -148,6 +148,7 @@ import { createMaterialsApi } from '../services/materialsApi.js';
 import AppModal from './AppModal.vue';
 const props = defineProps({
   assignmentId: { type: [String, Number], default: '' },
+  classId: { type: String, default: '' },
   sourceJobId: { type: String, default: '' },
   refreshKey: { type: Number, default: 0 },
 });
@@ -190,6 +191,7 @@ async function load() {
     const { data } = await materialsApi.list({
       assignmentId: props.assignmentId,
       sourceJobId: props.sourceJobId,
+      classId: props.classId,
     });
     if (disposed) return;
     batches.value = data.items || [];
@@ -206,6 +208,7 @@ async function prepareDirectory() {
   error.value = '';
   const body = {
     assignment_id: Number(props.assignmentId),
+    ...(props.classId ? { class_id: props.classId } : {}),
     source_path: sourcePath.value.trim(),
     output_root: outputRoot.value.trim(),
     auto_grade: autoGrade.value,
@@ -275,7 +278,7 @@ async function cancel(batch) {
   }
 }
 watch(
-  () => [props.assignmentId, props.sourceJobId, props.refreshKey],
+  () => [props.assignmentId, props.sourceJobId, props.refreshKey, props.classId],
   () => {
     load();
   }

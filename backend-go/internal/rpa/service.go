@@ -356,6 +356,12 @@ func allClassExport(job models.RPAJob) bool {
 
 func importFiles(job models.RPAJob) error {
 	var state struct {
+		Scope struct {
+			Mode    string `json:"mode"`
+			Classes []struct {
+				PlatformID string `json:"platform_id"`
+			} `json:"classes"`
+		} `json:"class_scope"`
 		Files []struct {
 			Status, Path, SHA256 string
 			Size                 int64
@@ -365,6 +371,13 @@ func importFiles(job models.RPAJob) error {
 	}
 	if err := json.Unmarshal([]byte(job.StateJSON), &state); err != nil {
 		return err
+	}
+	var selected PortalTarget
+	if job.PortalTargetJSON != "" {
+		_ = json.Unmarshal([]byte(job.PortalTargetJSON), &selected)
+	}
+	if selected.ClassID != "" && (state.Scope.Mode != "selected" || len(state.Scope.Classes) != 1 || state.Scope.Classes[0].PlatformID != selected.ClassID) {
+		return fmt.Errorf("导出班级范围与选定班级不一致")
 	}
 	for _, f := range state.Files {
 		if f.Status != "VERIFIED" {
@@ -387,6 +400,9 @@ func importFiles(job models.RPAJob) error {
 		}
 		if portalAllClasses(job) || (className == "" && allClassExport(job)) {
 			className = "全部班级"
+		}
+		if selected.ClassID != "" {
+			className = selected.ClassName
 		}
 		file := models.RPAFile{ID: hex.EncodeToString(id[:]), JobID: job.ID, ExportRef: f.ExportRef, ClassName: className,
 			Path: f.Path, SHA256: f.SHA256, Size: f.Size, GradingStatus: "DOWNLOADED", Message: "附件已下载，尚未提交批改"}
@@ -425,7 +441,15 @@ func dispatchFile(file models.RPAFile) error {
 			if err != nil {
 				return err
 			}
-			if assignment.ClassName != file.ClassName {
+			var target PortalTarget
+			grouped := assignment.PortalHomeworkID != "" && assignment.PortalConnectionID == job.PortalConnectionID && json.Unmarshal([]byte(job.PortalTargetJSON), &target) == nil && target.CourseID != "" && target.HomeworkID != ""
+			if grouped && target.ClassID != "" && strings.TrimPrefix(file.ClassName, "班级") == strings.TrimPrefix(target.ClassName, "班级") {
+				file.ClassName = target.ClassName
+			}
+			if grouped && target.ClassID != "" && target.ClassName != file.ClassName {
+				return fmt.Errorf("下载班级与所选官网班级不一致")
+			}
+			if !grouped && assignment.ClassName != file.ClassName {
 				return fmt.Errorf("下载班级与选定班级不一致")
 			}
 		} else {

@@ -34,6 +34,7 @@ func (a Actor) Check() error {
 }
 
 type Request struct {
+	ClassID        string `json:"class_id,omitempty"`
 	SourcePath     string `json:"source_path,omitempty"`
 	SourceJobID    string `json:"source_job_id,omitempty"`
 	SourceFileID   string `json:"source_file_id,omitempty"`
@@ -97,6 +98,7 @@ func (s *Service) Owned(ctx context.Context, actor Actor, id string) (models.Mat
 func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string) (models.MaterialBatch, error) {
 	var batch models.MaterialBatch
 	expectedSHA := ""
+	portalClassID := ""
 	if err := actor.Check(); err != nil {
 		return batch, err
 	}
@@ -120,6 +122,16 @@ func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string
 			return batch, fmt.Errorf("请指定一个已下载附件的 source_file_id；先查询下载任务文件清单")
 		}
 		f := files[0]
+		if job.PortalWorkflowItemID != "" {
+			var item models.PortalWorkflowItem
+			if s.DB.WithContext(ctx).First(&item, "id = ? AND owner_id = ? AND assignment_id = ?", job.PortalWorkflowItemID, actor.UserID, job.AssignmentID).Error != nil {
+				return batch, fmt.Errorf("下载班级的任务归属无法核验")
+			}
+			portalClassID = item.ClassID
+		}
+		if job.AssignmentID != 0 && r.AssignmentID != 0 && job.AssignmentID != r.AssignmentID {
+			return batch, fmt.Errorf("下载附件不能关联到其他作业")
+		}
 		expectedSHA = f.SHA256
 		if job.Status == "CANCELLED" {
 			return batch, fmt.Errorf("下载任务已取消，请从保存的本地目录创建独立材料批次")
@@ -137,10 +149,27 @@ func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string
 		if err := s.DB.WithContext(ctx).Where("owner_id = ?", actor.UserID).First(&a, r.AssignmentID).Error; err != nil {
 			return batch, fmt.Errorf("作业不存在")
 		}
-		if r.SourceJobID != "" && (r.CourseName != a.CourseName || r.AssignmentName != a.TaskName || r.ClassName != a.ClassName) {
+		grouped := a.PortalHomeworkID != "" && a.ClassName == "全部班级"
+		if r.ClassID != "" {
+			if !grouped {
+				return batch, fmt.Errorf("该作业不支持官网班级选择")
+			}
+			if r.SourceJobID != "" && r.ClassID != portalClassID {
+				return batch, fmt.Errorf("所选班级与下载任务不一致")
+			}
+			var class models.PortalCourseClass
+			if s.DB.WithContext(ctx).Joins("JOIN portal_homeworks ON portal_homeworks.course_id = portal_course_classes.course_id AND portal_homeworks.snapshot_id = portal_course_classes.snapshot_id").Where("portal_course_classes.id = ? AND portal_homeworks.id = ? AND portal_homeworks.connection_id = ?", r.ClassID, a.PortalHomeworkID, a.PortalConnectionID).First(&class).Error != nil {
+				return batch, fmt.Errorf("所选班级不属于该官网作业")
+			}
+			portalClassID, r.ClassName = class.ID, class.Name
+		}
+		if r.SourceJobID != "" && (r.CourseName != a.CourseName || r.AssignmentName != a.TaskName || (!grouped && r.ClassName != a.ClassName)) {
 			return batch, fmt.Errorf("下载附件与指定作业的课程、作业或班级不一致")
 		}
-		r.CourseName, r.AssignmentName, r.ClassName = a.CourseName, a.TaskName, a.ClassName
+		r.CourseName, r.AssignmentName = a.CourseName, a.TaskName
+		if !grouped || r.ClassName == "" {
+			r.ClassName = a.ClassName
+		}
 	}
 	if r.AssignmentID == 0 && r.ClassName != "" {
 		var matches []models.Assignment
@@ -186,7 +215,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, r Request, key string
 	if key != "" {
 		id = uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("materials:%d:%s", actor.UserID, key))).String()
 	}
-	batch = models.MaterialBatch{ID: id, OwnerID: actor.UserID, AssignmentID: r.AssignmentID, CourseName: r.CourseName, AssignmentName: r.AssignmentName, ClassName: r.ClassName, SourcePath: source, SourceJobID: r.SourceJobID, SourceFileID: r.SourceFileID, OutputDir: filepath.Join(root, component(r.CourseName), component(r.AssignmentName), component(r.ClassName), id), Status: "PENDING", Message: "材料整理已排队，尚未启动批改", AutoGrade: r.AutoGrade, GradingState: "NOT_REQUESTED", RequestHash: hex.EncodeToString(hash[:])}
+	batch = models.MaterialBatch{PortalClassID: portalClassID, ID: id, OwnerID: actor.UserID, AssignmentID: r.AssignmentID, CourseName: r.CourseName, AssignmentName: r.AssignmentName, ClassName: r.ClassName, SourcePath: source, SourceJobID: r.SourceJobID, SourceFileID: r.SourceFileID, OutputDir: filepath.Join(root, component(r.CourseName), component(r.AssignmentName), component(r.ClassName), id), Status: "PENDING", Message: "材料整理已排队，尚未启动批改", AutoGrade: r.AutoGrade, GradingState: "NOT_REQUESTED", RequestHash: hex.EncodeToString(hash[:])}
 	if beneath(source, batch.OutputDir) && info.IsDir() {
 		return batch, fmt.Errorf("输出位置不能位于被扫描目录内，请选择其他保存根目录")
 	}

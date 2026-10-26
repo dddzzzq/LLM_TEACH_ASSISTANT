@@ -25,8 +25,12 @@ func (h *PortalHandler) Register(g *gin.RouterGroup) {
 	g.DELETE("/connection", h.Disconnect)
 	g.POST("/connection/reauth", h.Reauth)
 	g.POST("/catalog-syncs", h.Sync)
+	g.PUT("/imports", h.PauseImports)
 	g.GET("/courses", h.Courses)
 	g.GET("/courses/:id/homeworks", h.Homeworks)
+	g.GET("/assignments/:id", h.AssignmentPortal)
+	g.PUT("/assignments/:id/rubric", h.AssignmentRubric)
+	g.POST("/assignments/:id/grade", h.GradeAssignmentClasses)
 	g.GET("/homeworks/:id/detail", h.HomeworkDetail)
 	g.POST("/homeworks/:id/detail-reads", h.ReadHomeworkDetail)
 	g.GET("/homeworks/:id/detail/sources/:source", h.HomeworkDetailFile)
@@ -39,6 +43,61 @@ func (h *PortalHandler) Register(g *gin.RouterGroup) {
 	g.PUT("/legacy-assignments/:id", h.ClaimAssignment)
 }
 func portalOwner(c *gin.Context) uint { owner, _ := middleware.GetUserIDFromContext(c); return owner }
+func portalAssignmentID(c *gin.Context) (uint, bool) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		c.JSON(400, gin.H{"detail": "作业ID无效"})
+		return 0, false
+	}
+	return uint(id), true
+}
+func (h *PortalHandler) AssignmentPortal(c *gin.Context) {
+	id, ok := portalAssignmentID(c)
+	if !ok {
+		return
+	}
+	data, err := h.Runner.Service.AssignmentPortal(c.Request.Context(), portalOwner(c), id)
+	if err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, data)
+}
+func (h *PortalHandler) AssignmentRubric(c *gin.Context) {
+	id, ok := portalAssignmentID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Rubric json.RawMessage `json:"rubric"`
+	}
+	if !portalBody(c, &req) {
+		return
+	}
+	if err := h.Runner.Service.SaveAssignmentRubric(c.Request.Context(), portalOwner(c), id, req.Rubric); err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"message": "评分标准已保存，后续班级批改使用此标准"})
+}
+func (h *PortalHandler) GradeAssignmentClasses(c *gin.Context) {
+	id, ok := portalAssignmentID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		ClassIDs []string `json:"class_ids"`
+	}
+	if !portalBody(c, &req) {
+		return
+	}
+	flow, err := h.Runner.Service.GradeAssignmentClasses(c.Request.Context(), portalOwner(c), id, req.ClassIDs, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(202, flow)
+}
 func portalError(c *gin.Context, err error) {
 	status := 400
 	message := err.Error()
@@ -112,6 +171,19 @@ func (h *PortalHandler) queue(c *gin.Context, kind string) {
 }
 func (h *PortalHandler) Reauth(c *gin.Context) { h.queue(c, "AUTH_BOOTSTRAP") }
 func (h *PortalHandler) Sync(c *gin.Context)   { h.queue(c, "CATALOG_SYNC") }
+func (h *PortalHandler) PauseImports(c *gin.Context) {
+	var req struct {
+		Paused bool `json:"paused"`
+	}
+	if !portalBody(c, &req) {
+		return
+	}
+	if err := h.Runner.Service.PauseImports(c.Request.Context(), portalOwner(c), req.Paused); err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"paused": req.Paused})
+}
 func (h *PortalHandler) Courses(c *gin.Context) {
 	rows, err := h.Runner.Service.Courses(c.Request.Context(), portalOwner(c))
 	if err != nil {

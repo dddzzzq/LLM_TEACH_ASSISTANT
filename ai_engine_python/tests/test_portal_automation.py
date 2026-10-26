@@ -42,6 +42,27 @@ async def wait_until(predicate, timeout=10):
 
 
 class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_reads_native_and_scripted_classes_without_all_option(self):
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.route(
+                "**/*",
+                lambda route: route.fulfill(
+                    content_type="text/html; charset=utf-8",
+                    body="""<select id="clazzid"><option value="0">全部班级</option><option value="22">A班</option><option value="23">A班</option></select><ul><li onclick="changeClass('24')">B班</li></ul>""",
+                ),
+            )
+            await page.goto("https://learning.xidian.edu.cn/work?courseid=11")
+            result = await PortalCatalog(context, lambda **kw: None).classes(page, {})
+            self.assertEqual(
+                {r["platform_id"]: r["name"] for r in result},
+                {"22": "A班", "23": "A班", "24": "B班"},
+            )
+        finally:
+            await browser.close()
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
