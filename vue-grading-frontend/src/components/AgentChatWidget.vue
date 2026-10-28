@@ -81,6 +81,7 @@
       ref="messagesContainer"
       class="messages-container p-4 bg-gray-50 h-96 overflow-y-auto"
       :class="{ 'messages-idle': !hasUserMessages }"
+      @scroll="observeMessageScroll"
     >
       <!-- 认证提示 -->
       <div v-if="!isAuthenticated" class="auth-prompt text-center py-8">
@@ -268,20 +269,37 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import authApi from '../services/authApi';
 import { taskResultLink } from '../services/taskResultLink';
+import {
+  assistantSessionKey,
+  readAssistantSession,
+  rememberAssistantSession,
+  forgetAssistantSession,
+} from '../services/floatingAssistant';
 import AppIcon from './AppIcon.vue';
 import ExecutionHistory from './ExecutionHistory.vue';
 const emit = defineEmits(['fetch-task']);
+const sessionUser = authApi.getCurrentUser();
+const sessionOwner = assistantSessionKey(sessionUser);
+let disposed = false;
+const isCurrentAccount = () =>
+  !disposed &&
+  authApi.isAuthenticated() &&
+  assistantSessionKey(authApi.getCurrentUser()) === sessionOwner;
+onBeforeUnmount(() => {
+  disposed = true;
+});
 
 // 消息数据
 const messages = ref([]);
 const inputMessage = ref('');
 const loading = ref(false);
 const messagesContainer = ref(null);
+const followMessages = ref(true);
 const currentSessionId = ref('');
 const sessions = ref([]);
 const showSessionDropdown = ref(false);
@@ -353,15 +371,15 @@ const welcomeText = computed(
 );
 
 // 初始化
-onMounted(() => {
+onMounted(async () => {
   if (isAuthenticated.value) {
     // 检查是否有保存的会话ID
-    const savedSessionId = localStorage.getItem('current_session_id');
+    const savedSessionId = readAssistantSession(localStorage, sessionUser);
     if (savedSessionId) {
-      currentSessionId.value = savedSessionId;
-      loadSessionHistory(savedSessionId);
+      const restored = await loadSessionHistory(savedSessionId);
+      if (restored === false && isCurrentAccount()) await createNewSession();
     } else {
-      createNewSession();
+      await createNewSession();
     }
   }
 });
@@ -447,10 +465,11 @@ const createNewSession = async () => {
     const response = await client.post('/api/sessions', {
       title: `会话 ${new Date().toLocaleDateString('zh-CN')}`,
     });
+    if (!isCurrentAccount()) return;
 
     if (response.data && response.data.id) {
       currentSessionId.value = response.data.id;
-      localStorage.setItem('current_session_id', response.data.id);
+      rememberAssistantSession(localStorage, sessionUser, response.data.id);
       messages.value = [];
 
       // 添加欢迎消息
@@ -463,11 +482,13 @@ const createNewSession = async () => {
       throw new Error('创建会话失败，未返回会话ID');
     }
   } catch (error) {
+    if (!isCurrentAccount()) return;
     console.error('创建会话失败:', error);
     // 显示错误提示
     alert('创建会话失败，请检查网络连接或稍后重试。');
     // 清除本地存储的会话ID
-    localStorage.removeItem('current_session_id');
+    if (currentSessionId.value)
+      forgetAssistantSession(localStorage, sessionUser, currentSessionId.value);
     currentSessionId.value = '';
     messages.value = [];
 
@@ -490,6 +511,7 @@ const loadSessions = async () => {
     // 【修改点 2】：使用普通的 client，手动添加 /api 前缀
     const client = authApi.getClient();
     const response = await client.get('/api/sessions');
+    if (!isCurrentAccount()) return;
 
     if (response.data) {
       sessions.value = response.data;
@@ -501,6 +523,7 @@ const loadSessions = async () => {
       throw new Error('未获取到会话数据');
     }
   } catch (error) {
+    if (!isCurrentAccount()) return;
     console.error('加载会话失败:', error);
     showSessionDropdown.value = false;
     alert('加载历史会话失败，请检查网络连接或重新登录');
@@ -511,8 +534,6 @@ const loadSessions = async () => {
 
 // 选择会话
 const selectSession = async (session) => {
-  currentSessionId.value = session.id;
-  localStorage.setItem('current_session_id', session.id);
   showSessionDropdown.value = false;
 
   // 加载会话历史
@@ -521,11 +542,15 @@ const selectSession = async (session) => {
 
 // 加载会话历史
 const loadSessionHistory = async (sessionId) => {
+  followMessages.value = true;
   try {
     loading.value = true;
     // 【修改点 3】：使用普通的 client，手动添加 /api 前缀
     const client = authApi.getClient();
     const response = await client.get(`/api/sessions/${sessionId}/history`);
+    if (!isCurrentAccount()) return null;
+    currentSessionId.value = sessionId;
+    rememberAssistantSession(localStorage, sessionUser, sessionId);
 
     if (response.data && response.data.messages) {
       messages.value = response.data.messages.map((msg) => ({
@@ -543,15 +568,24 @@ const loadSessionHistory = async (sessionId) => {
         },
       ];
     }
+    return true;
   } catch (error) {
+    if (!isCurrentAccount()) return null;
     console.error('加载会话历史失败:', error);
+    if ([403, 404].includes(error.response?.status)) {
+      forgetAssistantSession(localStorage, sessionUser, sessionId);
+      currentSessionId.value = '';
+      messages.value = [];
+      return false;
+    }
     messages.value = [
       {
         role: 'assistant',
-        content: `欢迎回来！开始新的对话。`,
+        content: '暂时无法读取历史会话，请稍后从“历史会话”重试，或新建会话。',
         timestamp: new Date(),
       },
     ];
+    return null;
   } finally {
     loading.value = false;
     scrollToBottom();
@@ -562,6 +596,7 @@ const loadSessionHistory = async (sessionId) => {
 const sendMessage = async () => {
   const message = inputMessage.value.trim();
   if (!message || loading.value) return;
+  followMessages.value = true;
 
   // 检查是否已认证
   if (!isAuthenticated.value) {
@@ -573,6 +608,7 @@ const sendMessage = async () => {
   if (!currentSessionId.value) {
     await createNewSession();
   }
+  if (!currentSessionId.value || !isCurrentAccount()) return;
 
   // 添加用户消息
   messages.value.push({
@@ -608,6 +644,7 @@ const sendMessage = async () => {
       }
     );
 
+    if (!isCurrentAccount()) return;
     const data = response.data;
     if (data.job_id && (!data.job_type || data.job_type === 'rpa_fetch_homework'))
       emit('fetch-task', data.job_id);
@@ -622,6 +659,7 @@ const sendMessage = async () => {
       timestamp: new Date(),
     });
   } catch (error) {
+    if (!isCurrentAccount()) return;
     console.error('发送消息失败:', error);
 
     // 检查是否为认证错误
@@ -694,9 +732,14 @@ const useQuickCommand = (commandType) => {
 };
 
 // 滚动到底部
+function observeMessageScroll() {
+  const element = messagesContainer.value;
+  if (element?.clientHeight)
+    followMessages.value = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+}
 const scrollToBottom = () => {
   nextTick(() => {
-    if (messagesContainer.value) {
+    if (messagesContainer.value && followMessages.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
     }
   });
@@ -715,9 +758,8 @@ watch(
 watch(isAuthenticated, (newVal) => {
   if (newVal) {
     // 重新加载会话
-    const savedSessionId = localStorage.getItem('current_session_id');
+    const savedSessionId = readAssistantSession(localStorage, sessionUser);
     if (savedSessionId) {
-      currentSessionId.value = savedSessionId;
       loadSessionHistory(savedSessionId);
     } else {
       createNewSession();
@@ -726,7 +768,8 @@ watch(isAuthenticated, (newVal) => {
     // 清除会话数据
     messages.value = [];
     currentSessionId.value = '';
-    localStorage.removeItem('current_session_id');
+    inputMessage.value = '';
+    sessions.value = [];
   }
 });
 </script>

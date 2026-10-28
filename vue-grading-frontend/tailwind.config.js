@@ -1,40 +1,53 @@
 /** @type {import('tailwindcss').Config} */
+const scale = (prefix) =>
+  Object.fromEntries(
+    [50, 100, 200, 300, 400, 500, 600, 700, 800, 900].map((n) => [
+      n,
+      `rgb(var(--color-${prefix}-${n}-rgb) / <alpha-value>)`,
+    ])
+  );
 export default {
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        gray: {
-          50: '#f7f9fb',
-          100: '#eff3f7',
-          200: '#e0e7ee',
-          300: '#c8d3de',
-          400: '#8b9bac',
-          500: '#66788a',
-          600: '#4c6072',
-          700: '#344b5f',
-          800: '#20384c',
-          900: '#142d40',
+        white: 'rgb(var(--color-white-rgb) / <alpha-value>)',
+        black: 'rgb(var(--color-ink-rgb) / <alpha-value>)',
+        gray: scale('gray'),
+        slate: scale('gray'),
+        indigo: scale('accent'),
+        blue: scale('accent'),
+        green: {
+          50: 'rgb(var(--color-success-soft-rgb) / <alpha-value>)',
+          100: 'rgb(var(--color-success-soft-rgb) / <alpha-value>)',
+          500: 'rgb(var(--color-success-rgb) / <alpha-value>)',
+          600: 'rgb(var(--color-success-rgb) / <alpha-value>)',
+          700: 'rgb(var(--color-success-rgb) / <alpha-value>)',
+          800: 'rgb(var(--color-success-rgb) / <alpha-value>)',
         },
-        indigo: {
-          50: '#edf7f5',
-          100: '#d9eeea',
-          200: '#b4ddd5',
-          300: '#83c4b9',
-          400: '#4ba799',
-          500: '#278e82',
-          600: '#197b70',
-          700: '#14655d',
-          800: '#135149',
-          900: '#133f3a',
+        red: {
+          50: 'rgb(var(--color-danger-soft-rgb) / <alpha-value>)',
+          100: 'rgb(var(--color-danger-soft-rgb) / <alpha-value>)',
+          500: 'rgb(var(--color-danger-rgb) / <alpha-value>)',
+          600: 'rgb(var(--color-danger-rgb) / <alpha-value>)',
+          700: 'rgb(var(--color-danger-rgb) / <alpha-value>)',
+          800: 'rgb(var(--color-danger-rgb) / <alpha-value>)',
+        },
+        yellow: {
+          50: 'rgb(var(--color-warning-soft-rgb) / <alpha-value>)',
+          100: 'rgb(var(--color-warning-soft-rgb) / <alpha-value>)',
+          500: 'rgb(var(--color-warning-rgb) / <alpha-value>)',
+          600: 'rgb(var(--color-warning-rgb) / <alpha-value>)',
+          700: 'rgb(var(--color-warning-rgb) / <alpha-value>)',
+          800: 'rgb(var(--color-warning-rgb) / <alpha-value>)',
         },
       },
       boxShadow: {
-        sm: '0 1px 2px rgb(20 45 64 / 0.03)',
-        DEFAULT: '0 2px 8px rgb(20 45 64 / 0.04)',
-        md: '0 3px 14px rgb(20 45 64 / 0.045)',
-        lg: '0 6px 20px rgb(20 45 64 / 0.055)',
-        xl: '0 8px 28px rgb(20 45 64 / 0.06)',
+        sm: 'var(--shadow-subtle)',
+        DEFAULT: 'var(--shadow-subtle)',
+        md: 'var(--shadow-subtle)',
+        lg: 'var(--shadow-panel)',
+        xl: 'var(--shadow-panel)',
       },
       borderRadius: { lg: '0.75rem', xl: '1rem', '2xl': '1.25rem' },
     },

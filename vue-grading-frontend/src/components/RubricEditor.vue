@@ -129,9 +129,10 @@ function toggle() {
 </script>
 <style scoped>
 .rubric-editor {
-  border: 1px solid #dce5e9;
-  border-radius: 10px;
-  padding: 16px;
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0;
+  padding: 20px 0 0;
   display: grid;
   gap: 12px;
 }
@@ -140,7 +141,7 @@ legend {
   padding: 0 6px;
 }
 .rubric-hint {
-  color: #66788a;
+  color: var(--color-muted);
   font-size: 13px;
 }
 .criterion {
@@ -160,21 +161,21 @@ textarea {
   min-width: 0;
   width: 100%;
   padding: 9px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--color-input-line);
   border-radius: 6px;
 }
 button {
   justify-self: start;
   padding: 8px 11px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--color-input-line);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .mode-toggle {
-  color: #197b70;
+  color: var(--color-accent);
 }
 .error {
-  color: #b91c1c;
+  color: var(--color-danger);
 }
 @media (max-width: 600px) {
   .criterion {

@@ -32,6 +32,7 @@ func (h *PortalHandler) Register(g *gin.RouterGroup) {
 	g.PUT("/assignments/:id/rubric", h.AssignmentRubric)
 	g.POST("/assignments/:id/grade", h.GradeAssignmentClasses)
 	g.GET("/homeworks/:id/detail", h.HomeworkDetail)
+	g.POST("/homeworks/:id/detail-review", h.ReviewHomeworkDetail)
 	g.POST("/homeworks/:id/detail-reads", h.ReadHomeworkDetail)
 	g.GET("/homeworks/:id/detail/sources/:source", h.HomeworkDetailFile)
 	g.GET("/operations/:id", h.Operation)
@@ -221,6 +222,17 @@ func (h *PortalHandler) ReadHomeworkDetail(c *gin.Context) {
 		return
 	}
 	c.JSON(202, gin.H{"operation_id": op.ID, "operation": op})
+}
+func (h *PortalHandler) ReviewHomeworkDetail(c *gin.Context) {
+	var req portal.ReviewDetailRequest
+	if !portalBody(c, &req) {
+		return
+	}
+	if err := h.Runner.Service.ReviewHomeworkDetail(c.Request.Context(), portalOwner(c), c.Param("id"), req); err != nil {
+		portalError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"message": "作业要求已核对，后续批改使用已确认的正文", "requirements_status": "READY"})
 }
 func (h *PortalHandler) HomeworkDetailFile(c *gin.Context) {
 	path, name, err := h.Runner.Service.HomeworkDetailFile(c.Request.Context(), portalOwner(c), c.Param("id"), c.Param("source"))

@@ -76,7 +76,9 @@
                 ? loginComplete
                   ? '已登录，等待继续'
                   : '等待登录完成并交还控制'
-                : preparationSummary?.label || statusName(job.status)
+                : codeWaiting
+                  ? '等待输入验证码'
+                  : preparationSummary?.label || statusName(job.status)
             }}</span
           ><span
             >阶段：{{
@@ -84,7 +86,9 @@
                 ? loginComplete
                   ? '登录完成'
                   : '人工登录与交接'
-                : preparationSummary
+                : codeWaiting
+                  ? '验证码验证'
+                  : preparationSummary
                   ? '材料整理'
                   : stageName(job.stage)
             }}</span
@@ -132,7 +136,7 @@
           :disabled="busy"
           class="px-3 py-2 rounded bg-blue-600 text-white"
           @click="control('resume')"
-          >{{ job.waiting_reason === 'BROWSER_STARTUP' ? '重新加载登录页' : '交还自动化' }}</button
+          >{{ job.waiting_reason === 'BROWSER_STARTUP' ? '重新加载登录页' : codeWaiting ? '验证码已在官网填写，继续登录' : '交还自动化' }}</button
         >
         <button
           v-if="!job.task_type && ['INTERRUPTED', 'FAILED', 'PARTIAL_SUCCESS'].includes(job.status)"
@@ -220,7 +224,11 @@
           >确认记录并继续</button
         >
       </div>
-      <RpaBrowserPanel v-if="active && showBrowser && !ended" :key="job.job_id" :job="job" />
+      <div v-if="codeWaiting" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm" role="status">
+        <strong>请输入收到的验证码</strong>
+        <p class="mt-2">在下方填写验证码并提交，系统会将其填写到官网、点击登录，再按你的设置处理可信设备提示。</p>
+      </div>
+      <RpaBrowserPanel v-if="active && (showBrowser || codeWaiting) && !ended" :key="job.job_id" :job="job" @login-code-filled="control('resume')" />
       <div v-if="job.grading_files?.length" class="overflow-x-auto">
         <table class="w-full text-sm text-left"
           ><thead
@@ -364,6 +372,9 @@ const loginWaiting = computed(
     ['LOGIN', 'LOGIN_COMPLETE'].includes(job.value?.waiting_reason)
 );
 const loginComplete = computed(() => job.value?.auth_status === 'AUTHENTICATED');
+const codeWaiting = computed(
+  () => !ended.value && job.value?.control_mode === 'HUMAN' && job.value?.waiting_reason === 'LOGIN_CODE'
+);
 const preparationSummary = computed(() => {
   if (!['SUCCEEDED', 'PARTIAL_SUCCESS'].includes(job.value?.status)) return null;
   const batches = job.value.material_batches || [];

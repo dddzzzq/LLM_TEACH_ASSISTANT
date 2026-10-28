@@ -1,7 +1,7 @@
 <template>
   <div class="form-page portal-settings">
     <header
-      ><h1 class="page-title">教务账号设置</h1
+      ><h1 class="page-title">教务连接</h1
       ><p class="page-description"
         >连接本人账号，在专用浏览器完成首次认证后自动同步课程和作业。</p
       ></header
@@ -10,7 +10,10 @@
     <p v-if="notice" role="status">{{ notice }}</p>
     <section class="form-surface">
       <div class="status-row"
-        ><strong>西安电子科技大学教学平台</strong><span>{{ portalStatus(view.status) }}</span></div
+        ><strong>西安电子科技大学教学平台</strong
+        ><span class="connection-state" :class="{ ready: view.status === 'READY' }">{{
+          portalStatus(view.status)
+        }}</span></div
       >
       <p v-if="view.connection"
         >账号：{{ view.connection.account_mask }} · 最近认证：{{
@@ -21,47 +24,51 @@
       <p v-if="!view.credential_storage_ready" class="error"
         >服务端尚未配置凭据密钥，请按部署文档配置后连接。</p
       >
-      <form class="settings-form" @submit.prevent="save">
-        <label
-          >教师教务账号<input
-            v-model="username"
-            name="portal_username"
-            autocomplete="off"
-            :required="!view.has_password"
-            :placeholder="view.has_password ? '留空保持当前账号' : '请输入教师账号'"
-            maxlength="255"
-        /></label>
-        <label
-          >教务密码<input
-            v-model="password"
-            name="portal_password"
-            type="password"
-            autocomplete="new-password"
-            :required="!view.has_password"
-            :placeholder="view.has_password ? '留空保持原密码' : '请输入教务密码'"
-            maxlength="4096"
-        /></label>
-        <label class="check"
-          ><input v-model="trustDevice" type="checkbox" />在本系统专用浏览器中信任该设备</label
+      <details class="credentials-panel" :open="!view.connection"
+        ><summary>{{ view.connection ? '修改教务账号与连接设置' : '设置教务账号' }}</summary
+        ><form class="settings-form" @submit.prevent="save">
+          <label
+            >教师教务账号<input
+              v-model="username"
+              name="portal_username"
+              autocomplete="off"
+              :required="!view.has_password"
+              :placeholder="view.has_password ? '留空保持当前账号' : '请输入教师账号'"
+              maxlength="255"
+          /></label>
+          <label
+            >教务密码<input
+              v-model="password"
+              name="portal_password"
+              type="password"
+              autocomplete="new-password"
+              :required="!view.has_password"
+              :placeholder="view.has_password ? '留空保持原密码' : '请输入教务密码'"
+              maxlength="4096"
+          /></label>
+          <label class="check"
+            ><input v-model="trustDevice" type="checkbox" />在本系统专用浏览器中信任该设备</label
+          >
+          <div class="actions">
+            <button class="primary" :disabled="busy || active || !view.credential_storage_ready"
+              >保存并连接</button
+            >
+          </div></form
+        ></details
+      ><div class="actions connection-actions">
+        <button type="button" :disabled="busy || active || !view.has_password" @click="reauth"
+          >重新认证</button
         >
-        <div class="actions">
-          <button class="primary" :disabled="busy || active || !view.credential_storage_ready"
-            >保存并连接</button
-          >
-          <button type="button" :disabled="busy || active || !view.has_password" @click="reauth"
-            >重新认证</button
-          >
-          <button type="button" :disabled="busy || active || view.status !== 'READY'" @click="sync"
-            >更新课程</button
-          >
-          <button
-            type="button"
-            :disabled="busy || !view.connection || view.status === 'DISABLED'"
-            @click="disconnect"
-            >断开并删除凭据</button
-          >
-        </div>
-      </form>
+        <button type="button" :disabled="busy || active || view.status !== 'READY'" @click="sync"
+          >更新课程</button
+        >
+        <button
+          type="button"
+          :disabled="busy || !view.connection || view.status === 'DISABLED'"
+          @click="disconnect"
+          >断开并删除凭据</button
+        >
+      </div>
     </section>
     <section v-if="operation" class="form-surface operation" aria-live="polite">
       <h2>连接进度：{{ portalStatus(operation.status) }}</h2
@@ -238,21 +245,55 @@ onBeforeUnmount(() => {
 .portal-settings {
   display: grid;
   gap: 22px;
+  font-size: 13px;
+  color: var(--color-ink);
 }
 .form-surface {
-  padding: 24px;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  padding: 26px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-surface);
+}
+.form-surface > p {
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.8;
+  margin-top: 10px;
 }
 .settings-form {
   display: grid;
   gap: 16px;
+  margin-top: 18px;
+}
+.credentials-panel {
+  border-top: 1px solid var(--color-line);
   margin-top: 20px;
+  padding-top: 16px;
+}
+.credentials-panel > summary {
+  font-size: 13px;
+  color: var(--color-accent);
+  min-height: 32px;
+  line-height: 2;
+}
+.connection-actions {
+  margin-top: 16px;
+}
+.connection-state {
+  font-size: 12px;
+  color: var(--color-muted);
+  background: var(--color-soft);
+  border-radius: 6px;
+  padding: 5px 9px;
+}
+.connection-state.ready {
+  color: var(--color-success);
+  background: var(--color-success-soft);
 }
 label {
   display: grid;
   gap: 8px;
+  font-size: 13px;
 }
 .check,
 .actions,
@@ -266,46 +307,90 @@ label {
 .status-row {
   justify-content: space-between;
 }
+.status-row > strong {
+  font-size: 15px;
+  font-weight: 600;
+}
 input:not([type='checkbox']) {
   padding: 10px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border: 1px solid var(--color-input-line);
+  border-radius: var(--radius-control);
   min-width: 0;
+  font-size: 13px;
 }
 button {
   padding: 9px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: white;
+  min-height: 40px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+  font-size: 13px;
+  transition:
+    background var(--dur-micro),
+    border-color var(--dur-micro);
+}
+button:hover {
+  background: var(--color-soft);
 }
 button.primary {
-  background: #2563eb;
-  color: white;
-  border-color: #2563eb;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+button.primary:hover {
+  background: var(--color-accent-hover);
 }
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.error {
-  color: #b91c1c;
+.error,
+.form-surface > p.error {
+  color: var(--color-danger);
 }
 .operation {
   display: grid;
   gap: 16px;
 }
 h2 {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 li {
-  margin: 8px 0;
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--color-muted);
 }
 a {
-  color: #2563eb;
+  display: inline-block;
+  color: var(--color-accent);
+  font-size: 13px;
+  margin-top: 12px;
 }
 .otp-form {
   display: grid;
   gap: 10px;
+}
+.actions > input {
+  max-width: 200px;
+}
+@media (max-width: 760px) {
+  .portal-settings {
+    gap: 18px;
+  }
+  .form-surface {
+    padding: 20px;
+  }
+  .status-row {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .connection-actions {
+    gap: 8px;
+  }
+  .connection-actions button {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
 }
 </style>

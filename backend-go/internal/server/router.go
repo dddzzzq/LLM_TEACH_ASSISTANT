@@ -121,9 +121,10 @@ func NewRouter(db *gorm.DB, logService *logbook.Service) *gin.Engine {
 	assignmentGroup.Use(middleware.AuthMiddleware())
 	assignmentGroup.Use(middleware.AssignmentAccess(db, false))
 	{
-		assignmentGroup.POST("/", middleware.StudentAccessGuard(), handlers.CreateAssignment)                 // 创建作业路由
-		assignmentGroup.GET("/", handlers.GetAssignments)                                                     // 获取所有作业路由用于展示
-		assignmentGroup.GET("/:id", handlers.GetAssignment)                                                   // 获取单个作业路由
+		assignmentGroup.POST("/", middleware.StudentAccessGuard(), handlers.CreateAssignment) // 创建作业路由
+		assignmentGroup.GET("/", handlers.GetAssignments)                                     // 获取所有作业路由用于展示
+		assignmentGroup.GET("/:id", handlers.GetAssignment)                                   // 获取单个作业路由
+		assignmentGroup.GET("/:id/classes", handlers.GetAssignmentClasses)
 		assignmentGroup.GET("/:id/results", handlers.GetAssignmentSubmissions)                                // 获取单个作业的所有提交
 		assignmentGroup.DELETE("/:id", middleware.StudentAccessGuard(), handlers.DeleteAssignment)            // 删除作业路由
 		assignmentGroup.POST("/:id/submit", middleware.StudentAccessGuard(), handlers.UploadAssignment)       // 上传学生作业路由

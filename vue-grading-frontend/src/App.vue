@@ -16,26 +16,26 @@
           <span>教学工作台</span><span class="breadcrumb-divider" aria-hidden="true">/</span>
           <span class="breadcrumb-current">{{
             {
-              home: '教学概览',
-              assignments: '作业批改',
+              home: '作业工作台',
+              assignments: '作业工作台',
               'create-assignment': '新建作业',
               'assignment-detail': '作业详情',
               'ai-assistant': 'AI 助手',
-              'skills-admin': '工具管理',
               'grade-homework': '导入与自动批改',
               logs: '日志查阅',
               materials: '作业材料',
               'portal-settings': '教务账号',
-            }[route.name] || '教学概览'
+            }[route.name] || '作业工作台'
           }}</span>
         </div>
-        <router-link class="workspace-caption" to="/settings/portal">教务账号设置</router-link>
+        <router-link class="workspace-caption" to="/settings/portal">教务连接</router-link>
       </header>
       <main class="workspace-content">
         <div class="page-content"><router-view /></div>
       </main>
     </div>
     <RpaAttentionCenter />
+    <FloatingAssistant :key="assistantOwner" />
   </div>
 </template>
 
@@ -44,8 +44,16 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import Sidebar from './components/Sidebar.vue';
 import RpaAttentionCenter from './components/RpaAttentionCenter.vue';
+import FloatingAssistant from './components/FloatingAssistant.vue';
+import authApi from './services/authApi';
 
 const route = useRoute();
+const assistantOwner = computed(() => {
+  // Re-evaluate on navigation, keeping one instance for the same signed-in teacher.
+  void route.path;
+  const user = authApi.getCurrentUser();
+  return user?.user_id || user?.id || user?.username || 'teacher';
+});
 
 // 计算属性：判断当前是否为登录页面
 const isLoginPage = computed(() => {

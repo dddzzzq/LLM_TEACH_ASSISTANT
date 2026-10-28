@@ -2,11 +2,14 @@
   <section class="materials-panel" aria-label="作业材料与批改">
     <header class="materials-heading"
       ><div
-        ><h2>作业材料与批改</h2
-        ><p>先整理材料，再主动开始批改。可指定本机目录，或使用官网下载、上传的批次。</p></div
+        ><h2>导入记录与批改</h2><p>查看学生文件、处理材料异常，再开始批改或查看本批成绩。</p></div
       ><button class="secondary-button" :disabled="loading" @click="load">刷新批次</button></header
     >
-    <form v-if="assignmentId" class="directory-form" @submit.prevent="prepareDirectory">
+    <form
+      v-if="assignmentId && showDirectory"
+      class="directory-form"
+      @submit.prevent="prepareDirectory"
+    >
       <label
         >作业所在目录<input
           v-model="sourcePath"
@@ -20,6 +23,9 @@
           aria-label="保存根目录"
           placeholder="留空使用项目 homework 目录"
       /></label>
+      <p class="directory-hint"
+        >目录必须能由运行服务的机器读取；这里不是上传浏览器所在电脑的文件夹。</p
+      >
       <label class="check"><input v-model="autoGrade" type="checkbox" />整理完成后继续批改</label>
       <button class="primary-button" :disabled="busy || !sourcePath.trim()">{{
         busy ? '正在提交…' : autoGrade ? '整理并批改' : '仅导入并整理'
@@ -149,6 +155,8 @@ import AppModal from './AppModal.vue';
 const props = defineProps({
   assignmentId: { type: [String, Number], default: '' },
   classId: { type: String, default: '' },
+  importClassId: { type: String, default: null },
+  showDirectory: { type: Boolean, default: true },
   sourceJobId: { type: String, default: '' },
   refreshKey: { type: Number, default: 0 },
 });
@@ -208,7 +216,9 @@ async function prepareDirectory() {
   error.value = '';
   const body = {
     assignment_id: Number(props.assignmentId),
-    ...(props.classId ? { class_id: props.classId } : {}),
+    ...((props.importClassId ?? props.classId)
+      ? { class_id: props.importClassId ?? props.classId }
+      : {}),
     source_path: sourcePath.value.trim(),
     output_root: outputRoot.value.trim(),
     auto_grade: autoGrade.value,
@@ -306,15 +316,15 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 .materials-heading h2 {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
-  color: #20384c;
+  color: var(--color-ink);
 }
 .materials-heading p,
 .batch-card p {
   font-size: 12px;
   line-height: 1.8;
-  color: #62778a;
+  color: var(--color-muted);
   margin-top: 8px;
 }
 .directory-form {
@@ -323,20 +333,20 @@ onBeforeUnmount(() => {
   gap: 14px;
   margin: 20px 0;
   padding: 18px;
-  background: #f6faf9;
+  background: var(--color-soft);
   border-radius: 10px;
 }
 .directory-form > label:not(.check) {
   font-size: 12px;
   font-weight: 600;
-  color: #456075;
+  color: var(--color-ink);
 }
 .directory-form input:not([type='checkbox']) {
   display: block;
   width: 100%;
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid #c8d3de;
+  border: 1px solid var(--color-input-line);
   border-radius: 7px;
   font-size: 13px;
   font-weight: 400;
@@ -357,33 +367,33 @@ onBeforeUnmount(() => {
 }
 .batch-card {
   padding: 18px;
-  border: 1px solid #dce5ec;
+  border: 1px solid var(--color-line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--color-paper);
 }
 .batch-title {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
-  color: #20384c;
+  color: var(--color-ink);
 }
 .batch-state {
-  font-size: 11px;
-  color: #197b70;
+  font-size: 12px;
+  color: var(--color-accent);
   white-space: nowrap;
 }
 .batch-card .batch-meta,
 .batch-meta {
-  font-size: 11px;
-  color: #718499;
+  font-size: 12px;
+  color: var(--color-muted);
   margin-top: 8px;
 }
 .batch-path {
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
   line-height: 1.8;
-  color: #62778a;
+  color: var(--color-muted);
 }
 .batch-actions {
   display: flex;
@@ -392,7 +402,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   margin-top: 14px;
   font-size: 12px;
-  color: #197b70;
+  color: var(--color-accent);
 }
 .batch-actions .primary-button {
   margin-left: auto;
@@ -400,10 +410,10 @@ onBeforeUnmount(() => {
 }
 .text-button {
   font-size: 12px;
-  color: #197b70;
+  color: var(--color-accent);
 }
 .danger {
-  color: #a63737;
+  color: var(--color-danger);
 }
 .partial-choice {
   margin-top: 14px;
@@ -416,61 +426,63 @@ onBeforeUnmount(() => {
   border-radius: 7px;
   margin-top: 14px;
   line-height: 1.8;
-  background: #fff1f1;
-  color: #a63737;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 .material-notice {
-  background: #edf7f4;
-  color: #197b70;
+  background: var(--color-success-soft);
+  color: var(--color-accent);
 }
 .empty-materials {
   padding: 24px 0;
   font-size: 12px;
-  color: #718499;
+  color: var(--color-muted);
 }
 .material-warning {
-  font-size: 11px;
-  color: #92581a;
+  font-size: 12px;
+  color: var(--color-warning);
   line-height: 1.8;
   margin-top: 8px;
 }
 .material-issues {
   font-size: 12px;
-  color: #92581a;
+  color: var(--color-warning);
   line-height: 1.8;
   padding: 14px;
-  background: #fff8e9;
+  background: var(--color-warning-soft);
   border-radius: 8px;
   margin: 16px 0;
 }
 .student-files {
   font-size: 12px;
-  border-top: 1px solid #e0e7ee;
+  border-top: 1px solid var(--color-line);
   padding: 12px 0;
 }
 .student-files summary {
   cursor: pointer;
   font-weight: 600;
-  color: #20384c;
+  color: var(--color-ink);
 }
 .student-files li {
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
   line-height: 1.8;
   margin-top: 6px;
 }
 .student-files li span {
-  color: #197b70;
+  color: var(--color-accent);
 }
 .secondary-button {
   font-size: 12px;
   white-space: nowrap;
   padding: 8px 12px;
-  border: 1px solid #c8d3de;
+  border: 1px solid var(--color-input-line);
   border-radius: 7px;
 }
 .primary-button:disabled {
-  opacity: 0.5;
+  background: var(--color-sidebar);
+  color: var(--color-muted);
+  cursor: not-allowed;
 }
 @media (max-width: 640px) {
   .directory-form {
@@ -488,5 +500,11 @@ onBeforeUnmount(() => {
   .batch-actions .primary-button {
     margin-left: 0;
   }
+}
+.directory-hint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--color-muted);
 }
 </style>

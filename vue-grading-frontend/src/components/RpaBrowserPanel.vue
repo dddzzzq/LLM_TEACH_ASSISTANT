@@ -46,19 +46,24 @@
         frameError || (job.stage === 'OPEN_PORTAL' ? job.message : '正在连接浏览器…')
       }}</p>
     </div>
-    <form v-if="human" class="p-3 border-t flex gap-2 bg-white" @submit.prevent="sendText">
+    <form v-if="human" class="p-3 border-t flex flex-wrap gap-2 bg-white" @submit.prevent="sendText">
+      <label v-if="codeWaiting" :for="'login-code-' + job.job_id" class="w-full text-sm font-medium">验证码</label>
       <input
+        :id="'login-code-' + job.job_id"
         v-model="inputText"
         type="password"
-        autocomplete="off"
-        placeholder="可在这里输入中文、密码或验证码，再填写到网页当前输入框"
+        :autocomplete="codeWaiting ? 'one-time-code' : 'off'"
+        :inputmode="codeWaiting ? 'numeric' : 'text'"
+        :maxlength="codeWaiting ? 12 : 2000"
+        :placeholder="codeWaiting ? '请输入收到的验证码' : '可在这里输入中文、密码或验证码，再填写到网页当前输入框'"
         class="min-w-0 flex-1 border rounded px-3 py-2 text-sm"
-        aria-label="填写到网页当前输入框的内容"
+        :aria-label="codeWaiting ? '验证码' : '填写到网页当前输入框的内容'"
+        :disabled="sending"
       />
       <button
         class="px-3 py-2 rounded bg-blue-600 text-white text-sm"
-        :disabled="!inputText || !connected || !frame"
-        >填写并清空</button
+        :disabled="sending || !inputText || !connected || !frame"
+        >{{ sending ? '正在提交…' : codeWaiting ? '提交验证码并继续登录' : '填写并清空' }}</button
       >
     </form>
     <p v-if="frameError" class="px-3 pb-2 text-sm text-red-700" role="alert">{{ frameError }}</p>
@@ -71,7 +76,10 @@ import authApi from '../services/authApi';
 import { createBrowserInputQueue } from '../services/browserInputQueue';
 import { createBrowserStream } from '../services/browserStream';
 const props = defineProps({ job: { type: Object, required: true } });
+const emit = defineEmits(['login-code-filled']);
 const human = computed(() => props.job.control_mode === 'HUMAN');
+const codeWaiting = computed(() => human.value && props.job.waiting_reason === 'LOGIN_CODE');
+const sending = ref(false);
 const frame = ref(null),
   frameError = ref(''),
   inputText = ref(''),
@@ -218,9 +226,22 @@ function keyDown(event) {
   }
 }
 async function sendText() {
+  if (sending.value) return;
   const text = inputText.value;
+  const code = codeWaiting.value;
+  if (code && !/^[0-9]{4,12}$/.test(text)) {
+    frameError.value = '请输入 4 至 12 位数字验证码';
+    return;
+  }
   inputText.value = '';
-  await enqueue({ kind: 'text', text });
+  sending.value = true;
+  try {
+    const ok = await enqueue({ kind: code ? 'login_code' : 'text', text });
+    if (ok && code) emit('login-code-filled');
+    if (!ok) frameError.value = '填写未确认，请等待浏览器连接后重新输入';
+  } finally {
+    sending.value = false;
+  }
   surface.value?.focus();
 }
 async function switchPage(page_id) {

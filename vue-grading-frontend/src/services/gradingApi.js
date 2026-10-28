@@ -23,6 +23,10 @@ export default {
     return apiClient.get(`/assignments/${id}`);
   },
 
+  getAssignmentClasses(id) {
+    return apiClient.get(`/assignments/${id}/classes`);
+  },
+
   createAssignment(assignmentData) {
     return apiClient.post('/assignments/', assignmentData);
   },

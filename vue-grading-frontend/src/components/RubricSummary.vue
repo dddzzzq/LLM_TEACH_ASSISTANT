@@ -47,7 +47,7 @@ p {
   color: var(--color-accent);
 }
 small {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
 }
 </style>

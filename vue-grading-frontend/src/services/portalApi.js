@@ -20,6 +20,8 @@ export function createPortalApi(client) {
         { headers: { 'Idempotency-Key': key } }
       ),
     homeworkDetail: (homeworkId) => client.get(`${base}/homeworks/${id(homeworkId)}/detail`),
+    reviewHomeworkDetail: (homeworkId, body) =>
+      client.post(`${base}/homeworks/${id(homeworkId)}/detail-review`, body),
     readHomeworkDetail: (homeworkId, snapshotId) =>
       client.post(`${base}/homeworks/${id(homeworkId)}/detail-reads`, { snapshot_id: snapshotId }),
     homeworkDetailSource: (homeworkId, sourceId) =>

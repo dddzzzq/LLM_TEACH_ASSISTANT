@@ -1,13 +1,13 @@
 <template>
   <div class="form-page grading-workbench">
-    <router-link to="/assignments" class="back-link">← 返回作业批改</router-link>
+    <router-link to="/assignments" class="back-link">返回作业工作台</router-link>
     <header
       ><h1 class="page-title">导入与自动批改</h1
       ><p class="page-description"
-        >按三个步骤开始：选择作业、获取要求、提交批改。全部班级默认一并处理。</p
+        >高级处理入口：保留压缩包、目录和官网多作业来源，按选定范围自动整理并批改。</p
       ></header
     >
-    <p class="workflow-step">提交后可返回作业列表查看内容与结果，也可在作业详情中处理材料。</p>
+    <p class="workflow-step">日常单份作业可从工作台进入详情，选择班级查看材料和成绩。</p>
     <form class="form-surface workbench-form" @submit.prevent="submit">
       <fieldset class="source-options"
         ><legend>1. 选择作业来源</legend
@@ -110,7 +110,10 @@
         ><p>{{ portalStatus(item.status) }} · {{ item.message }}</p
         ><router-link
           v-if="item.assignment_id"
-          :to="'/assignments/' + item.assignment_id + '?tab=materials'"
+          :to="{
+            path: '/assignments/' + item.assignment_id,
+            query: { tab: 'materials', ...(item.class_id ? { class_id: item.class_id } : {}) },
+          }"
           >查看材料和批改结果</router-link
         ><router-link
           v-if="item.status === 'WAITING_AUTH' && !item.rpa_job_id"
@@ -299,73 +302,117 @@ onBeforeUnmount(() => {
 .grading-workbench {
   display: grid;
   gap: 22px;
+  max-width: 1000px;
+  margin: 0 auto;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+.grading-workbench > .back-link {
+  margin-bottom: 0;
 }
 .form-surface {
-  padding: 24px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: white;
+  padding: 28px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-surface);
+  background: var(--color-paper);
 }
 .workbench-form {
   display: grid;
   gap: 20px;
 }
+.workbench-form > h2 {
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+}
 label {
   display: grid;
   gap: 8px;
+  font-size: 13px;
 }
 input:not([type='radio']):not([type='checkbox']),
 textarea {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border: 1px solid var(--color-input-line);
+  border-radius: var(--radius-control);
   padding: 10px;
   width: 100%;
+  font-size: 13px;
 }
 .source-options {
   display: flex;
-  gap: 20px;
+  gap: 12px;
   flex-wrap: wrap;
-}
-.requirement-mode {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  line-height: 1.5;
-}
-.requirement-mode input {
-  flex-shrink: 0;
 }
 .source-options label {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 160px;
+  padding: 15px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  color: var(--color-muted);
+  background: var(--color-soft);
+}
+.source-options label:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 .source-options legend {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   font-weight: 600;
+}
+.source-options legend,
+.submission-title {
+  font-size: 14px;
+}
+.requirement-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.6;
+}
+.requirement-mode input {
+  flex-shrink: 0;
 }
 .local-target {
   display: grid;
-  gap: 12px;
+  gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .rubric {
   font-family: monospace;
 }
 button {
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
+  padding: 9px 15px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-line);
+  font-size: 13px;
+  min-height: 40px;
+  background: var(--color-paper);
+  transition:
+    background var(--dur-micro),
+    border-color var(--dur-micro);
+}
+button:hover {
+  background: var(--color-soft);
 }
 button.primary {
   background: var(--color-accent);
-  color: white;
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+  justify-self: start;
+}
+button.primary:hover {
+  background: var(--color-accent-hover);
 }
 button:disabled {
   opacity: 0.5;
 }
 .error {
-  color: #b91c1c;
+  color: var(--color-danger);
 }
 a {
   color: var(--color-accent);
@@ -373,46 +420,57 @@ a {
 .workflow-progress header {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.workflow-progress h2 {
+  font-size: 16px;
+  font-weight: 600;
 }
 .workflow-progress article {
   padding: 18px 0;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--color-line);
   margin-top: 16px;
+}
+.workflow-progress article strong {
+  font-size: 14px;
+}
+.workflow-progress article p {
+  margin: 8px 0;
+}
+.workflow-progress article > a {
+  font-size: 13px;
 }
 small,
 p {
-  color: #64748b;
+  color: var(--color-muted);
+  line-height: 1.8;
 }
-
-.grading-workbench {
-  max-width: 1000px;
-  margin: 0 auto;
-}
-.grading-workbench > .back-link {
-  margin-bottom: 0;
-}
-.source-options label {
-  flex: 1;
-  min-width: 160px;
-  padding: 17px;
-  border: 1px solid var(--color-line);
-  border-radius: 9px;
-  font-size: 13px;
-  color: #647089;
-  background: #fafbfe;
-}
-.source-options label:has(input:checked) {
-  border-color: #98a3f3;
-  background: #f3f4ff;
-  color: #4455cf;
-}
-.source-options legend,
-.submission-title {
-  font-size: 14px;
-}
+small,
 .workflow-step {
   font-size: 12px;
-  color: var(--color-muted);
+}
+.workflow-progress > p {
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+@media (max-width: 760px) {
+  .grading-workbench {
+    gap: 18px;
+  }
+  .form-surface {
+    padding: 20px;
+  }
+  .source-options {
+    gap: 8px;
+  }
+  .source-options label {
+    padding: 12px;
+    min-width: 140px;
+  }
+  .local-target {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

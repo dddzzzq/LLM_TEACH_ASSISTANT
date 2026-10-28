@@ -46,7 +46,7 @@ func ListMaterials(c *gin.Context) {
 	actor := materialActor(c)
 	q := database.DB.WithContext(c.Request.Context()).Where("owner_id = ?", actor.UserID)
 	if class := c.Query("class_id"); class != "" {
-		q = q.Where("portal_class_id = ?", class)
+		q = materialClassScope(q, class)
 	}
 	if source := c.Query("source_job_id"); source != "" {
 		q = q.Where("source_job_id = ?", source)

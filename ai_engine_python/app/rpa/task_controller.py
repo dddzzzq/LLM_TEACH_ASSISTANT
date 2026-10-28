@@ -460,6 +460,18 @@ class Task:
                     self.update(stage="READING_CATALOG")
                     self.event("教务身份已核验，继续使用当前浏览器同步课程与作业")
         auth["authenticated"] = authenticated
+        if (
+            self.automatic()
+            and auth["otp_required"]
+            and auth["code_requested"]
+            and not auth["otp_entered"]
+            and not auth["trust_prompt"]
+        ):
+            self.update(stage="AUTHENTICATE")
+            self.wait_human(
+                "LOGIN_CODE",
+                "验证码已请求，请输入本人收到的验证码，提交后将自动点击登录并处理可信设备提示",
+            )
         return auth
 
     async def navigation_view(self):
@@ -677,6 +689,19 @@ class Task:
                     self.update(navigation_failures=failures)
                     if isinstance(exc, RpaIssue) and exc.code == "TARGET_AMBIGUOUS":
                         self.wait_human("TARGET_AMBIGUOUS", report["message"])
+                    elif isinstance(exc, RpaIssue) and exc.code.startswith(
+                        ("LOGIN_CODE_", "DEVICE_TRUST_")
+                    ):
+                        reason = (
+                            "LOGIN_CODE"
+                            if exc.code == "LOGIN_CODE_FORMAT"
+                            else "LOGIN_CODE_RESULT"
+                            if exc.code == "LOGIN_CODE_PENDING"
+                            else "LOGIN_CODE_REQUEST"
+                        )
+                        self.wait_human(reason, report["message"])
+                    elif isinstance(exc, RpaIssue) and exc.code == "LOGIN_VERIFICATION_FAILED":
+                        self.wait_human("LOGIN_CODE", report["message"])
                     elif failures >= 3:
                         self.wait_human(
                             "NAVIGATION",
@@ -782,7 +807,8 @@ class Task:
             elif tool == "request_login_code":
                 await self.portal_auth.request_code()
                 self.wait_human(
-                    "LOGIN_CODE", "请在当前任务浏览器填写本人收到的验证码，然后点击交还自动化"
+                    "LOGIN_CODE",
+                    "验证码已请求，请输入本人收到的验证码，提交后将自动点击登录并处理可信设备提示",
                 )
             elif tool == "submit_login_code":
                 await self.portal_auth.submit_entered_code()
@@ -1369,6 +1395,10 @@ class Task:
                 return
             if self.state.get("target_resolution"):
                 raise ValueError("请先在弹窗确认候选项或修改名称，确认后会自动继续")
+            if self.portal_auth and self.state.get("waiting_reason") == "LOGIN_CODE":
+                auth = await self.portal_auth.observation()
+                if auth["otp_required"] and not auth["otp_entered"] and not auth["trust_prompt"]:
+                    raise RpaIssue("LOGIN_CODE_FORMAT", "请先输入收到的验证码，再继续登录")
             authenticated = self.adapter and await self.adapter.authenticated()
             captcha = not authenticated and self.adapter and await self.prepare_captcha()
             if (
@@ -1413,10 +1443,16 @@ class Task:
                 control_mode="AUTO",
                 status="RUNNING",
                 waiting_reason="",
-                auth_status="CAPTCHA_REQUIRED" if captcha else "AUTHENTICATED",
+                auth_status="CAPTCHA_REQUIRED"
+                if captcha
+                else "AUTHENTICATED"
+                if authenticated
+                else "REQUIRED",
                 captcha_attempts=self.state.get("captcha_attempts", 0) if captcha else 0,
                 stage="SOLVE_CAPTCHA"
                 if captcha
+                else "AUTHENTICATE"
+                if self.portal_auth and not authenticated
                 else "LOCATE_COURSE"
                 if self.state["stage"] in {"AUTHENTICATE", "SOLVE_CAPTCHA"}
                 else self.state["stage"],
@@ -1602,6 +1638,11 @@ class Task:
             await self._release_pointer_locked(owner)
         elif kind == "text":
             await self.page.keyboard.insert_text(str(payload.get("text", ""))[:2000])
+        elif kind == "login_code":
+            if not self.portal_auth or self.state.get("waiting_reason") != "LOGIN_CODE":
+                raise ValueError("当前任务不在等待验证码")
+            # Direct teacher-to-browser input, never a model action or journal field.
+            await self.portal_auth.fill_code(payload.get("text"), page=self.page)
         elif kind == "key":
             key = str(payload.get("key", ""))
             if key not in {

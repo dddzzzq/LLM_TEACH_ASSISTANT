@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,7 +23,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -250,9 +247,7 @@ func GetAssignmentSubmissions(c *gin.Context) {
 	if batch := c.Query("batch_id"); batch != "" {
 		query = query.Where("material_batch_id = ?", batch)
 	}
-	if class := c.Query("class_id"); class != "" {
-		query = query.Where("material_batch_id IN (?)", database.DB.Model(&models.MaterialBatch{}).Select("id").Where("assignment_id = ? AND portal_class_id = ?", assignmentID, class))
-	}
+	query = submissionClassScope(query, database.DB, assignmentID, c.Query("class_id"))
 
 	// 如果是学生，只能查看自己的提交
 	if roleErr == nil && usernameErr == nil && role == "student" {
@@ -372,183 +367,4 @@ func ClearAllSubmissions(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
-}
-
-// 导出excel文件handler
-func ExportAssignmentExcel(c *gin.Context) {
-	id := c.Param("id")
-	var assignment models.Assignment
-
-	// 预加载该作业的所有批改记录
-	preload := database.DB.Preload("Submissions")
-	if batch := c.Query("batch_id"); batch != "" {
-		preload = database.DB.Preload("Submissions", "material_batch_id = ?", batch)
-	}
-	if class := c.Query("class_id"); class != "" {
-		query := database.DB.Where("material_batch_id IN (?)", database.DB.Model(&models.MaterialBatch{}).Select("id").Where("assignment_id = ? AND portal_class_id = ?", id, class))
-		if batch := c.Query("batch_id"); batch != "" {
-			query = query.Where("material_batch_id = ?", batch)
-		}
-		preload = database.DB.Preload("Submissions", query)
-	}
-	if err := preload.First(&assignment, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "未找到该作业"})
-		return
-	}
-
-	f := excelize.NewFile()
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.Printf("关闭 Excel 文件失败: %v", err)
-		}
-	}()
-
-	// Sheet 1: 成绩单
-	sheetName := "成绩单"
-	index, _ := f.NewSheet(sheetName)
-	f.SetActiveSheet(index)
-
-	headers := []string{"学号&姓名", "AI评分", "AI评语", "是否人工复核", "人工最终评分", "人工评语", "AIGC生成概率", "代码与文档匹配度"}
-	for i, header := range headers {
-		cellLabel, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheetName, cellLabel, header)
-	}
-
-	for i, sub := range assignment.Submissions {
-		row := i + 2
-
-		aigcProb := "N/A"
-		if sub.AIGCReport != "" && sub.AIGCReport != "{}" {
-			var aigc map[string]interface{}
-			if err := json.Unmarshal([]byte(sub.AIGCReport), &aigc); err == nil {
-				if prob, ok := aigc["ai_probability"]; ok {
-					aigcProb = fmt.Sprintf("%.2f%%", prob.(float64)*100)
-				}
-			}
-		}
-
-		matchScore := "N/A"
-		if sub.CodeDocMatchReport != "" && sub.CodeDocMatchReport != "{}" {
-			var match map[string]interface{}
-			if err := json.Unmarshal([]byte(sub.CodeDocMatchReport), &match); err == nil {
-				if score, ok := match["score"]; ok {
-					matchScore = fmt.Sprintf("%v/100", score)
-				}
-			}
-		}
-
-		isReviewed := "否"
-		if sub.IsHumanReviewed {
-			isReviewed = "是"
-		}
-
-		humanScore := ""
-		if sub.HumanScore != 0 {
-			humanScore = fmt.Sprintf("%.2f", sub.HumanScore)
-		}
-
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), sub.StudentID+"-"+sub.StudentName)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), sub.Score)
-		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), sub.Feedback)
-		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), isReviewed)
-		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), humanScore)
-		f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), sub.HumanFeedback)
-		f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), aigcProb)
-		f.SetCellValue(sheetName, fmt.Sprintf("H%d", row), matchScore)
-	}
-
-	f.SetColWidth(sheetName, "A", "A", 25)
-	f.SetColWidth(sheetName, "B", "B", 10)
-	f.SetColWidth(sheetName, "C", "C", 50)
-	f.SetColWidth(sheetName, "D", "D", 15)
-	f.SetColWidth(sheetName, "E", "E", 15)
-	f.SetColWidth(sheetName, "F", "F", 50)
-	f.SetColWidth(sheetName, "G", "H", 20)
-
-	// Sheet 2: 抄袭检测报告
-	plagSheetName := "抄袭检测报告"
-	f.NewSheet(plagSheetName)
-
-	plagHeaders := []string{"学生A", "学生B", "相似内容类型", "初始相似度得分", "AI抄袭判定", "AI详细分析"}
-	for i, header := range plagHeaders {
-		cellLabel, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(plagSheetName, cellLabel, header)
-	}
-
-	plagRow := 2
-	// 使用 map 记录已经输出过的双向关系，避免 A抄B 和 B抄A 重复出现
-	seenPairs := make(map[string]bool)
-
-	for _, sub := range assignment.Submissions {
-		if sub.PlagiarismReport == "" || sub.PlagiarismReport == "[]" {
-			continue
-		}
-
-		var plagReports []map[string]interface{}
-		if err := json.Unmarshal([]byte(sub.PlagiarismReport), &plagReports); err == nil {
-			for _, report := range plagReports {
-				studentB := fmt.Sprintf("%v", report["similar_to"])
-				contentType := fmt.Sprintf("%v", report["content_type"])
-
-				// 构造唯一键，确保 A-B 和 B-A 只记录一次
-				pairKey1 := fmt.Sprintf("%s-%s-%s", sub.StudentID, studentB, contentType)
-				pairKey2 := fmt.Sprintf("%s-%s-%s", studentB, sub.StudentID, contentType)
-
-				if seenPairs[pairKey1] || seenPairs[pairKey2] {
-					continue
-				}
-				seenPairs[pairKey1] = true
-
-				initialScore := fmt.Sprintf("%v", report["initial_score"])
-
-				aiAnalysis := ""
-				aiConclusion := ""
-				if llmData, ok := report["llm_analysis"].(map[string]interface{}); ok {
-					if isPlag, ok := llmData["is_plagiarism"].(bool); ok {
-						if isPlag {
-							aiConclusion = "判定为抄袭"
-						} else {
-							aiConclusion = "判定为独立完成"
-						}
-					}
-					if reason, ok := llmData["reasoning"].(string); ok {
-						aiAnalysis = reason
-					}
-				}
-
-				f.SetCellValue(plagSheetName, fmt.Sprintf("A%d", plagRow), sub.StudentID+"-"+sub.StudentName)
-				f.SetCellValue(plagSheetName, fmt.Sprintf("B%d", plagRow), studentB)
-				f.SetCellValue(plagSheetName, fmt.Sprintf("C%d", plagRow), contentType)
-				f.SetCellValue(plagSheetName, fmt.Sprintf("D%d", plagRow), initialScore)
-				f.SetCellValue(plagSheetName, fmt.Sprintf("E%d", plagRow), aiConclusion)
-				f.SetCellValue(plagSheetName, fmt.Sprintf("F%d", plagRow), aiAnalysis)
-
-				plagRow++
-			}
-		}
-	}
-
-	f.SetColWidth(plagSheetName, "A", "B", 20)
-	f.SetColWidth(plagSheetName, "C", "D", 15)
-	f.SetColWidth(plagSheetName, "E", "E", 15)
-	f.SetColWidth(plagSheetName, "F", "F", 80)
-
-	// 删除默认新建的空 Sheet1
-	f.DeleteSheet("Sheet1")
-
-	// 导出返回
-	var buffer bytes.Buffer
-	if err := f.Write(&buffer); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "生成 Excel 失败"})
-		return
-	}
-
-	fileName := fmt.Sprintf("作业报表_%s.xlsx", assignment.TaskName)
-	encodedFileName := url.QueryEscape(fileName)
-
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename*=utf-8''%s", encodedFileName))
-	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-	c.Header("Content-Transfer-Encoding", "binary")
-
-	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer.Bytes())
 }

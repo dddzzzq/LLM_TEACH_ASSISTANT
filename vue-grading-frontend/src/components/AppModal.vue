@@ -3,6 +3,7 @@
     <dialog
       ref="dialog"
       class="app-modal"
+      :class="{ 'is-drawer': drawer }"
       :aria-labelledby="titleId"
       tabindex="-1"
       @cancel.prevent="close"
@@ -23,7 +24,11 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-const props = defineProps({ title: { type: String, required: true }, closeDisabled: Boolean });
+const props = defineProps({
+  title: { type: String, required: true },
+  closeDisabled: Boolean,
+  drawer: Boolean,
+});
 const emit = defineEmits(['close']);
 const dialog = ref(null);
 const titleId = `modal-${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -82,18 +87,19 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .app-modal {
-  width: min(640px, calc(100vw - 32px));
+  width: min(640px, calc(100% - 32px));
   max-height: calc(100dvh - 48px);
   padding: 0;
   margin: auto;
-  border: 1px solid #d9e3e9;
+  border: 1px solid var(--color-line);
   border-radius: 16px;
-  color: #20384c;
-  box-shadow: 0 24px 80px #142d4033;
+  color: var(--color-ink);
+  background: var(--color-paper);
+  box-shadow: var(--shadow-panel);
   overflow-y: auto;
 }
 .app-modal::backdrop {
-  background: #142d4073;
+  background: var(--color-scrim);
 }
 .modal-heading {
   display: flex;
@@ -101,7 +107,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 20px 24px;
-  border-bottom: 1px solid #e0e7ee;
+  border-bottom: 1px solid var(--color-line);
 }
 .modal-heading h2 {
   font-size: 18px;
@@ -111,11 +117,11 @@ onBeforeUnmount(() => {
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  color: #66788a;
+  color: var(--color-muted);
   font-size: 24px;
 }
 .modal-heading button:hover {
-  background: #f0f4f7;
+  background: var(--color-soft);
 }
 .modal-body {
   padding: 22px 24px;
@@ -127,8 +133,15 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid #e0e7ee;
-  background: #f8fafb;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-soft);
+}
+.app-modal.is-drawer {
+  width: min(760px, 100%);
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0 0 0 auto;
+  border-radius: 16px 0 0 16px;
 }
 @media (max-width: 600px) {
   .modal-heading,

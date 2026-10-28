@@ -206,6 +206,11 @@
   },
   {
     "Method": "GET",
+    "Path": "/assignments/:id/classes",
+    "Handler": "grading-gateway/internal/handlers.GetAssignmentClasses"
+  },
+  {
+    "Method": "GET",
     "Path": "/assignments/:id/export",
     "Handler": "grading-gateway/internal/handlers.ExportAssignmentExcel"
   },
@@ -308,6 +313,11 @@
     "Method": "POST",
     "Path": "/api/portal/homeworks/:id/detail-reads",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).ReadHomeworkDetail-fm"
+  },
+  {
+    "Method": "POST",
+    "Path": "/api/portal/homeworks/:id/detail-review",
+    "Handler": "grading-gateway/internal/handlers.(*PortalHandler).ReviewHomeworkDetail-fm"
   },
   {
     "Method": "POST",

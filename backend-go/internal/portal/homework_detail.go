@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"grading-gateway/internal/agent/modelclient"
+	"grading-gateway/internal/cache"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/rpa"
 	"grading-gateway/internal/tools"
@@ -36,10 +38,112 @@ type HomeworkDetail struct {
 	Question    string            `json:"question"`
 	RawQuestion string            `json:"raw_question,omitempty"`
 	Processing  *DetailProcessing `json:"processing,omitempty"`
+	Review      *DetailReview     `json:"review,omitempty"`
 	Complete    bool              `json:"complete"`
 	Sources     []DetailSource    `json:"sources"`
 	Warnings    []string          `json:"warnings"`
 }
+
+type DetailReview struct {
+	ReviewedAt time.Time `json:"reviewed_at"`
+}
+
+// The teacher acknowledges the exact acquired revision, rather than approving
+// an arbitrary or superseded read. Existing raw materials and warnings remain.
+type ReviewDetailRequest struct {
+	SnapshotID  string `json:"snapshot_id"`
+	OperationID string `json:"operation_id"`
+	Question    string `json:"question"`
+	Confirmed   bool   `json:"confirmed"`
+}
+
+func validateDetailReview(req ReviewDetailRequest) error {
+	if !req.Confirmed || req.SnapshotID == "" || req.OperationID == "" || strings.TrimSpace(req.Question) == "" || len(req.Question) > 100000 {
+		return errors.New("请核对要求并明确确认，正文不能为空且不能超过100000字节")
+	}
+	return nil
+}
+
+func (s *Service) ReviewHomeworkDetail(ctx context.Context, owner uint, homeworkID string, req ReviewDetailRequest) error {
+	if err := validateDetailReview(req); err != nil {
+		return err
+	}
+	if s.DB == nil {
+		return ErrUnavailable
+	}
+	var assignmentID uint
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ts := *s
+		ts.DB = tx
+		c, err := ts.connection(ctx, owner, true)
+		if err != nil {
+			return ErrNotFound
+		}
+		if c.ActiveSnapshotID != req.SnapshotID {
+			return ErrConflict
+		}
+		var work models.PortalHomework
+		if err := tx.First(&work, "id = ? AND connection_id = ? AND snapshot_id = ?", homeworkID, c.ID, req.SnapshotID).Error; err != nil {
+			return ErrNotFound
+		}
+		if c.ActiveOperationID != "" {
+			var active models.PortalOperation
+			if err := tx.First(&active, "id = ?", c.ActiveOperationID).Error; err != nil {
+				return err
+			}
+			var target detailTarget
+			if active.Type == "HOMEWORK_DETAIL" && json.Unmarshal([]byte(active.PayloadJSON), &target) == nil && target.HomeworkID == homeworkID && !terminal(active.Status) {
+				return ErrConflict
+			}
+		}
+		var cached models.PortalHomeworkDetail
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cached, "homework_id = ? AND owner_id = ? AND connection_id = ? AND snapshot_id = ? AND profile_generation = ?", homeworkID, owner, c.ID, req.SnapshotID, c.ProfileGeneration).Error; err != nil {
+			return ErrNotFound
+		}
+		if cached.OperationID != req.OperationID {
+			return ErrConflict
+		}
+		var detail HomeworkDetail
+		if json.Unmarshal([]byte(cached.ContentJSON), &detail) != nil {
+			return ErrUnavailable
+		}
+		question := strings.TrimSpace(req.Question)
+		if detail.Review != nil {
+			if cached.Question == question {
+				return nil
+			}
+			return ErrConflict
+		}
+		detail.Question, detail.Complete = question, true
+		detail.Review = &DetailReview{ReviewedAt: time.Now()}
+		raw, err := json.Marshal(detail)
+		if err != nil {
+			return err
+		}
+		questionChanged := question != cached.Question
+		if err = tx.Model(&cached).Updates(map[string]any{"question": question, "complete": true, "content_json": string(raw)}).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&models.Assignment{}).Where("id = ? AND owner_id = ? AND portal_homework_id = ?", work.AssignmentID, owner, work.ID).Updates(map[string]any{"question": question, "requirements_status": "READY"})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		assignmentID = work.AssignmentID
+		var op models.PortalOperation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&op, "id = ? AND owner_id = ?", req.OperationID, owner).Error; err != nil {
+			return err
+		}
+		return appendEvent(tx, &op, "requirements.reviewed", map[string]any{"complete": true, "question_changed": questionChanged})
+	})
+	if err == nil && assignmentID != 0 {
+		_ = cache.InvalidateAssignmentCache(ctx, assignmentID)
+	}
+	return err
+}
+
 type detailTarget struct {
 	HomeworkID   string           `json:"homework_id"`
 	SnapshotID   string           `json:"snapshot_id"`
@@ -300,6 +404,7 @@ func resolveDetailWithModel(ctx context.Context, op models.PortalOperation, raw 
 	detail.Sources = append([]DetailSource(nil), raw.Sources...)
 	detail.Warnings = append([]string(nil), raw.Warnings...)
 	detail.Processing = nil
+	detail.Review = nil
 	var images []detailImage
 	var imageBytes int
 	visionExceeded := false

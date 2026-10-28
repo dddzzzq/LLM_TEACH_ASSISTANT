@@ -2,17 +2,75 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
 	"grading-gateway/internal/database"
+	"grading-gateway/internal/middleware"
 	"grading-gateway/internal/models"
 	"grading-gateway/internal/testutil"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestIntegrationAssignmentCatalogListsEmptyClassesAndKeepsUnassignedResults(t *testing.T) {
+	db, owner := testutil.ExecutionDB(t)
+	old := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = old })
+	if err := db.AutoMigrate(&models.Assignment{}, &models.Submission{}, &models.MaterialBatch{}, &models.PortalConnection{}, &models.PortalHomework{}, &models.PortalCourseClass{}); err != nil {
+		t.Fatal(err)
+	}
+	connection := models.PortalConnection{ID: uuid.NewString(), OwnerID: owner, Provider: "test", ActiveSnapshotID: uuid.NewString(), AccountMask: "test", CredentialCiphertext: []byte{}, CredentialNonce: []byte{}}
+	if err := db.Create(&connection).Error; err != nil {
+		t.Fatal(err)
+	}
+	a := models.Assignment{OwnerID: owner, CourseName: "课程", TaskName: "多班作业", ClassName: "全部班级", PortalConnectionID: connection.ID, PortalHomeworkID: uuid.NewString()}
+	if err := db.Create(&a).Error; err != nil {
+		t.Fatal(err)
+	}
+	homework := models.PortalHomework{ID: a.PortalHomeworkID, ConnectionID: connection.ID, CourseID: uuid.NewString(), SnapshotID: connection.ActiveSnapshotID, AssignmentID: a.ID}
+	if err := db.Create(&homework).Error; err != nil {
+		t.Fatal(err)
+	}
+	currentClasses := []models.PortalCourseClass{{ID: uuid.NewString(), CourseID: homework.CourseID, SnapshotID: connection.ActiveSnapshotID, Name: "一班"}, {ID: uuid.NewString(), CourseID: homework.CourseID, SnapshotID: connection.ActiveSnapshotID, Name: "空班级"}}
+	if err := db.Create(&currentClasses).Error; err != nil {
+		t.Fatal(err)
+	}
+	batch := models.MaterialBatch{ID: uuid.NewString(), AssignmentID: a.ID, OwnerID: owner, PortalClassID: currentClasses[0].ID, ClassName: "一班"}
+	if err := db.Create(&batch).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []models.Submission{{AssignmentID: a.ID, MaterialBatchID: batch.ID, StudentID: "same-id", Score: 90}, {AssignmentID: a.ID, StudentID: "same-id", Score: 50}} {
+		if err := db.Create(&sub).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	classes, err := assignmentClassCatalog(context.Background(), db, a)
+	if err != nil || len(classes) != 3 {
+		t.Fatalf("empty portal classes or legacy scope missing: %+v %v", classes, err)
+	}
+	var filtered []models.Submission
+	q := submissionClassScope(db.Where("assignment_id = ?", a.ID), db, fmt.Sprint(a.ID), unassignedClassID)
+	if err := q.Find(&filtered).Error; err != nil || len(filtered) != 1 || filtered[0].Score != 50 {
+		t.Fatalf("unassigned scope mixed or lost legacy result: %+v %v", filtered, err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.UserIDKey), owner+1)
+		c.Set(string(middleware.RoleKey), "teacher")
+	})
+	router.GET("/assignments/:id/classes", middleware.AssignmentAccess(db, false), GetAssignmentClasses)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/assignments/%d/classes", a.ID), nil))
+	if w.Code != 404 {
+		t.Fatalf("another teacher read the class catalog: %d %s", w.Code, w.Body.String())
+	}
+}
 
 func TestIntegrationAssignmentResultsAndExportRespectStableClassIDs(t *testing.T) {
 	db, owner := testutil.ExecutionDB(t)

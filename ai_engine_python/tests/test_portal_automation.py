@@ -160,6 +160,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             <div id="trust" role="dialog" hidden><h2>可信浏览器提示</h2>
             <button onclick="document.cookie='fixture_trusted=yes;Domain=xidian.edu.cn;Path=/;Max-Age=3600;Secure;SameSite=Lax';location.href='https://learning.xidian.edu.cn/portal'">信任此设备</button>
             <button>仅本次登录</button></div>"""
+            body = getattr(self, "mfa_body", body)
         elif p.hostname == "mooc1.chaoxing.com" and p.path == "/course":
             course = query["courseid"][0]
             clazz, name = ("22", "A班") if course == "11" else ("23", "B班")
@@ -386,6 +387,103 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             {**self.session, "connection_id": str(uuid4())}, self.root / "other"
         ) as context:
             self.assertFalse(any(c["name"] == "fixture_trusted" for c in await context.cookies()))
+
+    async def test_english_mfa_collects_teacher_code_then_logs_in_and_trusts_device(self):
+        self.mfa_body = """<button hidden>Get verification code</button>
+        <button id=send onclick="window.codes=(window.codes||0)+1;this.disabled=true;this.innerText='Resend in 59s'">Get verification code</button>
+        <input autocomplete=one-time-code placeholder="Verification code"><input id=unrelated placeholder=Search>
+        <button onclick="setTimeout(()=>{if(document.querySelector('input').value==='654321') document.querySelector('#trust').hidden=false},200)">Log in</button>
+        <div id=trust hidden><h2>Trust this browser?</h2><button onclick="document.cookie='fixture_trusted=yes;Domain=xidian.edu.cn;Path=/;Max-Age=3600;Secure;SameSite=Lax';location.href='https://learning.xidian.edu.cn/portal'">Trust this device</button><button>Not now</button></div>"""
+        task = self.start_task()
+        await self.action(task, "fill_portal_credentials")
+        await self.wait_auth(task, "otp_required")
+        await self.action(task, "request_login_code")
+        self.assertEqual(task.portal_result()["status"], "WAITING_OTP")
+        with self.assertRaisesRegex(RpaIssue, "请先输入"):
+            await task.resume()
+        self.assertEqual(task.state["control_mode"], "HUMAN")
+        # A replay/re-observation of the countdown must not send another code.
+        await task.portal_auth.request_code()
+        self.assertEqual(await task.page.evaluate("window.codes"), 1)
+        await task.page.locator("#unrelated").focus()
+        _, meta, _ = await task.frame()
+        await task.browser_input(
+            {
+                "kind": "login_code",
+                "text": "654321",
+                "epoch": meta["epoch"],
+                "page_id": meta["page_id"],
+                "revision": meta["revision"],
+            }
+        )
+        self.assertEqual(await task.page.locator("#unrelated").input_value(), "")
+        await task.resume()
+        self.assertEqual(task.state["auth_status"], "REQUIRED")
+        await self.action(task, "submit_login_code")
+        await self.wait_auth(task, "trust_prompt")
+        await self.action(task, "apply_device_trust")
+        self.assertTrue((await self.ready(task))["observation"]["authentication"]["authenticated"])
+        journal = (task.manager.root / (task.state["job_id"] + ".json")).read_text()
+        self.assertNotIn("654321", journal)
+        self.assertNotIn("654321", json.dumps(await task.observe()))
+
+    async def test_code_request_adapts_visible_labels_and_preserves_send_failure_reason(self):
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body=""))
+            await page.goto("https://ids.xidian.edu.cn/mfa")
+            for button in [
+                "<button onclick='window.sent=1'>发送验证码</button>",
+                "<input type=button value='Send code' onclick='window.sent=1'>",
+                "<span onclick='window.sent=1'>获取验证码</span>",
+            ]:
+                await page.set_content(
+                    "<button hidden>获取验证码</button><input name=otp>" + button
+                )
+                await page.evaluate("window.sent=0")
+                auth = PortalAuth(Owner(context, page), dict(self.credentials), True)
+                await auth.request_code()
+                self.assertEqual(await page.evaluate("window.sent"), 1)
+            for button, expected in [
+                ("<button disabled>获取验证码</button>", "LOGIN_CODE_SEND_DISABLED"),
+                (
+                    "<button>获取验证码</button><button>获取验证码</button>",
+                    "LOGIN_CODE_BUTTON_UNAVAILABLE",
+                ),
+                ("", "LOGIN_CODE_BUTTON_UNAVAILABLE"),
+            ]:
+                await page.set_content("<input name=otp>" + button)
+                auth = PortalAuth(Owner(context, page), dict(self.credentials), True)
+                with self.assertRaises(RpaIssue) as error:
+                    await auth.request_code()
+                self.assertEqual(error.exception.code, expected)
+                self.assertFalse(auth.last_code_request)
+            await page.set_content("<input name=otp><button disabled>59秒后重新获取</button>")
+            auth = PortalAuth(Owner(context, page), dict(self.credentials), True)
+            await auth.request_code()
+            self.assertTrue((await auth.observation())["code_requested"])
+        finally:
+            await browser.close()
+
+    async def test_english_trust_respects_both_saved_device_preferences(self):
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body=""))
+            await page.goto("https://ids.xidian.edu.cn/mfa")
+            for preference in [True, False]:
+                await page.set_content(
+                    """<h2>Trust this browser?</h2><button hidden>Trust this device</button><button onclick='window.choice=true'>Trust this device</button><button onclick='window.choice=false'>Not now</button>"""
+                )
+                auth = PortalAuth(Owner(context, page), dict(self.credentials), preference)
+                self.assertTrue(await auth.trust_available())
+                self.assertTrue(await auth.trust_prompt())
+                self.assertEqual(await page.evaluate("window.choice"), preference)
+        finally:
+            await browser.close()
 
     async def test_catalog_uses_page_agent_actions_and_keeps_same_name_ids_separate(self):
         await self.trusted()

@@ -9,8 +9,8 @@ description: 使用原页面 Agent 完成教师首次认证，并逐门更新本
 
 1. authentication.login_form 为 true、credentials_saved 为 true、credentials_filled 为 false 时，调用 fill_portal_credentials 自动填写已保存账号密码并提交。工具无参数，密码不能进入聊天或通用 fill。
 2. 滑块沿用已有 solve_slider_captcha 与执行器次数限制。完成后重新观察，不能把滑块消失当作登录成功。
-3. 需要验证码时，尚未获取则调用 request_login_code。教师在原任务浏览器中输入并交还自动化后，otp_entered 为 true 才调用 submit_login_code；没有填写或验证码无效时 request_human。不要从聊天收集、猜测或保存验证码。
-4. 出现可信浏览器弹窗时调用 apply_device_trust，按教师保存的设备信任选项处理。依靠 authentication.authenticated 核验登录成功。
+3. 需要验证码时，尚未获取则调用 request_login_code，执行器会点击官网的“获取/发送验证码”或 Get/Send code 按钮，再暂停并提醒教师输入。官网已有重发倒计时则直接等待输入，不重复发送。教师通过任务浏览器的验证码输入框提交，或在官网填写后继续；otp_entered 为 true 才调用 submit_login_code，由执行器点击登录。验证码未填写时不点击登录，不重复填写账号密码。不要从聊天收集、猜测或保存验证码。
+4. 提交验证码后若出现中英文可信浏览器/Trust this device 提示，优先调用 apply_device_trust，按教师保存的设备信任选项处理，不重复获取或提交验证码。依靠 authentication.authenticated 核验登录成功。
 5. AUTH_BOOTSTRAP 任务认证成功后直接在当前任务、当前浏览器继续下面的目录更新，不结束任务，不重新打开门户或登录。CATALOG_SYNC 若需登录也先执行上述认证，然后继续目录更新。authentication.authenticated 为 true 时不再填写账号密码；当前已有课程页、作业页或课程列表时从该页面继续，使用 catalog 和当前页面证据定位。
 
 ## 更新本学期所有课程与作业

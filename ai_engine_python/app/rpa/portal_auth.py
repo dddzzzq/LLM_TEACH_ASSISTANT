@@ -1,5 +1,7 @@
 """Secret-bearing login actions for the existing page Agent; no navigation loop."""
 
+import asyncio
+import hashlib
 import os
 import re
 import time
@@ -11,8 +13,53 @@ from playwright.async_api import TimeoutError as BrowserTimeout
 
 PASSWORD = "input[type=password]:visible"
 USERNAME = "#username:visible,#account:visible,input[name=username]:visible,input[autocomplete=username]:visible"
-OTP = "input[autocomplete=one-time-code]:visible,#dynamicCode:visible,input[name=otp]:visible,input[placeholder*=验证码]:visible,input[placeholder=请输入]:visible"
+OTP = "input[autocomplete=one-time-code]:visible,#dynamicCode:visible,input[name=otp]:visible,input[placeholder*=验证码]:visible,input[placeholder=请输入]:visible,input[placeholder*='verification code' i]:visible,input[placeholder*='security code' i]:visible"
 SENSITIVE = "input[type=password],input:not([type=checkbox]):not([type=radio]),textarea"
+CODE_REQUEST = re.compile(
+    r"^(?:(?:重新)?(?:获取|发送)(?:短信)?验证码|重新发送|获取动态码|发送动态码|"
+    r"(?:get|send|request|resend)(?:\s+(?:a|the))?\s+(?:(?:sms|verification|security)\s+)?code|resend)$",
+    re.I,
+)
+CODE_COUNTDOWN = re.compile(
+    r"^(?:(?:重新获取|重新发送|获取验证码|发送验证码|resend(?:\s+code)?(?:\s+in)?)\s*)?"
+    r"[（(]?\s*\d+\s*(?:秒|s|seconds?)\s*[）)]?\s*(?:后(?:重新)?(?:获取|发送))?$",
+    re.I,
+)
+TRUST_TITLE = re.compile(
+    r"可信(?:浏览器|设备)|trust(?:ed)?\s+(?:(?:this|your)\s+)?(?:browser|device)", re.I
+)
+TRUST_YES = re.compile(
+    r"^(?:信任此设备|信任此浏览器|trust\s+(?:this\s+)?(?:device|browser))\s*[?.！!。]?$", re.I
+)
+TRUST_NO = re.compile(
+    r"^(?:仅本次登录|暂不信任|不信任|(?:only\s+)?(?:this\s+time|log\s*in\s+once)|do\s+not\s+trust|don['’]t\s+trust(?:\s+this\s+(?:device|browser))?|not\s+now|skip)\s*[.!。]?$",
+    re.I,
+)
+INVALID_CODE = re.compile(
+    r"验证码错误|验证码无效|验证码已过期|verification\s+code\s+(?:error|invalid|expired)|"
+    r"(?:invalid|incorrect|expired)\s+(?:(?:verification|security)\s+code|captcha)",
+    re.I,
+)
+
+
+async def named_controls(frame, pattern):
+    """Prefer visible controls; hidden copies and unrelated containers are not actions."""
+    controls = frame.locator(
+        "button:visible,a:visible,input[type=button]:visible,input[type=submit]:visible,"
+        "[role=button]:visible,[onclick]:visible"
+    )
+    matches = []
+    for i in range(await controls.count()):
+        control = controls.nth(i)
+        label = await control.evaluate(
+            "e => (e.getAttribute('aria-label') || e.innerText || e.value || '').trim().replace(/\\s+/g, ' ')"
+        )
+        if pattern.fullmatch(label):
+            matches.append(control)
+    if not matches:
+        text = frame.get_by_text(pattern).filter(visible=True)
+        matches = [text.nth(i) for i in range(await text.count())]
+    return matches
 
 
 def origin(value):
@@ -42,19 +89,23 @@ class PortalAuth:
         self.identity_confirmed = False
         self.last_code_request = 0
         self.otp_submitted = 0
+        self.submitted_code_digest = None
 
-    async def trust_available(self):
+    async def trust_frame(self):
         for page in self.owner.context.pages:
             if page.is_closed() or origin(page.url) not in login_origins():
                 continue
             for frame in page.frames:
                 if origin(frame.url) not in login_origins():
                     continue
-                title = frame.get_by_text("可信浏览器提示", exact=True)
-                if await title.count() == 1 and await title.is_visible():
+                title = frame.get_by_text(TRUST_TITLE).filter(visible=True)
+                if await title.count():
                     self.owner.page = page
-                    return True
-        return False
+                    return frame
+        return None
+
+    async def trust_available(self):
+        return await self.trust_frame() is not None
 
     async def observation(self):
         """Only booleans reach the model, never form values or the account."""
@@ -71,13 +122,18 @@ class PortalAuth:
                 raise RpaIssue(
                     "INVALID_CREDENTIALS", "官网提示账号或密码错误，请修改设置后重新连接"
                 )
-            invalid_code = login.get_by_text(
-                re.compile(
-                    "验证码错误|验证码无效|验证码已过期|verification\\s+code\\s+(?:error|invalid|expired)|(?:invalid|incorrect|expired)\\s+(?:verification\\s+code|captcha)",
-                    re.I,
-                )
-            )
-            if await invalid_code.count() and await invalid_code.first.is_visible():
+        for frame in [login, otp]:
+            if frame is None:
+                continue
+            invalid_code = frame.get_by_text(INVALID_CODE).filter(visible=True)
+            if await invalid_code.count():
+                if frame == otp and self.submitted_code_digest is not None:
+                    entered = await frame.locator(OTP).input_value()
+                    if (
+                        entered
+                        and hashlib.sha256(entered.encode()).digest() != self.submitted_code_digest
+                    ):
+                        continue  # A teacher has replaced the rejected code; allow a new submission.
                 raise RpaIssue(
                     "LOGIN_VERIFICATION_FAILED",
                     "官网提示验证码校验失败，已停止重复填写账号密码；请检查当前登录验证",
@@ -88,7 +144,8 @@ class PortalAuth:
             "login_form": login is not None,
             "otp_required": otp is not None,
             "otp_entered": bool(await otp.locator(OTP).input_value()) if otp else False,
-            "code_requested": bool(self.last_code_request),
+            "code_requested": bool(self.last_code_request)
+            or bool(otp and await named_controls(otp, CODE_COUNTDOWN)),
             "trust_prompt": await self.trust_available(),
             "trust_device": self.trust_device,
         }
@@ -188,24 +245,17 @@ class PortalAuth:
         return None
 
     async def trust_prompt(self):
-        for page in self.owner.context.pages:
-            if page.is_closed() or origin(page.url) not in login_origins():
-                continue
-            for frame in page.frames:
-                if origin(frame.url) not in login_origins():
-                    continue
-                title = frame.get_by_text("可信浏览器提示", exact=True)
-                if not await title.count() or not await title.first.is_visible():
-                    continue
-                label = "信任此设备" if self.trust_device else "仅本次登录"
-                button = frame.get_by_role("button", name=label, exact=True)
-                if await button.count() != 1:
-                    button = frame.get_by_text(label, exact=True)
-                if await button.count() == 1 and await button.is_visible():
-                    self.owner.update(stage="TRUST_DECISION", message="正在应用教师的可信设备设置")
-                    await button.click(timeout=5000)
-                    return True
-        return False
+        frame = await self.trust_frame()
+        if frame is None:
+            return False
+        buttons = await named_controls(frame, TRUST_YES if self.trust_device else TRUST_NO)
+        if len(buttons) != 1 or not await buttons[0].is_enabled():
+            raise RpaIssue(
+                "DEVICE_TRUST_UNAVAILABLE", "官网可信设备选项暂不可用，请按已保存的设备设置核对弹窗"
+            )
+        self.owner.update(stage="TRUST_DECISION", message="正在应用教师的可信设备设置")
+        await buttons[0].click(timeout=5000)
+        return True
 
     async def identity(self):
         selector = os.environ.get(
@@ -237,37 +287,87 @@ class PortalAuth:
         return self.identity_confirmed
 
     async def request_code(self):
-        if time.monotonic() - self.last_code_request < 60:
-            raise ValueError("请等待官网验证码倒计时结束")
         frame = await self.otp_frame()
         if not frame:
-            raise ValueError("当前页面不需要验证码")
-        button = frame.get_by_text("获取验证码", exact=True)
-        if await button.count() != 1 or not await button.is_enabled():
-            raise ValueError("官网暂不允许发送验证码")
+            raise RpaIssue("LOGIN_CODE_PAGE_MISSING", "当前未找到官网验证码输入页，请核对认证页面")
+        # A countdown is evidence of an existing request, including codes sent by
+        # the school or teacher. Hand over for entry instead of clicking again.
+        if (
+            self.last_code_request and time.monotonic() - self.last_code_request < 60
+        ) or await named_controls(frame, CODE_COUNTDOWN):
+            await frame.locator(OTP).focus()
+            return
+        buttons = await named_controls(frame, CODE_REQUEST)
+        if len(buttons) != 1:
+            raise RpaIssue(
+                "LOGIN_CODE_BUTTON_UNAVAILABLE",
+                "未找到唯一可见的获取验证码按钮，请核对官网验证页面",
+                {"visible_matches": len(buttons)},
+            )
+        if not await buttons[0].is_enabled():
+            raise RpaIssue(
+                "LOGIN_CODE_SEND_DISABLED",
+                "官网获取验证码按钮暂不可用，请检查页面提示后继续",
+                {"visible_matches": 1, "enabled": False},
+            )
+        self.owner.update(message="正在点击官网获取验证码按钮")
         self.last_code_request = time.monotonic()
-        await button.click(timeout=5000)
+        try:
+            await buttons[0].click(timeout=5000)
+        except BrowserTimeout as exc:
+            raise RpaIssue(
+                "LOGIN_CODE_REQUEST_UNCONFIRMED",
+                "获取验证码操作未确认，请检查官网是否已发送，避免重复获取",
+            ) from exc
+        await frame.locator(OTP).focus()
+
+    async def fill_code(self, code, page=None):
+        if not isinstance(code, str) or not re.fullmatch(r"[0-9]{4,12}", code):
+            raise RpaIssue("LOGIN_CODE_FORMAT", "请输入 4 至 12 位数字验证码")
+        frame = await self.otp_frame()
+        if not frame or (page is not None and frame.page is not page):
+            raise RpaIssue("LOGIN_CODE_PAGE_MISSING", "验证码页面已变化，请检查当前认证页面")
+        await frame.locator(OTP).fill(code)
+        return frame
 
     async def verify_code(self, code):
         if not isinstance(code, str) or not re.fullmatch(r"[0-9]{4,12}", code):
-            raise ValueError("验证码格式无效")
+            raise RpaIssue("LOGIN_CODE_FORMAT", "请输入 4 至 12 位数字验证码")
         frame = await self.otp_frame()
         if not frame or time.monotonic() - self.otp_submitted < 3:
-            raise ValueError("请等待当前验证完成")
-        button = frame.get_by_role("button", name="登录", exact=True)
-        if await button.count() != 1:
-            button = frame.get_by_text("登录", exact=True)
-        if await button.count() != 1:
-            raise ValueError("请在认证浏览器中提交验证码")
+            raise RpaIssue("LOGIN_CODE_PENDING", "请等待官网完成当前验证码校验")
+        digest = hashlib.sha256(code.encode()).digest()
+        if self.submitted_code_digest == digest:
+            raise RpaIssue("LOGIN_CODE_PENDING", "已提交该验证码，请核对官网校验结果，避免重复登录")
+        buttons = await named_controls(
+            frame,
+            re.compile(
+                r"^(?:登录|验证并登录|log\s*in|sign\s*in|verify(?:\s+and\s+(?:log|sign)\s*in)?)$",
+                re.I,
+            ),
+        )
+        if len(buttons) != 1:
+            raise RpaIssue(
+                "LOGIN_CODE_SUBMIT_UNAVAILABLE", "未找到唯一可见的登录按钮，请在认证浏览器中核对"
+            )
         await frame.locator(OTP).fill(code)
         self.otp_submitted = time.monotonic()
-        await button.click(timeout=5000)
-        if await frame.locator(OTP).count() == 1:
-            await frame.locator(OTP).fill("")
+        self.submitted_code_digest = digest
+        await buttons[0].click(timeout=5000)
+        # Some login handlers read the field asynchronously. Keep it in the
+        # masked browser until the school consumes it; never clear it on click.
+        for _ in range(30):
+            if await self.trust_available() or await self.otp_frame() is None:
+                return
+            if await frame.get_by_text(INVALID_CODE).filter(visible=True).count():
+                raise RpaIssue(
+                    "LOGIN_VERIFICATION_FAILED", "官网提示验证码无效或已过期，请重新核对验证码"
+                )
+            await asyncio.sleep(0.1)
 
     async def submit_entered_code(self):
         frame = await self.otp_frame()
         if not frame:
-            raise ValueError("当前页面不需要验证码")
+            raise RpaIssue("LOGIN_CODE_PAGE_MISSING", "当前未找到官网验证码输入页")
         # Read inside the Worker only; the Agent calls a parameterless action.
         await self.verify_code(await frame.locator(OTP).input_value())

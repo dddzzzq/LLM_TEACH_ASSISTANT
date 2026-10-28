@@ -1,55 +1,61 @@
 <template>
   <aside class="app-sidebar" aria-label="主导航">
-    <div class="sidebar-brand">
-      <div class="brand-symbol"><AppIcon name="book" /></div>
-      <div><h1>教师作业助手</h1><p>AI 协作 · 作业批改</p></div>
-    </div>
-    <div class="sidebar-nav-label">工作空间</div>
-    <nav class="sidebar-navigation">
+    <router-link to="/assignments" class="sidebar-brand" aria-label="教师作业助手首页">
+      <span class="brand-symbol"><AppIcon name="book" /></span>
+      <span><strong>教师作业助手</strong><small>让教学更从容</small></span>
+    </router-link>
+    <nav class="sidebar-navigation" aria-label="工作区">
       <router-link
         v-for="item in filteredMenuItems"
-        :key="item.name"
+        :key="item.path"
         :to="item.path"
-        :aria-label="item.name"
         class="sidebar-link"
         :class="{
-          'is-active':
-            item.path === '/assignments'
-              ? route.path.startsWith('/assignments') || route.path === '/grade-homework'
-              : route.path === item.path,
+          'is-active': route.path.startsWith('/assignments') || route.path === '/grade-homework',
         }"
+        :aria-label="item.name"
+        ><AppIcon :name="item.icon" />{{ item.name }}</router-link
       >
-        <AppIcon :name="item.icon" /><span>{{ item.name }}</span>
-        <span v-if="item.path === '/ai-assistant'" class="ai-label">AI</span>
-      </router-link>
+      <div class="sidebar-views" v-if="route.path.startsWith('/assignments')">
+        <router-link
+          :to="{ path: '/assignments', query: { view: 'attention' } }"
+          :class="{ 'is-current': route.query.view === 'attention' }"
+          >需要处理</router-link
+        >
+        <router-link
+          :to="{ path: '/assignments', query: { view: 'processing' } }"
+          :class="{ 'is-current': route.query.view === 'processing' }"
+          >正在批改</router-link
+        >
+        <router-link
+          :to="{ path: '/assignments', query: { view: 'graded' } }"
+          :class="{ 'is-current': route.query.view === 'graded' }"
+          >已有成绩</router-link
+        >
+      </div>
     </nav>
-    <details class="sidebar-resources" open>
-      <summary>资源与设置</summary>
-      <nav aria-label="资源与设置">
-        <router-link to="/materials" class="sidebar-link"
-          ><AppIcon name="file" />作业材料</router-link
-        >
-        <router-link to="/settings/portal" class="sidebar-link"
-          ><AppIcon name="settings" />教务账号</router-link
-        >
-        <details class="sidebar-advanced"
-          ><summary>更多设置</summary>
-          <router-link to="/tools-admin" class="sidebar-link">工具与技能</router-link>
-          <router-link v-if="currentUser?.role === 'admin'" to="/logs" class="sidebar-link"
-            >运行日志</router-link
-          >
-        </details>
-      </nav>
-    </details>
+    <div class="sidebar-helper"
+      ><AppIcon name="chat" /><p>AI 助手随时在侧<br /><span>点击右下角图标开始对话</span></p></div
+    >
+    <nav class="sidebar-resources" aria-label="辅助功能">
+      <router-link to="/materials" class="sidebar-link"
+        ><AppIcon name="file" />导入记录</router-link
+      >
+      <router-link to="/settings/portal" class="sidebar-link"
+        ><AppIcon name="settings" />教务连接</router-link
+      >
+      <router-link v-if="currentUser?.role === 'admin'" to="/logs" class="sidebar-link"
+        ><AppIcon name="shield" />运行日志</router-link
+      >
+    </nav>
     <div class="sidebar-footer">
-      <div v-if="currentUser" class="sidebar-user">
-        <div class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</div>
-        <div class="user-info"
+      <div v-if="currentUser" class="sidebar-user"
+        ><span class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</span
+        ><div class="user-info"
           ><p :title="hasRealName ? '真实姓名' : '登录账号'">{{ displayName }}</p
           ><span>{{ currentUser.username }}</span></div
-        >
-        <span class="user-role">{{ getRoleName(currentUser.role) }}</span>
-      </div>
+        ></div
+      >
       <button @click="handleLogout" class="logout-button"
         ><AppIcon name="logout" /><span>退出登录</span></button
       >
@@ -97,7 +103,6 @@ onMounted(async () => {
   }
 });
 
-const getRoleName = () => '教师工作区';
 const filteredMenuItems = computed(() => mainNavigation);
 // 处理退出登录
 const handleLogout = async () => {
@@ -116,327 +121,246 @@ const handleLogout = async () => {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 244px;
+  width: 204px;
   height: 100%;
-  background: #fff;
-  border-right: 1px solid #e0e7ee;
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-line);
 }
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: 11px;
-  min-height: 100px;
-  padding: 21px 24px;
+  padding: 28px 18px 32px;
+  color: var(--color-ink);
 }
 .brand-symbol {
   display: grid;
   place-items: center;
-  width: 39px;
+  width: 36px;
   height: 39px;
   flex-shrink: 0;
-  background: var(--color-accent);
-  border-radius: 11px;
-  color: #fff;
+  color: var(--color-accent);
 }
 .brand-symbol svg {
-  width: 23px;
-  height: 23px;
+  width: 30px;
+  height: 30px;
 }
-.sidebar-brand h1 {
-  color: #142d40;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.4px;
+.sidebar-brand strong {
+  font-size: 15px;
+  letter-spacing: -0.3px;
 }
-.sidebar-brand p {
-  color: #66788a;
-  font-size: 10px;
+.sidebar-brand small {
+  display: block;
   margin-top: 5px;
-}
-.sidebar-nav-label {
-  font-size: 10px;
-  color: #66788a;
-  padding: 17px 28px 13px;
+  font-size: 12px;
+  color: var(--color-muted);
 }
 .sidebar-navigation {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 15px;
-  overflow-y: auto;
+  padding: 0 12px;
 }
 .sidebar-link {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 14px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 11px 12px;
   border-radius: 8px;
-  color: #4c6072;
   font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
+  color: var(--color-muted);
   transition:
     background 150ms,
     color 150ms;
 }
-.sidebar-link > svg {
-  width: 19px;
-  height: 19px;
+.sidebar-link svg {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  color: #66788a;
 }
 .sidebar-link:hover {
-  color: var(--color-accent);
-  background: #f5f6ff;
+  background: var(--color-paper);
+  color: var(--color-ink);
 }
 .sidebar-link.is-active,
 .sidebar-link.router-link-exact-active {
-  color: #4455cf;
-  background: #eef0ff;
-  font-weight: 600;
-}
-.sidebar-link.is-active > svg,
-.sidebar-link.router-link-exact-active > svg {
+  background: var(--color-paper);
   color: var(--color-accent);
+  font-weight: 650;
+  box-shadow: var(--shadow-subtle);
 }
-.sidebar-link.is-active::before {
-  content: '';
-  position: absolute;
-  left: -15px;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--color-accent);
+.sidebar-views {
+  display: grid;
+  padding: 8px 0 0 40px;
+  gap: 2px;
 }
-.ai-label {
-  margin-left: auto;
-  padding: 1px 5px;
-  border: 1px solid #d9e7e4;
-  border-radius: 4px;
-  font-size: 9px;
-  color: var(--color-accent);
-}
-.sidebar-note {
-  display: flex;
-  gap: 11px;
-  margin: auto 25px 28px;
-  padding-top: 40px;
-  color: var(--color-accent);
-}
-.sidebar-note > svg {
-  width: 20px;
-  height: 20px;
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-.sidebar-note p {
+.sidebar-views a {
+  padding: 9px 0;
   font-size: 12px;
-  line-height: 1.9;
+  min-height: 36px;
+  color: var(--color-muted);
 }
-.sidebar-note span {
-  color: #66788a;
+.sidebar-views a:hover,
+.sidebar-views .is-current {
+  color: var(--color-accent);
+}
+.sidebar-helper {
+  display: flex;
+  gap: 9px;
+  margin: auto 18px 24px;
+  padding-top: 28px;
+  color: var(--color-muted);
+}
+.sidebar-helper svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sidebar-helper p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.sidebar-helper span {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.sidebar-resources {
+  display: grid;
+  padding: 0 12px 12px;
+  gap: 3px;
 }
 .sidebar-footer {
-  margin-top: auto;
-  border-top: 1px solid #e0e7ee;
-  padding: 20px 21px 17px;
+  border-top: 1px solid var(--color-line);
+  padding: 18px;
 }
 .sidebar-user {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 }
 .user-avatar {
   display: grid;
   place-items: center;
-  width: 35px;
-  height: 35px;
-  flex-shrink: 0;
-  background: #eef0ff;
-  border: 1px solid #d9e7e4;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
   color: var(--color-accent);
   font-size: 13px;
-  font-weight: 600;
 }
 .user-info {
   min-width: 0;
 }
 .user-info p {
-  color: #20384c;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.user-info > span {
-  color: #66788a;
-  font-size: 10px;
-}
-.user-role {
-  color: #66788a;
-  margin-left: auto;
-  font-size: 9px;
-  background: #f4f7fa;
-  border-radius: 4px;
-  padding: 3px 6px;
-  flex-shrink: 0;
+.user-info span {
+  font-size: 11px;
+  color: var(--color-muted);
 }
 .logout-button {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  margin-top: 17px;
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid #e0e7ee;
-  border-radius: 7px;
-  color: #66788a;
-  font-size: 11px;
-  transition:
-    background 150ms,
-    color 150ms;
-}
-.logout-button:hover {
-  background: #fff3f3;
-  color: #b44040;
-  border-color: #f2dada;
+  margin-top: 14px;
+  color: var(--color-muted);
+  font-size: 12px;
+  min-height: 32px;
 }
 .logout-button svg {
   width: 15px;
   height: 15px;
 }
-@media (max-width: 1100px) and (min-width: 761px) {
+.logout-button:hover {
+  color: var(--color-danger);
+}
+@media (max-width: 1000px) and (min-width: 761px) {
   .app-sidebar {
-    width: 216px;
+    width: 188px;
   }
   .sidebar-brand {
-    padding-left: 19px;
-    gap: 9px;
+    padding-left: 14px;
+    padding-right: 14px;
   }
-  .sidebar-brand h1 {
-    font-size: 15px;
+  .sidebar-brand strong {
+    font-size: 14px;
   }
 }
 @media (max-width: 760px) {
   .app-sidebar {
-    position: relative;
     width: 100%;
     height: auto;
     border-right: 0;
-    border-bottom: 1px solid #e0e7ee;
+    border-bottom: 1px solid var(--color-line);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 10px 16px;
+    gap: 6px;
   }
   .sidebar-brand {
-    min-height: 70px;
-    padding: 15px 18px;
+    padding: 0;
+    gap: 8px;
   }
   .brand-symbol {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
+    width: 29px;
+    height: 32px;
   }
-  .sidebar-brand h1 {
-    font-size: 15px;
+  .brand-symbol svg {
+    width: 25px;
+    height: 25px;
   }
-  .sidebar-brand p,
-  .sidebar-nav-label,
-  .sidebar-note,
+  .sidebar-brand small,
+  .sidebar-views,
+  .sidebar-helper,
   .sidebar-user {
     display: none;
   }
   .sidebar-navigation {
-    flex-direction: row;
-    gap: 5px;
-    padding: 0 14px 11px;
-    overflow-x: auto;
-    scrollbar-width: thin;
+    padding: 0;
+    grid-column: 2;
+    grid-row: 1;
   }
   .sidebar-link {
-    padding: 10px;
-    font-size: 11px;
-    gap: 6px;
+    font-size: 12px;
+    padding: 8px 10px;
+    min-height: 36px;
   }
-  .sidebar-link > svg {
+  .sidebar-link svg {
     width: 16px;
     height: 16px;
   }
-  .sidebar-link.is-active::before {
-    display: none;
+  .sidebar-resources {
+    display: flex;
+    padding: 0;
+    grid-column: 1/-1;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-right: 70px;
   }
-  .ai-label {
-    display: none;
+  .sidebar-resources .sidebar-link {
+    font-size: 12px;
+    padding: 6px 8px;
+    min-height: 32px;
   }
   .sidebar-footer {
-    position: absolute;
-    top: 18px;
-    right: 18px;
+    grid-column: 2;
+    grid-row: 2;
     border: 0;
     padding: 0;
+    align-self: center;
   }
   .logout-button {
     margin: 0;
-    padding: 7px 9px;
-    font-size: 10px;
-  }
-}
-
-.sidebar-resources {
-  padding: 28px 15px 20px;
-}
-.sidebar-resources > summary {
-  list-style: none;
-  font-size: 10px;
-  color: var(--color-muted);
-  padding: 0 13px 14px;
-  cursor: pointer;
-}
-.sidebar-resources .sidebar-link {
-  font-size: 12px;
-  padding: 11px 14px;
-}
-.sidebar-advanced {
-  font-size: 11px;
-  color: var(--color-muted);
-  margin-top: 8px;
-}
-.sidebar-advanced > summary {
-  padding: 10px 14px;
-  cursor: pointer;
-}
-.sidebar-advanced .sidebar-link {
-  padding-left: 26px;
-  font-size: 11px;
-}
-@media (max-width: 760px) {
-  .sidebar-resources {
-    padding: 0 14px 8px;
-  }
-  .sidebar-resources > summary {
-    font-size: 11px;
-    padding: 3px 10px 8px;
-  }
-  .sidebar-resources:not([open]) {
-    padding-bottom: 0;
-  }
-  .sidebar-resources nav {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .sidebar-resources .sidebar-link {
-    padding: 6px 10px;
+    min-height: 32px;
     font-size: 11px;
   }
-  .sidebar-advanced {
-    margin-top: 0;
-  }
-  .sidebar-advanced > summary {
-    padding: 6px 10px;
+  .logout-button svg {
+    width: 13px;
+    height: 13px;
   }
 }
 </style>

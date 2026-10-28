@@ -7,7 +7,6 @@ import AssignmentDetailView from '../views/AssignmentDetailView.vue';
 import CreateAssignmentView from '../views/CreateAssignmentView.vue';
 import AIAssistantView from '../views/AIAssistantView.vue';
 import LoginView from '../views/LoginView.vue';
-import ToolsAdminView from '../views/ToolsAdminView.vue';
 import LogsView from '../views/LogsView.vue';
 import MaterialsView from '../views/MaterialsView.vue';
 import PortalSettingsView from '../views/PortalSettingsView.vue';
@@ -33,8 +32,7 @@ const router = createRouter({
     {
       path: '/tools-admin',
       alias: '/skills-admin',
-      name: 'skills-admin',
-      component: ToolsAdminView,
+      redirect: '/assignments',
     },
     { path: '/logs', name: 'logs', component: LogsView, meta: { admin: true } },
     { path: '/:pathMatch(.*)*', redirect: '/assignments' },

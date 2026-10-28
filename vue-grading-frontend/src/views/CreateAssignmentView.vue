@@ -1,15 +1,13 @@
 <template>
   <div class="create-assignment">
-    <router-link to="/assignments" class="back-link">← 返回作业批改</router-link>
+    <router-link to="/assignments" class="back-link">返回作业工作台</router-link>
     <header class="page-heading"
       ><div
-        ><h1 class="page-title">新建作业</h1
-        ><p class="page-description"
-          >先保存作业内容和评分标准，再导入学生材料。默认处理全部班级。</p
-        ></div
+        ><h1 class="page-title">新建本地作业</h1
+        ><p class="page-description">保存题目和评分标准，随后按班级导入学生材料。</p></div
       ></header
     >
-    <form class="create-form surface" @submit.prevent="createAssignment">
+    <form class="create-form surface" @submit.prevent="createAssignment($event)">
       <section
         ><div class="section-title"><span>01</span><h2>基本信息</h2></div
         ><div class="form-columns"
@@ -43,9 +41,19 @@
       <div v-if="error" class="workspace-error" role="alert">{{ error }}</div>
       <footer
         ><router-link to="/assignments" class="workspace-button">取消</router-link
-        ><button class="workspace-button primary" :disabled="isLoading || !rubric" type="submit">{{
-          isLoading ? '保存中…' : '保存并查看作业'
-        }}</button></footer
+        ><button
+          class="workspace-button"
+          :disabled="isLoading || !rubric"
+          type="submit"
+          value="content"
+          >仅创建作业</button
+        ><button
+          class="workspace-button primary"
+          :disabled="isLoading || !rubric"
+          type="submit"
+          value="materials"
+          >{{ isLoading ? '保存中…' : '创建并导入材料' }}</button
+        ></footer
       >
     </form>
   </div>
@@ -68,7 +76,8 @@ const rubric = ref(
     文档报告: { description: '报告内容详实，格式正确', score: 20 },
   })
 );
-async function createAssignment() {
+async function createAssignment(event) {
+  const nextTab = event?.submitter?.value === 'content' ? 'content' : 'materials';
   if (isLoading.value) return;
   isLoading.value = true;
   error.value = '';
@@ -80,7 +89,9 @@ async function createAssignment() {
       question: question.value,
       rubric: JSON.parse(rubric.value),
     });
-    await router.push(data.id ? `/assignments/${data.id}` : '/assignments');
+    await router.push(
+      data.id ? { path: `/assignments/${data.id}`, query: { tab: nextTab } } : '/assignments'
+    );
   } catch (e) {
     error.value = e instanceof SyntaxError ? '请完善评分标准。' : '保存失败，请稍后重试。';
   } finally {
@@ -110,7 +121,7 @@ async function createAssignment() {
 .section-title span {
   font-size: 11px;
   color: var(--color-accent);
-  background: #eef0ff;
+  background: var(--color-accent-soft);
   border-radius: 6px;
   padding: 5px 7px;
 }
