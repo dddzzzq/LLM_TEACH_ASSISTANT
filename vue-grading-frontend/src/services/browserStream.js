@@ -21,10 +21,13 @@ export function createBrowserStream({
     sequence = 0;
   let lastMessage = 0;
   const pending = new Map();
+  const confirmations = new Map();
   function closeConnection() {
     ready = false;
     clearInterval(heartbeat);
     pending.clear();
+    for (const entry of confirmations.values()) entry.reject(new Error('输入结果未确认'));
+    confirmations.clear();
     const previous = socket;
     socket = undefined;
     previous?.close();
@@ -84,8 +87,11 @@ export function createBrowserStream({
           ready = true;
           onState?.('connected');
         } else if (message.type === 'frame') onFrame?.(message);
-        else if (message.type === 'input_ack') pending.delete(message.id);
-        else if (message.type === 'error') onError?.(message.message || '浏览器操作未完成');
+        else if (message.type === 'input_ack') {
+          pending.delete(message.id);
+          confirmations.get(message.id)?.resolve();
+          confirmations.delete(message.id);
+        } else if (message.type === 'error') onError?.(message.message || '浏览器操作未完成');
         else if (message.type === 'ended') {
           stop();
           onError?.(message.message);
@@ -106,7 +112,7 @@ export function createBrowserStream({
     active = true;
     connect();
   }
-  function send(action) {
+  function send(action, { waitForAck = false } = {}) {
     if (!ready || !socket || socket.readyState !== 1) throw new Error('浏览器尚未连接');
     if (socket.bufferedAmount > 128 * 1024 || pending.size >= 128) {
       failed('连接过慢，操作已停止，请检查画面后重试');
@@ -114,12 +120,16 @@ export function createBrowserStream({
     }
     const id = ++sequence;
     pending.set(id, Date.now());
+    const confirmed = waitForAck
+      ? new Promise((resolve, reject) => confirmations.set(id, { resolve, reject }))
+      : undefined;
     try {
       socket.send(JSON.stringify({ type: 'input', id, action }));
     } catch (error) {
       failed('操作结果未确认，请检查画面后重试');
-      throw error;
+      if (!waitForAck) throw error;
     }
+    return confirmed;
   }
   return { start, stop, send };
 }

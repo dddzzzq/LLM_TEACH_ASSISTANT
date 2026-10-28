@@ -116,3 +116,34 @@ test('stopping while authentication is pending cannot create a stale connection'
   await pause(10);
   assert.equal(f.sockets.length, 0);
 });
+
+test('code collection waits for the Worker acknowledgement before continuing login', async (t) => {
+  const f = fixture();
+  t.after(() => f.stream.stop());
+  const socket = await f.open();
+  let filled = false;
+  const result = f.stream.send({ kind: 'login_code', text: '123456' }, { waitForAck: true });
+  result.then(() => {
+    filled = true;
+  });
+  await pause(10);
+  assert.equal(filled, false);
+  socket.message({ type: 'input_ack', id: 1 });
+  await result;
+  assert.equal(filled, true);
+});
+
+test('disconnecting rejects an unconfirmed code and never resends it', async (t) => {
+  const f = fixture();
+  t.after(() => f.stream.stop());
+  const socket = await f.open();
+  const result = f.stream.send({ kind: 'login_code', text: '123456' }, { waitForAck: true });
+  const rejected = assert.rejects(result, /输入结果未确认/);
+  socket.close();
+  await rejected;
+  await until(() => f.sockets.length === 2);
+  const next = f.sockets[1];
+  next.onopen();
+  next.message({ type: 'ready' });
+  assert.equal(next.sent.length, 1);
+});

@@ -274,6 +274,7 @@ async def health():
         "browser_startup": "bounded-cooldown.v2",
         "portal_auth_catalog": "same-browser.v1",
         "portal_automation": "teacher.portal.agent.v2",
+        "portal_code_input": "teacher.code.browser.v1",
         "catalog_reader": "homework.dom.v2",
         "catalog_navigation": "catalog.viewport.v1",
         "homework_detail": "question.resources.v1",
