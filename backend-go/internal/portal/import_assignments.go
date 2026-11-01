@@ -167,6 +167,14 @@ func (s *Service) SaveAssignmentRubric(ctx context.Context, owner, id uint, rubr
 }
 
 func (s *Service) GradeAssignmentClasses(ctx context.Context, owner, id uint, classes []string, key string) (models.PortalWorkflow, error) {
+	return s.gradeAssignmentClasses(ctx, owner, id, classes, false, key)
+}
+
+func (s *Service) GradeAllAssignmentClasses(ctx context.Context, owner, id uint, key string) (models.PortalWorkflow, error) {
+	return s.gradeAssignmentClasses(ctx, owner, id, nil, true, key)
+}
+
+func (s *Service) gradeAssignmentClasses(ctx context.Context, owner, id uint, classes []string, all bool, key string) (models.PortalWorkflow, error) {
 	var a models.Assignment
 	if s.DB.WithContext(ctx).First(&a, "id = ? AND owner_id = ?", id, owner).Error != nil {
 		return models.PortalWorkflow{}, ErrNotFound
@@ -177,6 +185,19 @@ func (s *Service) GradeAssignmentClasses(ctx context.Context, owner, id uint, cl
 	c, err := s.connection(ctx, owner, false)
 	if err != nil {
 		return models.PortalWorkflow{}, err
+	}
+	if all {
+		var work models.PortalHomework
+		if s.DB.WithContext(ctx).First(&work, "id = ? AND connection_id = ? AND snapshot_id = ? AND assignment_id = ?", a.PortalHomeworkID, c.ID, c.ActiveSnapshotID, a.ID).Error != nil {
+			return models.PortalWorkflow{}, ErrNotFound
+		}
+		var catalog []models.PortalCourseClass
+		if err := s.DB.WithContext(ctx).Where("course_id = ? AND snapshot_id = ?", work.CourseID, c.ActiveSnapshotID).Order("id").Find(&catalog).Error; err != nil {
+			return models.PortalWorkflow{}, err
+		}
+		for _, class := range catalog {
+			classes = append(classes, class.ID)
+		}
 	}
 	if len(classes) == 0 {
 		return models.PortalWorkflow{}, errors.New("请选择要批改的班级")

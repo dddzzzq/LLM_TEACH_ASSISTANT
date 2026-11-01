@@ -71,20 +71,9 @@
             @input="error = ''"
           />
         </label>
-        <label for="rpa-rubric"
-          >评分标准（JSON）<textarea
-            id="rpa-rubric"
-            v-model="rubric"
-            :disabled="saving || !loaded"
-            rows="7"
-            required
-            spellcheck="false"
-            placeholder='例如：{"正确性": 60, "代码质量": 40}'
-            @input="error = ''"
-          />
-        </label>
+        <RubricEditor v-model="rubric" :disabled="saving || !loaded" />
         <p class="text-xs text-slate-500"
-          >请填写非空 JSON 对象。已有内容会保留，可在此补充或修改。</p
+          >按评分项填写分值和要求；已有内容会保留。JSON 仅作为高级编辑方式。</p
         >
       </form>
     </template>
@@ -140,6 +129,7 @@ import { useRouter } from 'vue-router';
 import authApi from '../services/authApi';
 import AppModal from './AppModal.vue';
 import RpaTargetResolver from './RpaTargetResolver.vue';
+import RubricEditor from './RubricEditor.vue';
 
 const router = useRouter(),
   api = authApi.getClient();
@@ -256,10 +246,7 @@ async function refresh() {
     for (const key of drafts.keys()) if (!keys.has(key)) drafts.delete(key);
     remember();
     if (current.value && !keys.has(current.value.key) && !saving.value) current.value = null;
-    if (!current.value && !saving.value && !showInbox.value) {
-      const next = notices.value.find((n) => !seen.has(n.key));
-      if (next) await openNotice(next);
-    }
+    // Keep teachers in their current editing flow; the persistent badge opens the inbox on demand.
   } catch {
     /* A network failure must not create a human-intervention prompt. */
   } finally {
@@ -396,7 +383,7 @@ onBeforeUnmount(() => {
 .attention-launcher {
   position: fixed;
   right: 24px;
-  bottom: 24px;
+  bottom: 92px;
   z-index: 60;
   padding: 12px 16px;
   display: flex;
@@ -408,6 +395,13 @@ onBeforeUnmount(() => {
   color: #825018;
   font-size: 13px;
   box-shadow: 0 4px 20px #142d4014;
+}
+@media (max-width: 760px) {
+  .attention-launcher {
+    right: 16px;
+    bottom: 86px;
+    max-width: calc(100vw - 32px);
+  }
 }
 .attention-launcher span {
   min-width: 24px;

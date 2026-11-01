@@ -2,7 +2,8 @@
   <section class="materials-panel" aria-label="作业材料与批改">
     <header class="materials-heading"
       ><div
-        ><h2>导入记录与批改</h2><p>查看学生文件、处理材料异常，再开始批改或查看本批成绩。</p></div
+        ><h2>导入记录与批改</h2
+        ><p>查看学生文件、处理材料异常，开始或重新批改，也可查看本批成绩。</p></div
       ><button class="secondary-button" :disabled="loading" @click="load">刷新批次</button></header
     >
     <form
@@ -53,6 +54,9 @@
           >批改：{{ status(grades[batch.grading_job_id]?.status || batch.grading_state) }} ·
           {{ batch.grading_job_id }}</p
         >
+        <p v-if="grades[batch.grading_job_id]?.message" class="batch-meta">{{
+          grades[batch.grading_job_id].message
+        }}</p>
         <p v-else-if="batch.grading_state === 'WAITING_REQUIREMENTS'" class="material-warning"
           >已请求批改，等待补齐本作业的题目与评分标准。</p
         >
@@ -82,11 +86,18 @@
             >查看本批成绩</button
           >
           <button
-            v-if="!batch.grading_job_id && ['READY', 'NEEDS_REVIEW'].includes(batch.status)"
+            v-if="['READY', 'NEEDS_REVIEW'].includes(batch.status)"
             class="primary-button"
-            :disabled="busy || (batch.status === 'NEEDS_REVIEW' && !partial[batch.id])"
+            :disabled="
+              busy ||
+              isGrading(batch) ||
+              (batch.grading_job_id && !canRegrade(batch)) ||
+              (batch.status === 'NEEDS_REVIEW' && !partial[batch.id])
+            "
             @click="grade(batch)"
-            >开始批改</button
+            >{{
+              isGrading(batch) ? '正在批改，请等待' : batch.grading_job_id ? '重新批改' : '开始批改'
+            }}</button
           >
           <button
             v-if="!batch.grading_job_id && batch.status !== 'CANCELLED'"
@@ -96,8 +107,13 @@
             >取消后续处理</button
           >
         </div>
+        <p
+          v-if="canRegrade(batch) && ['READY', 'NEEDS_REVIEW'].includes(batch.status)"
+          class="batch-meta"
+          >可复用本批材料重新批改，无需再次下载；更新 AI 评分，保留人工复核。</p
+        >
         <label
-          v-if="batch.status === 'NEEDS_REVIEW' && !batch.grading_job_id"
+          v-if="batch.status === 'NEEDS_REVIEW' && !isGrading(batch)"
           class="check partial-choice"
           ><input
             v-model="partial[batch.id]"
@@ -133,7 +149,16 @@
         ><p v-for="warning in student.warnings" :key="warning" class="material-warning">{{
           warning
         }}</p
-        ><ul
+        ><p v-for="source in studentSources(student)" :key="source.id" class="batch-meta"
+          >附件来源：{{ source.name }}（{{ source.format.toUpperCase() }}）</p
+        >
+        <p
+          v-for="skipped in student.skipped_files || []"
+          :key="skipped.path"
+          class="material-warning"
+          >{{ skipped.path }}：{{ skipped.reason }}</p
+        >
+        <ul
           ><li v-for="file in student.files" :key="file.path"
             ><span>{{ { code: '程序', report: '报告', other: '其他' }[file.kind] }}</span>
             {{ file.path }}</li
@@ -177,6 +202,12 @@ const canViewLogs = computed(() => authApi.getCurrentUser()?.role === 'admin');
 let timer,
   disposed = false,
   pending;
+const regradeIntents = new Map();
+const gradingStatus = (batch) => grades.value[batch.grading_job_id]?.status || batch.grading_state;
+const isGrading = (batch) => ['PENDING', 'PROCESSING', 'REQUESTED'].includes(gradingStatus(batch));
+const canRegrade = (batch) =>
+  Boolean(batch.grading_job_id) &&
+  ['SUCCESS', 'FAILED', 'CANCELLED'].includes(gradingStatus(batch));
 const date = (v) =>
   new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 const status = (v) =>
@@ -246,6 +277,11 @@ async function inspect(batch) {
     error.value = e.response?.data?.error || '读取材料清单失败';
   }
 }
+function studentSources(student) {
+  return (detail.value?.manifest?.sources || []).filter(
+    (source) => source.student_id && student.source_ids?.includes(source.id)
+  );
+}
 async function retry(batch) {
   if (busy.value) return;
   busy.value = true;
@@ -262,10 +298,35 @@ async function retry(batch) {
   }
 }
 async function grade(batch) {
+  if (busy.value || isGrading(batch)) return;
+  const regrade = Boolean(batch.grading_job_id);
+  if (
+    regrade &&
+    (!canRegrade(batch) ||
+      !confirm(
+        '确定使用本批已准备的材料重新批改？将按当前题目与评分标准更新本批 AI 评分，已有人工复核分数和评语保留。'
+      ))
+  )
+    return;
   busy.value = true;
   error.value = '';
   try {
-    const { data } = await materialsApi.grade(batch.id, Boolean(partial[batch.id]));
+    let response;
+    if (regrade) {
+      let intent = regradeIntents.get(batch.id);
+      if (!intent || intent.previous !== batch.grading_job_id) {
+        intent = { previous: batch.grading_job_id, key: crypto.randomUUID() };
+        regradeIntents.set(batch.id, intent);
+      }
+      response = await materialsApi.regrade(
+        batch.id,
+        Boolean(partial[batch.id]),
+        intent.previous,
+        intent.key
+      );
+      regradeIntents.delete(batch.id);
+    } else response = await materialsApi.grade(batch.id, Boolean(partial[batch.id]));
+    const { data } = response;
     notice.value = data.message;
     await load();
   } catch (e) {

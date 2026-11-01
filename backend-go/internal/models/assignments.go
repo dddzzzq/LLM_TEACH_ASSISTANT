@@ -17,6 +17,9 @@ type Assignment struct {
 
 // Submission 学生提交记录表
 type Submission struct {
+	ReadingStatus      string  `gorm:"size:32"`
+	ReadingReport      string  `gorm:"type:longtext"`
+	ScoreDetails       string  `gorm:"type:longtext"`
 	MaterialBatchID    string  `gorm:"size:36;index"`
 	GradingJobID       string  `gorm:"size:36;index"`
 	ID                 uint    `gorm:"primaryKey"`                                                                                                  // 主键

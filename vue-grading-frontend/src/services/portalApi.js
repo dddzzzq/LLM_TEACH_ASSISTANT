@@ -13,10 +13,10 @@ export function createPortalApi(client) {
     assignment: (assignmentId) => client.get(`${base}/assignments/${id(assignmentId)}`),
     saveRubric: (assignmentId, rubric) =>
       client.put(`${base}/assignments/${id(assignmentId)}/rubric`, { rubric }),
-    gradeClasses: (assignmentId, classIds, key) =>
+    gradeClasses: (assignmentId, classIds, key, allClasses = false) =>
       client.post(
         `${base}/assignments/${id(assignmentId)}/grade`,
-        { class_ids: classIds },
+        { class_ids: classIds, ...(allClasses ? { all_classes: true } : {}) },
         { headers: { 'Idempotency-Key': key } }
       ),
     homeworkDetail: (homeworkId) => client.get(`${base}/homeworks/${id(homeworkId)}/detail`),

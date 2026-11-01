@@ -18,11 +18,17 @@ BROWSER_TOOLS = {
     "fill_portal_credentials": BrowserTool(
         "在已授权登录页填写已保存账号密码并提交；不接收或返回凭据", {}
     ),
-    "request_login_code": BrowserTool("在当前本人验证码页面获取验证码，然后交还教师填写", {}),
+    "request_login_code": BrowserTool(
+        "在发送验证码页面获取后交还教师填写；企业微信动态码页直接等待输入，不发送短信", {}
+    ),
     "submit_login_code": BrowserTool("提交教师已在当前浏览器输入的验证码；不接收或返回验证码", {}),
     "apply_device_trust": BrowserTool("按教师保存的信任设备设置处理当前官网可信浏览器弹窗", {}),
     "read_course_list": BrowserTool("只读取当前课程列表的真实标识和名称；不跳转、不下载", {}),
     "read_homework_list": BrowserTool("只读取当前已核验课程的班级和作业列表", {"course_id": str}),
+    "select_homework_detail": BrowserTool(
+        "选择当前已读取作业列表中的官网作业，随后点击该作业名称读取详情；不跳转",
+        {"homework_id": str},
+    ),
     "read_homework_detail": BrowserTool(
         "只读取当前所选作业详情的题目文字、图片和附件；不读取学生答案、不批改、不查重", {}
     ),

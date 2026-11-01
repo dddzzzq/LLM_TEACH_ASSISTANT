@@ -7,11 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf8"
-
-	"grading-gateway/internal/grpcclient"
-	"grading-gateway/pb"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -63,20 +59,12 @@ func ExtractContent(filename string, content []byte, depth int) string {
 	// 3. 路由图片给 Python 进行 OCR
 	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
 		log.Printf("拦截到图片 %s，发起 RPC调用Python进行OCR...", filename)
-		// 设定 OCR 提取超时时间 60 秒
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		res, err := grpcclient.Client.ExtractText(ctx, &pb.ExtractRequest{
-			Filename:    filename,
-			FileContent: content,
-		})
+		res, err := extractOCR(context.Background(), filename, content)
 
 		if err != nil {
 			log.Printf("图片 %s OCR 失败: %v", filename, err)
 			return fmt.Sprintf("【图片OCR失败: %s】", filename)
 		}
-		log.Printf("[OCR 成功] 图片: %s, 提取长度: %d 字符", filename, len(res.TextContent))
 		log.Printf("[OCR 成功] 图片: %s, 提取长度: %d 字符", filename, len(res.TextContent))
 		return fmt.Sprintf("--- [图片文件内容 (OCR): %s] ---\n%s\n", filename, res.TextContent)
 	}

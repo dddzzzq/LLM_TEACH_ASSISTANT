@@ -14,7 +14,6 @@ from playwright.async_api import TimeoutError as BrowserTimeout
 PASSWORD = "input[type=password]:visible"
 USERNAME = "#username:visible,#account:visible,input[name=username]:visible,input[autocomplete=username]:visible"
 OTP = "input[autocomplete=one-time-code]:visible,#dynamicCode:visible,input[name=otp]:visible,input[placeholder*=验证码]:visible,input[placeholder=请输入]:visible,input[placeholder*='verification code' i]:visible,input[placeholder*='security code' i]:visible"
-SENSITIVE = "input[type=password],input:not([type=checkbox]):not([type=radio]),textarea"
 CODE_REQUEST = re.compile(
     r"^(?:(?:重新)?(?:获取|发送)(?:短信)?验证码|重新发送|获取动态码|发送动态码|"
     r"(?:get|send|request|resend)(?:\s+(?:a|the))?\s+(?:(?:sms|verification|security)\s+)?code|resend)$",
@@ -38,6 +37,12 @@ TRUST_NO = re.compile(
 INVALID_CODE = re.compile(
     r"验证码错误|验证码无效|验证码已过期|verification\s+code\s+(?:error|invalid|expired)|"
     r"(?:invalid|incorrect|expired)\s+(?:(?:verification|security)\s+code|captcha)",
+    re.I,
+)
+WECHAT_DYNAMIC_CODE = re.compile(
+    r"dynamic\s*code\s*[（(]?\s*WeChat\s*Work|"
+    r"(?:企业微信|WeChat\s*Work).{0,32}(?:动态(?:验证码|码)?|dynamic\s*code)|"
+    r"(?:动态验证码|动态码).{0,20}(?:企业微信|WeChat\s*Work)",
     re.I,
 )
 
@@ -144,11 +149,22 @@ class PortalAuth:
             "login_form": login is not None,
             "otp_required": otp is not None,
             "otp_entered": bool(await otp.locator(OTP).input_value()) if otp else False,
+            "code_method": await self.code_method(otp),
             "code_requested": bool(self.last_code_request)
             or bool(otp and await named_controls(otp, CODE_COUNTDOWN)),
             "trust_prompt": await self.trust_available(),
             "trust_device": self.trust_device,
         }
+
+    async def code_method(self, frame):
+        if frame is None:
+            return ""
+        hint = frame.get_by_text(WECHAT_DYNAMIC_CODE).filter(visible=True)
+        # The delivery method only changes the prompt; every method still
+        # requires an explicit send action before waiting for the teacher.
+        if await hint.count():
+            return "wechat_work"
+        return ""
 
     async def login_frame(self):
         for page in self.owner.context.pages:
@@ -297,7 +313,17 @@ class PortalAuth:
         ) or await named_controls(frame, CODE_COUNTDOWN):
             await frame.locator(OTP).focus()
             return
-        buttons = await named_controls(frame, CODE_REQUEST)
+        dynamic_button = frame.locator("#getDynamicCode:visible")
+        try:
+            # The OTP input can render before the school's dynamic-code button.
+            await dynamic_button.wait_for(state="visible", timeout=5000)
+        except BrowserTimeout:
+            pass
+        buttons = (
+            [dynamic_button]
+            if await dynamic_button.count() == 1
+            else await named_controls(frame, CODE_REQUEST)
+        )
         if len(buttons) != 1:
             raise RpaIssue(
                 "LOGIN_CODE_BUTTON_UNAVAILABLE",
@@ -355,7 +381,7 @@ class PortalAuth:
         self.submitted_code_digest = digest
         await buttons[0].click(timeout=5000)
         # Some login handlers read the field asynchronously. Keep it in the
-        # masked browser until the school consumes it; never clear it on click.
+        # task browser until the school consumes it; never clear it on click.
         for _ in range(30):
             if await self.trust_available() or await self.otp_frame() is None:
                 return

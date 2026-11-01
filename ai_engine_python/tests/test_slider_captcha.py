@@ -167,10 +167,13 @@ class SliderBrowserTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejected_drags_are_bounded_to_three_attempts(self):
         await self.page.evaluate("window.complete=false")
-        result = await solve_slider_captcha(self.page, max_attempts=100)
+        with self.assertLogs("app.rpa.slider_captcha", level="WARNING") as logs:
+            result = await solve_slider_captcha(self.page, max_attempts=100)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["attempts"], 3)
         self.assertEqual(await self.page.evaluate("window.releases"), 3)
+        self.assertEqual(len(logs.output), 3)
+        self.assertIn("Slider attempt 1 failed", logs.output[0])
 
     async def test_other_actions_cannot_run_in_captcha_stage(self):
         task = self.task()

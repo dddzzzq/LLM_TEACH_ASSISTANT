@@ -36,7 +36,7 @@
       ></section>
       <section
         ><div class="section-title"><span>03</span><h2>评分标准</h2></div
-        ><RubricEditor v-model="rubric"
+        ><RubricEditor v-model="rubric" :disabled="isLoading"
       /></section>
       <div v-if="error" class="workspace-error" role="alert">{{ error }}</div>
       <footer
@@ -63,19 +63,14 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import gradingApi from '../services/gradingApi';
 import RubricEditor from '../components/RubricEditor.vue';
+import { createRubricFromTemplate } from '../services/rubricTemplates';
 const router = useRouter();
 const courseName = ref(''),
   taskName = ref(''),
   question = ref(''),
   error = ref(''),
   isLoading = ref(false);
-const rubric = ref(
-  JSON.stringify({
-    功能实现: { description: '核心功能完整无误', score: 60 },
-    代码质量: { description: '代码规范，注释清晰', score: 20 },
-    文档报告: { description: '报告内容详实，格式正确', score: 20 },
-  })
-);
+const rubric = ref(createRubricFromTemplate());
 async function createAssignment(event) {
   const nextTab = event?.submitter?.value === 'content' ? 'content' : 'materials';
   if (isLoading.value) return;

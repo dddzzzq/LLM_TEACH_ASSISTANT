@@ -102,15 +102,166 @@ class HomeworkDetailTests(unittest.IsolatedAsyncioTestCase):
             "published work ID was lost before entering its library detail",
         )
         self.assertIs(task.detail_page, task.page)
+        detail_page = task.page
         self.assertTrue((await task.detail_reader.observation())["ready"])
         destination = task.page.url
-        await task.page.goto(destination.replace("library_abc", "library_other"))
+
+        # Returning to the list must reuse the bound detail, not open another tab.
+        task.page = self.page
+        view = await task.adapter.observe()
+        entry = next(item for item in view["elements"] if item["name"] == "编程作业")
+        await task.execute({"tool": "click", "element_ref": entry["ref"]})
+        self.assertIs(task.page, detail_page)
+        self.assertEqual(len(self.context.pages), 2)
+
+        # An unreadable bound detail must fail clearly instead of spawning tabs.
+        await detail_page.goto(destination.replace("library_abc", "library_other"))
         self.assertIsNone(
             await task.detail_reader.frame(), "a later library navigation reused stale entry proof"
         )
-        await task.page.goto(destination)
+        task.page = self.page
+        view = await task.adapter.observe()
+        entry = next(item for item in view["elements"] if item["name"] == "编程作业")
+        with self.assertRaises(RpaIssue) as error:
+            await task.execute({"tool": "click", "element_ref": entry["ref"]})
+        self.assertEqual(error.exception.code, "DETAIL_ALREADY_OPEN")
+        self.assertEqual(len(self.context.pages), 2)
+
+        # Closing the old detail is the only condition that permits a fresh entry.
+        await detail_page.close()
+        task.page = self.page
+        view = await task.adapter.observe()
+        entry = next(item for item in view["elements"] if item["name"] == "编程作业")
+        await task.execute({"tool": "click", "element_ref": entry["ref"]})
+        await task.page.wait_for_load_state()
+        self.assertIs(task.detail_page, task.page)
+        self.assertEqual(len(self.context.pages), 2)
         await task.detail_reader.read()
         self.assertEqual(task.state["homework_detail"]["homework_id"], "33")
+
+    async def test_scripted_detail_popup_waits_for_navigation_and_never_binds_the_source_list(self):
+        for delay in (650, 3200, None):
+            with self.subTest(delay=delay):
+                context = await self.browser.new_context()
+                try:
+                    script = (
+                        f"setTimeout(()=>window.open('/work/library/view-work?courseid=11&workId='+libraryId),{delay})"
+                        if delay is not None else ""
+                    )
+
+                    async def route(request):
+                        if "/view-work" in request.request.url:
+                            body = '<h2>编程作业</h2><div class="mark_item">实现并发下载</div>'
+                        else:
+                            body = (
+                                '<script>function showWork(libraryId,workId){' + script + '}</script>'
+                                '<ul><li><a title="编程作业" href="javascript:void(0)" '
+                                'onclick="showWork(\'library_abc\',\'33\')">编程作业</a></li></ul>'
+                            )
+                        await request.fulfill(body='<meta charset="utf-8">' + body, content_type="text/html")
+
+                    await context.route("**/*", route)
+                    source = await context.new_page()
+                    await source.goto("https://mooc2-ans.chaoxing.com/course?courseid=11&clazzid=22")
+                    task = Task(
+                        SimpleNamespace(download_root=Path(self.temp.name), persist=lambda state: None),
+                        {"job_id": "fixture", "task_type": "HOMEWORK_DETAIL", "status": "RUNNING",
+                         "stage": "LOCATE_ASSIGNMENT", "control_mode": "AUTO", "control_epoch": 1,
+                         "target": self.state["target"]},
+                    )
+                    task.context, task.page = context, source
+                    task.adapter = PortalAdapter(context, task.state["target"])
+                    task.adapter.course_confirmed = True
+                    task.prepare_captcha = AsyncMock(return_value=False)
+                    task.gate.set()
+                    view = await task.adapter.observe()
+                    entry = next(e for e in view["elements"] if e["name"] == "编程作业" and e["role"] == "link")
+                    self.assertFalse(entry["opens_new_page"], "fixture must reproduce the unrecognized script popup")
+                    action = {"tool": "click", "element_ref": entry["ref"]}
+                    await task.execute(action)
+                    self.assertIsNot(task.detail_page, source, "the assignment list was locked as a detail")
+                    if delay is None:
+                        self.assertIsNone(task.detail_page)
+                        self.assertIsNone(await task.navigation_view())
+                        self.assertFalse((await task.detail_observation())["open"])
+                        continue
+                    if delay > 2500:
+                        self.assertIsNone(task.detail_page)
+                        self.assertIsNone(await task.navigation_view())
+                        await task.execute(action)  # A repeated proposal must not click again.
+                        await asyncio.sleep(0.9)
+                        active_view = await task.navigation_view()
+                        self.assertEqual(active_view["active_page_id"], str(context.pages.index(task.page)))
+                    view = await task.detail_observation()
+                    self.assertTrue(view["ready"], view)
+                    self.assertTrue(view["open"])
+                    self.assertTrue(view["active"])
+                    self.assertEqual(len(context.pages), 2, "late popup caused a duplicate detail")
+                    self.assertIsNot(task.detail_page, source)
+                    detail = await task.detail_reader.read(finish_task=False)
+                    self.assertEqual(detail["homework_id"], "33")
+                    self.assertEqual(detail["sources"][0]["text"], "实现并发下载")
+                finally:
+                    await context.close()
+
+    async def test_bound_detail_state_drives_recovery_without_leaving_the_page(self):
+        detail_page = await self.context.new_page()
+        await detail_page.route(
+            "**/*",
+            lambda route: route.fulfill(
+                body='<meta charset="utf-8"><h2>编程作业</h2><div class="mark_item">题目</div>',
+                content_type="text/html",
+            ),
+        )
+        await detail_page.goto(
+            "https://mooc2-ans.chaoxing.com/work/library/view-work?courseid=11&workid=33"
+        )
+        task = Task(
+            SimpleNamespace(persist=lambda state: None),
+            {
+                "job_id": "fixture",
+                "task_type": "HOMEWORK_DETAIL",
+                "status": "RUNNING",
+                "stage": "LOCATE_ASSIGNMENT",
+                "control_mode": "AUTO",
+                "control_epoch": 1,
+                "target": self.state["target"],
+            },
+        )
+        task.context, task.page = self.context, self.page
+        task.detail_page, task.detail_page_url = detail_page, detail_page.url
+        task.adapter = SimpleNamespace(
+            active_page=None,
+            course_confirmed=True,
+            assignment_confirmed=True,
+            login_required=AsyncMock(return_value=False),
+            reconcile=AsyncMock(),
+            observe=AsyncMock(return_value={}),
+        )
+        task.prepare_captcha = AsyncMock(return_value=False)
+
+        view = await task.navigation_view()
+        self.assertEqual(task.state["stage"], "READING_DETAIL")
+        self.assertEqual(
+            view["homework_detail"],
+            {
+                "ready": False,
+                "read_only": True,
+                "reason": "DETAIL_PAGE_NOT_ACTIVE",
+                "open": True,
+                "active": False,
+                "page_id": "1",
+            },
+        )
+
+        task.page = detail_page
+        view = await task.navigation_view()
+        self.assertTrue(view["homework_detail"]["ready"], view["homework_detail"])
+        self.assertTrue(view["homework_detail"]["active"])
+        with self.assertRaises(RpaIssue) as error:
+            await task.execute({"tool": "switch_page", "page_id": "0"})
+        self.assertEqual(error.exception.code, "DETAIL_NAVIGATION_LOCKED")
+        self.assertIs(task.page, detail_page)
 
     async def test_mixed_sources_preserve_order_and_exclude_answers(self):
         image = "data:image/png;base64," + base64.b64encode(PNG).decode()
@@ -161,6 +312,27 @@ class HomeworkDetailTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RpaIssue) as error:
             await task.execute({"tool": "switch_page", "page_id": "0"})
         self.assertEqual(error.exception.code, "PAGE_ALREADY_ACTIVE")
+
+    async def test_repeated_detail_tab_switching_stops_before_action_budget(self):
+        other = await self.context.new_page()
+        task = Task(
+            SimpleNamespace(persist=lambda state: None),
+            {
+                "job_id": "fixture",
+                "task_type": "HOMEWORK_DETAIL",
+                "status": "RUNNING",
+                "stage": "LOCATE_ASSIGNMENT",
+                "control_mode": "AUTO",
+                "control_epoch": 1,
+            },
+        )
+        task.context, task.page = self.context, self.page
+        for page_id in ("1", "0", "1", "0"):
+            await task.execute({"tool": "switch_page", "page_id": page_id})
+        self.assertEqual(task.state["waiting_reason"], "DETAIL_NAVIGATION")
+        self.assertEqual(task.state["status"], "WAITING_USER")
+        self.assertIs(task.page, other)
+        self.assertEqual(len(self.context.pages), 2)
 
     async def test_page_body_is_never_a_question_fallback(self):
         await self.load("<p>整个页面还有学生答案，不能当成题目</p>")

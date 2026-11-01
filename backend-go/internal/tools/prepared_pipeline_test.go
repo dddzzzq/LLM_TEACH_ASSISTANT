@@ -43,7 +43,12 @@ func (c *preparedClient) GradeHomework(_ context.Context, r *pb.GradeRequest, _ 
 			return nil, fmt.Errorf("lost file %s", part)
 		}
 	}
-	return &pb.GradeResponse{TotalScore: 91, Feedback: "fixture evidence", MergedContent: r.StudentText, CodeDocMatchReportJson: "{}"}, nil
+	var input studentMaterials
+	if json.Unmarshal([]byte(r.StudentText), &input) != nil || input.Reading.Status != "COMPLETE" {
+		return nil, fmt.Errorf("missing structured evidence")
+	}
+	result, _ := json.Marshal(map[string]interface{}{"schema": "grading-result.v1", "text": input.analysisText(), "reading": input.Reading, "score_details": []map[string]interface{}{{"criterion": "功能", "score": 91, "max_score": 100, "evidence_refs": []string{"F0001.C0001"}}}})
+	return &pb.GradeResponse{TotalScore: 91, Feedback: "fixture evidence", MergedContent: string(result), CodeDocMatchReportJson: "{}"}, nil
 }
 
 func TestIntegrationPreparedPipelineUsesManifestSnapshotAndPreservesResults(t *testing.T) {
@@ -97,7 +102,7 @@ func TestIntegrationPreparedPipelineUsesManifestSnapshotAndPreservesResults(t *t
 	}
 	var results []models.Submission
 	db.Where("grading_job_id = ?", job.ID).Find(&results)
-	if len(results) != 1 || results[0].Score != 91 || results[0].MaterialBatchID != batch.ID || client.graded.Load() != 1 {
+	if len(results) != 1 || results[0].Score != 91 || results[0].MaterialBatchID != batch.ID || client.graded.Load() != 1 || results[0].ReadingStatus != "COMPLETE" || !strings.Contains(results[0].ScoreDetails, "evidence_refs") {
 		t.Fatalf("wrong results %+v", results)
 	}
 	var m materials.Manifest
@@ -110,5 +115,38 @@ func TestIntegrationPreparedPipelineUsesManifestSnapshotAndPreservesResults(t *t
 	db.Model(&models.Submission{}).Where("grading_job_id = ?", job.ID).Count(&count)
 	if count != 1 {
 		t.Fatal("failed retry changed previous results")
+	}
+	// A corrupt document holds only that student for review; readable classmates
+	// still receive new results and an existing teacher review is not replaced.
+	db.Model(&results[0]).Updates(map[string]interface{}{"is_human_reviewed": true, "human_score": 88, "human_feedback": "教师复核保留"})
+	bad := filepath.Join(root, "source", "20260002_李四", "报告.docx")
+	os.MkdirAll(filepath.Dir(bad), 0700)
+	os.WriteFile(bad, []byte("broken docx"), 0600)
+	next, err := s.Create(t.Context(), materials.Actor{UserID: 8501, Role: "teacher"}, materials.Request{SourcePath: filepath.Join(root, "source"), AssignmentID: a.ID}, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProcessOne(t.Context(), next.ID); err != nil {
+		t.Fatal(err)
+	}
+	next, err = s.Owned(t.Context(), materials.Actor{UserID: 8501, Role: "teacher"}, next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newJob := models.AsyncJob{ID: uuid.NewString(), OwnerID: 8501, JobType: models.JobTypeHomework, ReferenceID: fmt.Sprint(a.ID), MaterialBatchID: next.ID, Status: models.JobStatusPending, QuestionSnapshot: "snapshot requirement", RubricSnapshot: `{"功能":100}`}
+	db.Create(&newJob)
+	db.Model(&next).Update("grading_job_id", newJob.ID)
+	if err = ProcessPipelineForJob(fmt.Sprint(a.ID), next.ManifestPath, newJob); err == nil || !strings.Contains(err.Error(), "需复核") {
+		t.Fatal("missing per-student review outcome", err)
+	}
+	var newResults []models.Submission
+	db.Where("grading_job_id = ?", newJob.ID).Order("student_id").Find(&newResults)
+	if len(newResults) != 2 || newResults[0].Score != 91 || newResults[1].ReadingStatus != "NEEDS_REVIEW" || newResults[1].Score != -1 || client.graded.Load() != 2 {
+		t.Fatal("one failed reader affected classmates", newResults)
+	}
+	var original models.Submission
+	db.First(&original, results[0].ID)
+	if !original.IsHumanReviewed || original.HumanScore != 88 || original.HumanFeedback != "教师复核保留" {
+		t.Fatal("teacher review changed", original)
 	}
 }

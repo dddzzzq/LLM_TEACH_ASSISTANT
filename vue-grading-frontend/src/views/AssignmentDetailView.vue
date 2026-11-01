@@ -71,7 +71,7 @@
             ></div
           >
           <form v-if="editingRubric" @submit.prevent="saveRubric">
-            <RubricEditor v-model="rubricDraft" />
+            <RubricEditor v-model="rubricDraft" :disabled="savingRubric" />
             <p v-if="rubricError" class="workspace-error" role="alert">{{ rubricError }}</p>
             <div class="form-actions"
               ><button class="workspace-button primary" :disabled="savingRubric || !rubricDraft">{{
@@ -202,6 +202,11 @@
                 ><option value="pending">未复核</option
                 ><option value="reviewed">已复核</option></select
               >
+              <select v-model="resultSort" aria-label="成绩排序"
+                ><option value="review">未复核优先</option
+                ><option value="score_desc">分数从高到低</option
+                ><option value="score_asc">分数从低到高</option></select
+              >
               <button
                 class="workspace-button primary"
                 :disabled="exporting || !results.length"
@@ -220,9 +225,20 @@
                   ></div
                 ></details
               >
+              <button class="workspace-button" @click="selectTab('materials')"
+                >使用已有材料批改</button
+              >
+              <button
+                class="workspace-button danger-action"
+                :disabled="deletingResults || !selectedClass || resultsLoading"
+                @click="deleteClassResults"
+                >{{ deletingResults ? '正在删除…' : '删除当前班级作业' }}</button
+              >
             </div>
             <p class="section-note"
-              >当前班级：{{ currentClass?.name }}。导出按班级与导入记录，不受姓名及复核筛选影响。</p
+              >当前班级：{{
+                currentClass?.name
+              }}。导出按班级与导入记录，不受姓名、复核及排序筛选影响。</p
             >
             <div v-if="resultsBatchId" class="batch-filter"
               >正在查看一条导入记录
@@ -233,15 +249,23 @@
             <p v-if="resultsError" class="workspace-error" role="alert"
               >{{ resultsError }} <button @click="fetchResults">重新加载</button></p
             >
-            <div v-if="resultsLoading" class="workspace-empty"
+            <p v-if="resultsNotice" class="inline-notice" role="status">{{ resultsNotice }}</p>
+            <div v-if="resultsLoading && !results.length" class="workspace-empty"
               ><Loader /><p>正在读取本班成绩…</p></div
             >
             <template v-else>
               <div class="results-caption"
                 ><span>共 {{ results.length }} 条成绩</span
-                ><span>已复核 {{ results.filter((item) => item.is_human_reviewed).length }} 条</span
+                ><span>已复核 {{ reviewedCount }} 条</span
+                ><span>未复核 {{ results.length - reviewedCount }} 条</span
                 ><span v-if="studentSearch || reviewFilter"
                   >筛选后 {{ filteredResults.length }} 条</span
+                ><span v-if="resultsLoading" role="status">正在刷新，当前数据仍可查看</span
+                ><button
+                  v-if="studentSearch || reviewFilter"
+                  class="text-action"
+                  @click="clearResultFilters"
+                  >清除筛选</button
                 ></div
               >
               <div v-if="filteredResults.length" class="result-table-scroll">
@@ -261,7 +285,9 @@
                       <td
                         ><span class="score" :class="finalScore(result) < 0 ? 'score-error' : ''">{{
                           finalScore(result) < 0
-                            ? '评分失败'
+                            ? result.reading_status === 'NEEDS_REVIEW'
+                              ? '待复核'
+                              : '评分失败'
                             : Number(finalScore(result)).toFixed(1)
                         }}</span></td
                       >
@@ -299,6 +325,45 @@
                   >
                 </table>
               </div>
+              <div v-if="filteredResults.length" class="result-card-list">
+                <article v-for="result in filteredResults" :key="result.id" class="result-card">
+                  <header>
+                    <div
+                      ><strong>{{ result.student_name || result.student_id }}</strong
+                      ><small>{{ result.student_id }}</small></div
+                    >
+                    <span class="score" :class="finalScore(result) < 0 ? 'score-error' : ''">{{
+                      finalScore(result) < 0
+                        ? result.reading_status === 'NEEDS_REVIEW'
+                          ? '待复核'
+                          : '评分失败'
+                        : Number(finalScore(result)).toFixed(1)
+                    }}</span>
+                  </header>
+                  <div class="result-card-state">
+                    <span class="review-state" :class="{ reviewed: result.is_human_reviewed }">{{
+                      result.is_human_reviewed ? '已复核' : '未复核'
+                    }}</span>
+                    <button class="risk-link" @click="showReport(result, 'plagiarism')">{{
+                      plagiarismLabel(result)
+                    }}</button>
+                  </div>
+                  <p
+                    >{{ aigcLabel(result)
+                    }}<span v-if="result.code_doc_match_report"
+                      >；代码文档匹配 {{ result.code_doc_match_report.score }} 分</span
+                    ></p
+                  >
+                  <footer>
+                    <button class="text-action" @click="showReport(result, 'feedback')"
+                      >查看完整评语</button
+                    >
+                    <button class="workspace-button primary" @click="openReview(result)"
+                      >查看并复核</button
+                    >
+                  </footer>
+                </article>
+              </div>
               <div v-else class="workspace-empty"
                 ><AppIcon name="file" /><h3>{{
                   results.length ? '没有符合条件的学生' : '本班暂无成绩'
@@ -306,7 +371,7 @@
                 ><p>{{
                   results.length
                     ? '调整搜索或复核筛选条件。'
-                    : '先导入学生作业并开始批改，结果会显示在这里。'
+                    : '已有材料可直接开始或重新批改，也可以导入新的学生作业。'
                 }}</p
                 ><button
                   v-if="!results.length"
@@ -332,8 +397,15 @@
       :submission="reviewSubmission"
       :saving="savingReview"
       :error="reviewError"
+      :max-score="maxReviewScore"
+      :position="reviewPosition"
+      :total="filteredResults.length"
+      :can-previous="reviewPosition > 1"
+      :can-next="reviewPosition < filteredResults.length"
+      :has-next-unreviewed="Boolean(nextUnreviewed)"
       @close="reviewSubmission = null"
       @save="saveReview"
+      @navigate="navigateReview"
     />
   </div>
 </template>
@@ -360,6 +432,7 @@ import RubricSummary from '../components/RubricSummary.vue';
 import RpaTaskPanel from '../components/RpaTaskPanel.vue';
 import ReviewModal from '../components/ReviewModal.vue';
 import ReportModal from '../components/ReportModal.vue';
+import { rubricRows } from '../services/assignmentWorkspace';
 const props = defineProps({ id: { type: String, required: true } });
 const route = useRoute(),
   router = useRouter(),
@@ -418,20 +491,45 @@ const requirementLabel = computed(
 const results = ref([]),
   resultsLoading = ref(false),
   resultsError = ref(''),
+  resultsNotice = ref(''),
+  deletingResults = ref(false),
   studentSearch = ref(''),
   reviewFilter = ref(''),
+  resultSort = ref('review'),
   exporting = ref(false);
 const resultsBatchId = computed(() =>
   typeof route.query.batch_id === 'string' ? route.query.batch_id : ''
 );
 const filteredResults = computed(() =>
-  filterClassResults(results.value, studentSearch.value, reviewFilter.value)
+  filterClassResults(results.value, studentSearch.value, reviewFilter.value, resultSort.value)
 );
+const reviewedCount = computed(() => results.value.filter((item) => item.is_human_reviewed).length);
+const maxReviewScore = computed(() => {
+  const total = rubricRows(assignment.value?.rubric).reduce(
+    (sum, row) => sum + (Number.isFinite(row.score) ? row.score : 0),
+    0
+  );
+  return total > 0 ? Math.round(total * 10) / 10 : 100;
+});
 const reportSubmission = ref(null),
   reportType = ref('feedback'),
   reviewSubmission = ref(null),
   savingReview = ref(false),
   reviewError = ref('');
+const reviewPosition = computed(() => {
+  const index = filteredResults.value.findIndex((item) => item.id === reviewSubmission.value?.id);
+  return index < 0 ? 0 : index + 1;
+});
+const nextUnreviewed = computed(() => {
+  if (!reviewSubmission.value) return null;
+  const rows = filteredResults.value;
+  const index = rows.findIndex((item) => item.id === reviewSubmission.value.id);
+  const candidates = index < 0 ? rows : [...rows.slice(index + 1), ...rows.slice(0, index)];
+  return (
+    candidates.find((item) => item.id !== reviewSubmission.value.id && !item.is_human_reviewed) ||
+    null
+  );
+});
 let assignmentEpoch = 0,
   resultEpoch = 0,
   disposed = false,
@@ -447,6 +545,10 @@ const memoryKey = () =>
   ':' +
   props.id;
 const selectTab = (tab) => router.replace({ query: { ...route.query, tab } });
+function clearResultFilters() {
+  studentSearch.value = '';
+  reviewFilter.value = '';
+}
 async function selectClass(id) {
   if (!classes.value.some((item) => item.id === id) || id === selectedClass.value) return;
   if ((file.value || submitting.value) && !confirm('切换班级会清除未提交的文件选择。继续？'))
@@ -454,7 +556,10 @@ async function selectClass(id) {
   file.value = null;
   fileName.value = '';
   submissionMessage.value = '';
+  resultsNotice.value = '';
   results.value = [];
+  reviewSubmission.value = null;
+  clearResultFilters();
   resultEpoch++;
   selectedClass.value = id;
   try {
@@ -572,9 +677,9 @@ async function fetchResults() {
     classId = selectedClass.value,
     assignmentId = props.id,
     batchId = resultsBatchId.value;
+  const hadResults = results.value.length > 0;
   resultsLoading.value = true;
   resultsError.value = '';
-  results.value = [];
   try {
     const { data } = await gradingApi.getResultsForAssignment(assignmentId, batchId, classId);
     if (
@@ -585,7 +690,10 @@ async function fetchResults() {
     )
       results.value = Array.isArray(data) ? data : [];
   } catch {
-    if (epoch === resultEpoch) resultsError.value = '本班成绩暂时无法读取。';
+    if (epoch === resultEpoch)
+      resultsError.value = hadResults
+        ? '刷新失败，当前显示的是上次读取的本班成绩。'
+        : '本班成绩暂时无法读取。';
   } finally {
     if (epoch === resultEpoch) resultsLoading.value = false;
   }
@@ -673,6 +781,7 @@ async function deleteSingleResult(result) {
   }
 }
 async function deleteAllResults() {
+  if (deletingResults.value) return;
   if (
     !confirm(
       '将清空“' +
@@ -681,11 +790,49 @@ async function deleteAllResults() {
     )
   )
     return;
+  deletingResults.value = true;
   try {
     await gradingApi.deleteAllSubmissions(props.id);
     await fetchResults();
+    await loadClasses();
   } catch {
     resultsError.value = '清空失败，请重试。';
+  } finally {
+    deletingResults.value = false;
+  }
+}
+async function deleteClassResults() {
+  if (deletingResults.value || !selectedClass.value || !currentClass.value) return;
+  const id = props.id,
+    classId = selectedClass.value,
+    name = currentClass.value.name;
+  if (
+    !confirm(
+      '确定删除“' +
+        name +
+        '”在“' +
+        assignment.value.task_name +
+        '”下全部批次的评分和人工复核记录？原始材料保留，可重新批改。此操作无法撤销。'
+    )
+  )
+    return;
+  deletingResults.value = true;
+  resultsError.value = '';
+  resultsNotice.value = '';
+  try {
+    await gradingApi.deleteClassSubmissions(id, classId);
+    if (props.id === id && selectedClass.value === classId) {
+      resultsNotice.value =
+        '已删除当前班级的评分记录，原始材料保留。可点击“使用已有材料批改”重新批改。';
+      await fetchResults();
+      await loadClasses();
+      materialsVersion.value++;
+    }
+  } catch (e) {
+    if (props.id === id && selectedClass.value === classId)
+      resultsError.value = e.response?.data?.detail || '删除本班作业失败，请重试。';
+  } finally {
+    deletingResults.value = false;
   }
 }
 function showReport(result, type) {
@@ -695,6 +842,11 @@ function showReport(result, type) {
 function openReview(result) {
   reviewSubmission.value = result;
   reviewError.value = '';
+}
+function navigateReview(offset) {
+  const index = filteredResults.value.findIndex((item) => item.id === reviewSubmission.value?.id);
+  const target = filteredResults.value[index + offset];
+  if (target) openReview(target);
 }
 async function saveReview(data) {
   if (savingReview.value) return;
@@ -708,7 +860,9 @@ async function saveReview(data) {
     });
     const index = results.value.findIndex((item) => item.id === data.id);
     if (index >= 0) results.value[index] = saved;
+    const next = data.continueNext ? nextUnreviewed.value : null;
     reviewSubmission.value = null;
+    if (next) openReview(next);
   } catch (e) {
     reviewError.value = e.response?.data?.detail || '保存失败，输入已保留，请重试。';
   } finally {
@@ -1078,6 +1232,60 @@ onBeforeUnmount(() => {
   font-size: 13px;
   padding: 12px 0;
 }
+.result-card-list {
+  display: none;
+}
+.workspace-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-muted);
+}
+.workspace-empty > svg {
+  width: 36px;
+  height: 36px;
+}
+.workspace-empty h3 {
+  font-size: 15px;
+  color: var(--color-ink);
+}
+.result-card {
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-paper);
+}
+.result-card > header,
+.result-card-state,
+.result-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.result-card strong {
+  font-size: 14px;
+}
+.result-card small,
+.result-card > p {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.result-card-state {
+  justify-content: flex-start;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.result-card > footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
 @media (max-width: 1100px) {
   .assignment-content-grid {
     grid-template-columns: 1fr;
@@ -1096,26 +1304,47 @@ onBeforeUnmount(() => {
   .detail-heading {
     align-items: flex-start;
     flex-direction: column;
+    margin-bottom: 18px;
+  }
+  .detail-heading .page-description {
+    display: none;
   }
   .detail-tabs {
     gap: 20px;
+    margin-bottom: 20px;
   }
   .detail-tabs button {
     font-size: 13px;
   }
+  .class-content-heading {
+    padding-bottom: 16px;
+  }
   .content-section,
   .material-section,
   .results-section {
-    padding: 18px;
+    padding: 16px;
   }
   .results-toolbar {
     align-items: stretch;
+    gap: 8px;
+  }
+  .results-toolbar select {
+    flex: 1;
+    min-width: 120px;
   }
   .student-search {
     flex-basis: 100%;
   }
-  .results-table {
-    min-width: 650px;
+  .results-caption {
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .result-table-scroll {
+    display: none;
+  }
+  .result-card-list {
+    display: grid;
+    gap: 12px;
   }
 }
 </style>

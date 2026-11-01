@@ -1,0 +1,1 @@
+els=>els.filter(e=>e.getClientRects().length&&!e.closest('li,tr,[role=list]')).map(e=>(e.innerText||'').trim())

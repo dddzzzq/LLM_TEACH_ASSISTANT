@@ -477,7 +477,14 @@ func resolveDetailWithModel(ctx context.Context, op models.PortalOperation, raw 
 
 func publishDetail(tx *gorm.DB, c *models.PortalConnection, op *models.PortalOperation, detail *HomeworkDetail) error {
 	var selected detailTarget
-	if json.Unmarshal([]byte(op.PayloadJSON), &selected) != nil || detail == nil || selected.SnapshotID != c.ActiveSnapshotID || detail.HomeworkID != selected.Target.HomeworkID || detail.CourseID != selected.Target.CourseID {
+	if json.Unmarshal([]byte(op.PayloadJSON), &selected) != nil {
+		return errors.New("invalid detail target")
+	}
+	return publishSelectedDetail(tx, c, op, selected, detail)
+}
+
+func publishSelectedDetail(tx *gorm.DB, c *models.PortalConnection, op *models.PortalOperation, selected detailTarget, detail *HomeworkDetail) error {
+	if detail == nil || selected.SnapshotID != c.ActiveSnapshotID || detail.HomeworkID != selected.Target.HomeworkID || detail.CourseID != selected.Target.CourseID || detail.Title != selected.HomeworkName {
 		return errors.New("stale detail")
 	}
 	var work models.PortalHomework

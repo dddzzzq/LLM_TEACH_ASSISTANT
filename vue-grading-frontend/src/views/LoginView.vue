@@ -55,11 +55,10 @@
                 登录密码
               </label>
               <div class="mt-1">
-                <input
+                <PasswordInput
                   id="password"
                   v-model="loginForm.password"
                   name="password"
-                  type="password"
                   autocomplete="section-login current-password"
                   :disabled="loading"
                   required
@@ -142,11 +141,10 @@
                 登录密码
               </label>
               <div class="mt-1">
-                <input
+                <PasswordInput
                   id="reg-password"
                   v-model="registerForm.password"
                   name="password"
-                  type="password"
                   autocomplete="section-register new-password"
                   :disabled="loading"
                   required
@@ -250,6 +248,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { isTeacherAccount } from '../services/teacherWorkspace';
 import authApi from '../services/authApi';
 import AppIcon from '../components/AppIcon.vue';
+import PasswordInput from '../components/PasswordInput.vue';
 
 const router = useRouter();
 const route = useRoute();

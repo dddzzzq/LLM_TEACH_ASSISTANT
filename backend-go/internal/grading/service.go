@@ -40,6 +40,7 @@ type Request struct {
 	DirectoryPath string `json:"directory_path,omitempty"`
 	OutputRoot    string `json:"output_root,omitempty"`
 	AllowPartial  bool   `json:"allow_partial,omitempty"`
+	Regrade       bool   `json:"regrade,omitempty"`
 	Kind          string `json:"kind"`
 	ResourceID    string `json:"resource_id"`
 	FilePath      string `json:"file_path,omitempty"`

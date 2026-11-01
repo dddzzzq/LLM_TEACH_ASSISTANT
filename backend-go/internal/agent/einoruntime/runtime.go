@@ -35,6 +35,7 @@ type Config struct {
 	SkillLoaded       func(catalog.Document)
 	BeforeModel       func()
 	DisableTools      func() bool
+	ToolAllowed       func(string) bool
 	MaxIterations     int
 	History           []execution.Message
 	Record            execution.Record
@@ -109,6 +110,9 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 		messages = append(messages, map[string]interface{}{"role": "system", "content": "本轮任务已受理，工具调用阶段已结束。请仅根据已有工具回执，用自然语言说明已提交的任务类型、任务 ID 和后续查看入口。不要继续查询或调用工具，不要输出工具调用标记，也不要把任务受理说成任务完成。"})
 	} else {
 		for _, t := range options.Tools {
+			if m.cfg.ToolAllowed != nil && !m.cfg.ToolAllowed(t.Name) {
+				continue
+			}
 			p, err := t.ParamsOneOf.ToJSONSchema()
 			if err != nil {
 				return nil, err

@@ -1,0 +1,1 @@
+e => (e.getAttribute('aria-label') || e.innerText || e.value || '').trim().replace(/\s+/g, ' ')

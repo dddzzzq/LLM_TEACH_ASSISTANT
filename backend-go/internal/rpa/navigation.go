@@ -92,7 +92,11 @@ func drivePage(ctx context.Context, id string, snapshot NavigationSnapshot, requ
 		return nil, fmt.Errorf("Worker 观察协议不完整")
 	}
 	input, _ := json.Marshal(map[string]any{"target": obs.Target, "stage": obs.Stage, "observation": obs.Observation, "recent_actions": obs.Recent})
-	action, err := decide(ctx, input, snapshot.Skill, snapshot.ActionSchema)
+	doc, err := decisionSkill(snapshot.Skill, obs.Observation)
+	if err != nil {
+		return nil, err
+	}
+	action, err := decide(ctx, input, doc, snapshot.ActionSchema)
 	if err != nil {
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
@@ -102,11 +106,37 @@ func drivePage(ctx context.Context, id string, snapshot NavigationSnapshot, requ
 		}
 		return state, err
 	}
-	payload, _ := json.Marshal(map[string]any{"action_id": obs.ID, "observation_id": obs.ID, "revision": obs.Revision, "epoch": obs.Epoch, "action": action, "skill_version": snapshot.Skill.Version})
+	payload, _ := json.Marshal(map[string]any{"action_id": obs.ID, "observation_id": obs.ID, "revision": obs.Revision, "epoch": obs.Epoch, "action": action, "skill_version": doc.Version})
 	if err = journal.Save(payload); err != nil {
 		return nil, err
 	}
 	return sendAction(ctx, id, payload, request, journal)
+}
+
+// A catalog job temporarily uses the same navigation knowledge as a standalone
+// detail read. Keep its persisted sync snapshot so the next list resumes it.
+func decisionSkill(base catalog.Document, observation json.RawMessage) (catalog.Document, error) {
+	if base.Name != "sync-teacher-portal" && base.Name != "collect-homework" {
+		return base, nil
+	}
+	var view struct {
+		HomeworkDetail *json.RawMessage `json:"homework_detail"`
+	}
+	if err := json.Unmarshal(observation, &view); err != nil {
+		return catalog.Document{}, err
+	}
+	if view.HomeworkDetail == nil {
+		return base, nil
+	}
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		return catalog.Document{}, err
+	}
+	doc, ok := skills["read-homework-detail"]
+	if !ok || doc.Instructions == "" {
+		return catalog.Document{}, fmt.Errorf("缺少作业详情导航 Skill")
+	}
+	return doc, nil
 }
 func sendAction(ctx context.Context, id string, payload []byte, request workerRequest, journal actionJournal) ([]byte, error) {
 	var response []byte
@@ -236,7 +266,7 @@ func launchNavigation(ctx context.Context, job models.RPAJob) {
 		}
 		raw, stepErr := drivePage(stepCtx, job.ID, snapshot, WorkerRequest, DecidePage, databaseJournal{stepCtx, job.ID, owner})
 		if stepErr != nil {
-			log.Printf("RPA page step %s incomplete (%T); pending action retained when necessary", job.ID, stepErr)
+			log.Printf("RPA page step %s incomplete (%T): %v; pending action retained when necessary", job.ID, stepErr, stepErr)
 		}
 		if len(raw) > 0 {
 			if err := SaveState(job.ID, raw); err != nil {
@@ -293,7 +323,7 @@ func portalToolExtension(old, current json.RawMessage) bool {
 	if len(before) == 0 || len(after) <= len(before) {
 		return false
 	}
-	allowed := map[string]bool{"solve_slider_captcha": true, "fill_portal_credentials": true, "request_login_code": true, "submit_login_code": true, "apply_device_trust": true, "read_course_list": true, "read_homework_list": true, "read_homework_detail": true, "finish_catalog": true, "return_to_course_list": true}
+	allowed := map[string]bool{"solve_slider_captcha": true, "fill_portal_credentials": true, "request_login_code": true, "submit_login_code": true, "apply_device_trust": true, "read_course_list": true, "read_homework_list": true, "select_homework_detail": true, "read_homework_detail": true, "finish_catalog": true, "return_to_course_list": true}
 	for name, spec := range before {
 		if !sameJSON(spec, after[name]) {
 			return false
@@ -311,6 +341,10 @@ func portalToolExtension(old, current json.RawMessage) bool {
 		if name == "read_homework_list" {
 			props["course_id"] = map[string]string{"type": "string"}
 			required = append(required, "course_id")
+		}
+		if name == "select_homework_detail" {
+			props["homework_id"] = map[string]string{"type": "string"}
+			required = append(required, "homework_id")
 		}
 		var actual map[string]any
 		if json.Unmarshal(spec, &actual) != nil {

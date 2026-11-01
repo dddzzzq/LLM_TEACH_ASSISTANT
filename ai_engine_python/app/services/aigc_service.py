@@ -4,6 +4,7 @@ from typing import Dict, Any, Tuple
 import os
 import re
 from ..core.paths import model_path, model_cache_dir
+from .student_evidence import decode_materials, analysis_parts
 
 
 class AIGCDetectorService:
@@ -52,6 +53,9 @@ class AIGCDetectorService:
         """
         从合并的文本中分离出文字报告和源代码。
         """
+        materials = decode_materials(merged_text)
+        if materials is not None:
+            return analysis_parts(materials)
         prose_parts = []
         code_parts = []
 

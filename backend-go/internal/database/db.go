@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DB 全局数据库示例
@@ -79,9 +81,42 @@ func SaveAssignment(assignmentID, studentID, studentName string, score float64, 
 	if len(provenance) >= 2 {
 		submission.MaterialBatchID, submission.GradingJobID = provenance[0], provenance[1]
 	}
+	return SaveSubmission(submission)
+}
+
+func SaveSubmission(submission models.Submission) error {
+	submission.MergeContent = strings.ToValidUTF8(submission.MergeContent, "")
+	submission.Feedback = strings.ToValidUTF8(submission.Feedback, "")
 	if err := DB.Create(&submission).Error; err != nil {
-		log.Printf("[DB错误] 无法保存学生 %s 记录: %v\n", studentID, err)
+		log.Printf("[DB错误] 无法保存学生 %s 记录: %v\n", submission.StudentID, err)
 		return err
 	}
 	return nil
+}
+
+// Explicit regrading refreshes AI fields in this batch only. Human review fields
+// are deliberately absent from Updates, including reviews saved while AI runs.
+func SaveRegradedSubmission(submission models.Submission) error {
+	if submission.MaterialBatchID == "" || submission.GradingJobID == "" {
+		return fmt.Errorf("重新批改缺少材料批次或任务ID")
+	}
+	submission.MergeContent = strings.ToValidUTF8(submission.MergeContent, "")
+	submission.Feedback = strings.ToValidUTF8(submission.Feedback, "")
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var existing models.Submission
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("assignment_id = ? AND material_batch_id = ? AND student_id = ?", submission.AssignmentID, submission.MaterialBatchID, submission.StudentID).Order("id DESC").First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tx.Create(&submission).Error
+		}
+		if err != nil {
+			return err
+		}
+		return tx.Model(&existing).Updates(map[string]any{
+			"student_name": submission.StudentName, "score": submission.Score, "feedback": submission.Feedback,
+			"merge_content": submission.MergeContent, "plagiarism_reports": submission.PlagiarismReport,
+			"aigc_reports": submission.AIGCReport, "code_doc_match_report": submission.CodeDocMatchReport,
+			"grading_job_id": submission.GradingJobID, "reading_status": submission.ReadingStatus,
+			"reading_report": submission.ReadingReport, "score_details": submission.ScoreDetails,
+		}).Error
+	})
 }

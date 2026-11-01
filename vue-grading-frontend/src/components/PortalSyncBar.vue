@@ -44,14 +44,35 @@
       >后续要求同步已暂停，当前读取会继续完成。</p
     ><p v-if="notice" role="status" class="sync-message">{{ notice }}</p
     ><p v-if="error" role="alert" class="sync-message error">{{ error }}</p>
-    <details v-if="operationActive(view?.operation)" class="sync-operation"
-      ><summary>查看同步任务：{{ view.operation.message }}</summary
-      ><RpaTaskPanel :key="view.operation.id" :task-id="view.operation.id" embedded
-    /></details>
+    <section v-if="operationActive(view?.operation)" class="current-task" aria-live="polite">
+      <header
+        ><div
+          ><strong>当前同步任务</strong
+          ><span>{{
+            view.operation.control_mode === 'HUMAN' ? '等待你处理' : '自动处理中'
+          }}</span></div
+        ><button type="button" class="workspace-button primary" @click="openTask">{{
+          view.operation.control_mode === 'HUMAN' ? '处理并交还自动化' : '查看实时进度'
+        }}</button></header
+      >
+      <ol class="task-steps" aria-label="同步进度">
+        <li
+          v-for="(step, index) in taskSteps"
+          :key="step"
+          :class="{ done: index < taskStep, current: index === taskStep }"
+          >{{ step }}</li
+        >
+      </ol>
+      <p>{{ view.operation.message || taskGuidance }}</p>
+      <details class="sync-operation"
+        ><summary>高级任务控制与执行记录</summary
+        ><RpaTaskPanel :key="view.operation.id" :task-id="view.operation.id" embedded
+      /></details>
+    </section>
   </section>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import AppIcon from './AppIcon.vue';
 import authApi from '../services/authApi';
@@ -64,6 +85,20 @@ const api = createPortalApi(authApi.getClient()),
   busy = ref(false),
   notice = ref(''),
   error = ref('');
+const taskSteps = ['连接官网', '登录验证', '同步作业与要求', '完成'];
+const taskStep = computed(() => {
+  const stage = view.value?.operation?.stage;
+  if (stage === 'DONE') return 3;
+  if (['READING_CATALOG', 'READING_DETAIL'].includes(stage)) return 2;
+  if (['AUTHENTICATE', 'SOLVE_CAPTCHA', 'FILLING_CREDENTIALS', 'TRUST_DECISION'].includes(stage))
+    return 1;
+  return 0;
+});
+const taskGuidance = computed(() =>
+  view.value?.operation?.control_mode === 'HUMAN'
+    ? '请完成当前页面操作，再交还自动化继续同步。'
+    : '系统正在处理，可离开此页面，任务状态会自动更新。'
+);
 let timer,
   loading = false,
   disposed = false,
@@ -92,7 +127,7 @@ async function sync() {
   error.value = '';
   try {
     await api.sync();
-    notice.value = '正在同步课程与作业，完成后会自动出现在作业列表';
+    notice.value = '正在同步课程、作业及作业要求，完成后会自动出现在作业列表';
     await load();
     emit('updated');
   } catch (e) {
@@ -115,6 +150,13 @@ async function pause() {
 async function syncOrConnect() {
   if (!view.value || view.value.status !== 'READY') return router.push('/settings/portal');
   return sync();
+}
+async function openTask() {
+  const id = view.value?.operation?.id;
+  if (!id) return;
+  await router.push({ name: 'ai-assistant', query: { task: id } });
+  await nextTick();
+  window.dispatchEvent(new CustomEvent('rpa-open-console', { detail: { jobId: id } }));
 }
 defineExpose({ syncOrConnect });
 onMounted(() => {
@@ -196,6 +238,63 @@ onBeforeUnmount(() => {
 }
 .sync-message.error {
   color: var(--color-danger);
+}
+.current-task {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-soft);
+}
+.current-task > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.current-task > header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.current-task strong {
+  font-size: 14px;
+}
+.current-task header span {
+  color: var(--color-warning);
+  font-size: 12px;
+}
+.current-task > p {
+  margin-top: 12px;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.task-steps {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 0;
+  list-style: none;
+}
+.task-steps li {
+  flex: 1;
+  padding-top: 8px;
+  border-top: 3px solid var(--color-line);
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.task-steps li.done {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+.task-steps li.current {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.current-task .sync-operation {
+  margin-top: 12px;
 }
 .sync-operation {
   width: 100%;

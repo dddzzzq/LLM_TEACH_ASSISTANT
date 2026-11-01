@@ -2,6 +2,7 @@ package grading
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -111,6 +112,63 @@ func TestIntegrationPreparedBatchGradingIsExplicitIdempotentAndRecoverable(t *te
 	db.First(&job, "id = ?", first.JobID)
 	if job.DispatchState != "SENT" || calls != 2 {
 		t.Fatal("durable outbox did not resume")
+	}
+	// Clearing results must not prevent a new attempt, but a live attempt
+	// cannot be replaced. New attempts use the currently edited rubric.
+	if _, err := RegradeBatch(ctx, actor, Request{BatchID: batch.ID}, first.JobID, "while-running"); err == nil {
+		t.Fatal("replaced an active grading job")
+	}
+	if err := db.Model(&job).Update("status", models.JobStatusSuccess).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A normal regrade also upgrades a legacy manifest before it is queued.
+	legacy, err := materials.LoadManifest(batch.ManifestPath, batch.ManifestSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.ReaderVersion = 0
+	legacy.Sources = nil
+	for i := range legacy.Students {
+		legacy.Students[i].SourceIDs = nil
+	}
+	legacyRaw, _ := json.Marshal(legacy)
+	if err := os.WriteFile(batch.ManifestPath, legacyRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	legacyHash, _ := materials.HashFile(batch.ManifestPath)
+	if err := db.Model(&batch).Updates(map[string]any{"manifest_sha256": legacyHash, "manifest_json": string(legacyRaw)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	previousManifest := batch.ManifestPath
+	regraded, err := RegradeBatch(ctx, actor, Request{BatchID: batch.ID}, first.JobID, "teacher-explicit-regrade")
+	if err != nil || regraded.JobID == first.JobID || regraded.JobID == "" || calls != 3 {
+		t.Fatalf("new grading attempt missing: %+v %v calls=%d", regraded, err, calls)
+	}
+	var attempt models.AsyncJob
+	db.First(&attempt, "id = ?", regraded.JobID)
+	if attempt.QuestionSnapshot != "修改后的官网题目" || attempt.RubricSnapshot != `{"新标准":100}` || !strings.Contains(attempt.PayloadJSON, `"regrade":true`) {
+		t.Fatal("regrade used old portal snapshot", attempt.ID)
+	}
+	if err := db.First(&batch, "id = ?", batch.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := materials.LoadManifest(batch.ManifestPath, batch.ManifestSHA256)
+	if err != nil || upgraded.ReaderVersion != materials.CurrentReaderVersion || batch.ManifestPath == previousManifest {
+		t.Fatal("regrade reused legacy reader", err)
+	}
+	replayed, err := RegradeBatch(ctx, actor, Request{BatchID: batch.ID}, first.JobID, "teacher-explicit-regrade")
+	if err != nil || replayed.JobID != regraded.JobID || calls != 3 {
+		t.Fatal("regrade retry duplicated task", err)
+	}
+	if _, err := RegradeBatch(ctx, actor, Request{BatchID: batch.ID}, first.JobID, "stale-click"); err == nil {
+		t.Fatal("stale browser created another attempt")
+	}
+	if _, err := RegradeBatch(ctx, Actor{UserID: actor.UserID + 1, Role: "teacher"}, Request{BatchID: batch.ID}, first.JobID, "other-owner"); err == nil {
+		t.Fatal("other teacher regraded batch")
+	}
+	current, err := SubmitBatch(ctx, actor, Request{BatchID: batch.ID})
+	if err != nil || current.JobID != regraded.JobID {
+		t.Fatal("normal repeated submission lost latest attempt", err)
 	}
 	// An explicit auto-grade intent waits for requirements; ordinary batches do not gain one.
 	b2, err := s.Create(ctx, materials.Actor{UserID: actor.UserID, Role: actor.Role}, materials.Request{SourcePath: fixtureZip(t, "20260002_李四/main.py"), AssignmentID: a.ID, AutoGrade: true}, uuid.NewString())

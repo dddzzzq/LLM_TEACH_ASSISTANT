@@ -36,6 +36,8 @@
 | `return_to_course_list` | 按已读取列表的内部书签返回原课程页，不接收 URL；无作业也返回继续 |
 | `read_course_list` | 读取当前课程列表的官网 ID 与名称 |
 | `read_homework_list(course_id)` | 核验当前课程归属，读取班级和作业列表 |
+| `select_homework_detail(homework_id)` | 绑定当前已读作业列表中的详情目标，随后由 Agent 点击名称；不接收 URL |
+| `read_homework_detail` | 复用原读取器获取目标详情，同步中读完自动回到原作业列表，单独重读仍可使用 HOMEWORK_DETAIL |
 | `finish_catalog` | 先返回并重新核验课程列表，完整后提交目录；清单尚未核验到末尾则继续采集 |
 | 原 `scroll` | 采集时定位课程/作业所在 iframe 和内部列表，滚动并等待懒加载稳定，参数协议不变 |
 

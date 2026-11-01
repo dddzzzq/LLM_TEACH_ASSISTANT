@@ -1,0 +1,6 @@
+<meta charset="utf-8"><h1 class=courseName>操作系统</h1><ul><li id=work><h2>第一次作业</h2>
+<a onclick="document.querySelector('#work').hidden=true;document.querySelector('#grade').hidden=false">批阅</a></li></ul>
+<div id=grade hidden><h2>第一次作业</h2><ul class=morePop><a onclick="document.querySelector('[role=dialog]').hidden=false">导出作业附件</a></ul></div>
+<div role=dialog hidden>导出设置<label class=export-range><input type=checkbox>班级A</label>
+<label class=export-range><input type=checkbox>班级B</label>
+<a class=confirmDown onclick="fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=task-a><td>第一次作业 全部班级 导出成功 <a class=download_ic href=/download>下载</a></td></tr></tbody></table>'">确定</a></div><div id=downloadcenter><p class=empty>暂无下载记录</p></div>

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # 截取长度配置
     MAX_STUDENT_ANSWER_LENGTH: int = 150000  # 学生答案最大长度（字符）
+    GRADING_INPUT_TOKEN_BUDGET: int = 48000  # UTF-8字节数作为保守token上界，含题目、清单与证据
     MAX_CODE_CONTENT_LENGTH: int = 100000  # 代码内容最大长度（字符）
     MAX_DOC_CONTENT_LENGTH: int = 75000  # 文档内容最大长度（字符）
     MAX_PLAGIARISM_TEXT_LENGTH: int = 50000  # 抄袭分析文本长度（字符）

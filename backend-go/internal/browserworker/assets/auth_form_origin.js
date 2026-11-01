@@ -1,0 +1,1 @@
+e => e.form ? new URL(e.form.action || location.href, location.href).origin : location.origin

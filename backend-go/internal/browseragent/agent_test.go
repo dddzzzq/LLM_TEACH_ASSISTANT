@@ -52,10 +52,122 @@ func TestHomeworkDetailSkillReachesQuestionReader(t *testing.T) {
 		if !strings.Contains(doc.Instructions, "不要自行改写、概括或补全题目") || !strings.Contains(string(raw), "不要自行改写、概括或补全题目") {
 			t.Fatal("detail instructions missing from the actual decision")
 		}
+		for _, rule := range []string{"homework_detail.open", "DETAIL_PAGE_NOT_ACTIVE", "不得返回作业列表、再次点击作业名称或打开另一个详情标签", "严格保持单详情页"} {
+			if !strings.Contains(string(raw), rule) {
+				t.Fatalf("single-detail navigation rule missing: %s", rule)
+			}
+		}
 		return modelResponse("read_homework_detail", `{}`), nil
 	})
 	if err != nil || string(action) != `{"tool":"read_homework_detail"}` || rounds != 2 {
 		t.Fatalf("detail reader decision failed: action=%s model_calls=%d err=%v", action, rounds, err)
+	}
+}
+
+func TestSyncDetailPhaseCannotChooseCatalogToolsInsteadOfOpeningQuestion(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	variants := []map[string]any{}
+	for _, name := range []string{"click", "read_homework_detail", "read_homework_list", "read_course_list", "select_homework_detail", "finish_catalog", "return_to_course_list", "open_export_settings"} {
+		properties := map[string]any{"tool": map[string]any{"type": "string", "enum": []string{name}}}
+		required := []string{"tool"}
+		for field, tool := range map[string]string{"element_ref": "click", "course_id": "read_homework_list", "homework_id": "select_homework_detail"} {
+			if name == tool {
+				properties[field] = map[string]string{"type": "string"}
+				required = append(required, field)
+			}
+		}
+		variants = append(variants, map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false})
+	}
+	contract, _ := json.Marshal(map[string]any{"oneOf": variants})
+	round := 0
+	action, err := Decide(context.Background(), json.RawMessage(`{"target":{"assignment_name":"课后作业7"},"observation":{"task_type":"AUTH_BOOTSTRAP","homework_detail":{"open":false,"ready":false}}}`), skills["read-homework-detail"], contract, func(_ context.Context, messages []map[string]interface{}, definitions []map[string]interface{}) (*modelclient.LLMResponse, error) {
+		round++
+		if round == 1 {
+			return modelResponse("load_skill", `{"skill":"read-homework-detail"}`), nil
+		}
+		offered := map[string]bool{}
+		for _, definition := range definitions {
+			function := definition["function"].(map[string]interface{})
+			offered[function["name"].(string)] = true
+		}
+		// Reproduce the observed planner preference whenever list tools remain.
+		if offered["read_homework_list"] {
+			return modelResponse("read_homework_list", `{"course_id":"265960224"}`), nil
+		}
+		for _, forbidden := range []string{"read_course_list", "select_homework_detail", "finish_catalog", "return_to_course_list", "open_export_settings"} {
+			if offered[forbidden] {
+				t.Fatal("catalog/export action leaked into detail phase", forbidden)
+			}
+		}
+		if !offered["click"] || !offered["read_homework_detail"] {
+			t.Fatal("detail navigation actions unavailable")
+		}
+		return modelResponse("click", `{"element_ref":"work-title"}`), nil
+	})
+	if err != nil || round != 2 || !strings.Contains(string(action), `"tool":"click"`) {
+		t.Fatalf("failed to enter selected detail: action=%s calls=%d err=%v", action, round, err)
+	}
+}
+
+func TestCatalogManifestPhasesDoNotOfferPrematureReturnOrWrongPageReads(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"click", "scroll", "read_course_list", "read_homework_list", "select_homework_detail", "return_to_course_list", "finish_catalog"}
+	variants := []map[string]any{}
+	for _, name := range names {
+		props := map[string]any{"tool": map[string]any{"type": "string", "enum": []string{name}}}
+		required := []string{"tool"}
+		field := map[string]string{"click": "element_ref", "scroll": "delta_y", "read_homework_list": "course_id", "select_homework_detail": "homework_id"}[name]
+		if field != "" {
+			kind := "string"
+			if field == "delta_y" {
+				kind = "integer"
+			}
+			props[field] = map[string]string{"type": kind}
+			required = append(required, field)
+		}
+		variants = append(variants, map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false})
+	}
+	contract, _ := json.Marshal(map[string]any{"oneOf": variants})
+	for _, phase := range []struct{ step, tool, args string }{
+		{"OPEN_HOMEWORK_LIST", "click", `{"element_ref":"homework-menu"}`},
+		{"READ_HOMEWORK_LIST", "read_homework_list", `{"course_id":"11"}`},
+		{"SCROLL_HOMEWORK_LIST", "scroll", `{"delta_y":800}`},
+		{"SELECT_HOMEWORK_DETAIL", "select_homework_detail", `{"homework_id":"33"}`},
+		{"RETURN_TO_COURSE_LIST", "return_to_course_list", `{}`},
+		{"FINISH_CATALOG", "finish_catalog", `{}`},
+	} {
+		t.Run(phase.step, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]any{"observation": map[string]any{"catalog": map[string]string{"next_step": phase.step}}})
+			round := 0
+			action, err := Decide(context.Background(), input, skills["sync-teacher-portal"], contract, func(_ context.Context, _ []map[string]interface{}, defs []map[string]interface{}) (*modelclient.LLMResponse, error) {
+				round++
+				if round == 1 {
+					return modelResponse("load_skill", `{"skill":"sync-teacher-portal"}`), nil
+				}
+				offered := map[string]bool{}
+				for _, def := range defs {
+					offered[def["function"].(map[string]interface{})["name"].(string)] = true
+				}
+				if !offered[phase.tool] {
+					t.Fatal("required next action missing", phase.tool)
+				}
+				for _, business := range []string{"read_homework_list", "select_homework_detail", "return_to_course_list", "finish_catalog"} {
+					if business != phase.tool && offered[business] {
+						t.Fatal("premature/wrong-page action offered", business)
+					}
+				}
+				return modelResponse(phase.tool, phase.args), nil
+			})
+			if err != nil || !strings.Contains(string(action), `"tool":"`+phase.tool+`"`) {
+				t.Fatalf("action=%s err=%v", action, err)
+			}
+		})
 	}
 }
 
@@ -120,6 +232,29 @@ func TestPageAgentCanChooseZeroArgumentSliderTool(t *testing.T) {
 		})
 	if err != nil || string(action) != `{"tool":"solve_slider_captcha"}` {
 		t.Fatalf("action=%s err=%v", action, err)
+	}
+}
+
+func TestPageAgentOnlyOffersActionsAfterLoadingSkill(t *testing.T) {
+	doc := catalog.Document{Name: "sync-teacher-portal", Description: "nav", Version: "v1", Instructions: "提交验证码后继续可信设备核验"}
+	contract := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"type":"string","enum":["submit_login_code"]}},"required":["tool"],"additionalProperties":false}]}`)
+	round := 0
+	action, err := Decide(context.Background(), json.RawMessage(`{"stage":"AUTHENTICATE","observation":{"authentication":{"otp_entered":true}}}`), doc, contract, func(_ context.Context, messages []map[string]interface{}, defs []map[string]interface{}) (*modelclient.LLMResponse, error) {
+		round++
+		payload, _ := json.Marshal(defs)
+		if round == 1 {
+			if strings.Contains(string(payload), "submit_login_code") || !strings.Contains(string(payload), "load_skill") {
+				t.Fatalf("page action offered before Skill load: %s", payload)
+			}
+			return modelResponse("load_skill", `{"skill":"sync-teacher-portal"}`), nil
+		}
+		if !strings.Contains(string(payload), "submit_login_code") {
+			t.Fatalf("page action missing after Skill load: %s", payload)
+		}
+		return modelResponse("submit_login_code", `{}`), nil
+	})
+	if err != nil || round != 2 || string(action) != `{"tool":"submit_login_code"}` {
+		t.Fatalf("action=%s rounds=%d err=%v", action, round, err)
 	}
 }
 

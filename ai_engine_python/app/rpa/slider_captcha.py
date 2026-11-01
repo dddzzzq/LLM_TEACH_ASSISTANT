@@ -3,7 +3,11 @@
 import asyncio
 import base64
 import contextlib
+import logging
 import random
+
+
+logger = logging.getLogger(__name__)
 
 
 async def find_slider_challenge(page, allowed_frame=None):
@@ -119,10 +123,45 @@ async def solve_slider_captcha(
                     "attempts": attempts,
                     "message": "滑块图像处理依赖未安装，请手动完成验证",
                 }
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Slider attempt %d failed (%s): %s",
+                    attempts,
+                    type(exc).__name__,
+                    str(exc)[:240],
+                )
                 if not active():
                     return {"status": "interrupted", "attempts": attempts}
                 await asyncio.sleep(0.2)
     except Exception:
         pass  # Detached/unsupported frames are failures, never evidence of success.
     return {"status": "failed", "attempts": attempts, "message": "滑块验证未通过，请手动完成验证"}
+
+
+def image_worker():
+    """Image-only bridge for the Go browser tool; no browser or credentials."""
+    import json
+    import sys
+
+    result = {"driver": "python-opencv", "status": "error"}
+    try:
+        raw = sys.stdin.buffer.read((6 << 20) + 1)
+        if len(raw) > 6 << 20:
+            raise ValueError("Image request too large")
+        request = json.loads(raw)
+        background = base64.b64decode(request["background"], validate=True)
+        piece = base64.b64decode(request["piece"], validate=True)
+        if not 0 < len(background) <= 2 << 20 or not 0 < len(piece) <= 2 << 20:
+            raise ValueError("Invalid image size")
+        distance = captcha_distance(background, piece)
+        result.update(status="ok", distance=distance)
+    except (ImportError, ModuleNotFoundError):
+        result["code"] = "CAPTCHA_OPENCV_UNAVAILABLE"
+    except Exception:
+        # Never write the request, images, traceback or arbitrary exception text.
+        result["code"] = "CAPTCHA_IMAGE_UNCERTAIN"
+    sys.stdout.write(json.dumps(result))
+
+
+if __name__ == "__main__":
+    image_worker()

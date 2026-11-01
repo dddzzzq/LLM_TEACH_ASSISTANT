@@ -2,6 +2,9 @@ module grading-gateway
 
 go 1.25.5
 
+// Keep the upstream version pinned; the local patch makes frame/page publication race-safe.
+replace github.com/mxschmitt/playwright-go => ./third_party/playwright-go
+
 require (
 	github.com/IBM/sarama v1.47.0
 	github.com/bodgit/sevenzip v1.6.5
@@ -12,6 +15,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+	github.com/mxschmitt/playwright-go v0.6201.2-0.20260914222347-775648cd1805
 	github.com/nwaples/rardecode v1.1.3
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/xuri/excelize/v2 v2.10.1
@@ -37,6 +41,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
@@ -47,6 +52,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
+	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect

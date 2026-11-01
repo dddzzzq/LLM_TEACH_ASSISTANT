@@ -11,13 +11,15 @@ import grpc
 
 from app.rpc.compute import ComputeServices, ComputeServicer
 from app.rpc.protocol import pb2, pb2_grpc
+from app.rpc.limits import GRPC_OPTIONS
+from app.services.deepseek_service import DeepSeekService
 
 
 class ComputeRPCContractTests(unittest.TestCase):
     def setUp(self):
         self.ocr_paths = []
 
-        def extract(paths):
+        def extract(paths, **kwargs):
             self.ocr_paths.extend(paths)
             self.assertEqual(Path(paths[0]).read_bytes(), b"test image")
             return "识别结果"
@@ -48,12 +50,12 @@ class ComputeRPCContractTests(unittest.TestCase):
             SimpleNamespace(get_concatenated_text=extract),
         )
         self.executor = ThreadPoolExecutor(max_workers=2)
-        self.server = grpc.server(self.executor)
+        self.server = grpc.server(self.executor, options=GRPC_OPTIONS)
         pb2_grpc.add_ComputeServiceServicer_to_server(ComputeServicer(services), self.server)
         port = self.server.add_insecure_port("127.0.0.1:0")
         self.assertNotEqual(port, 0)
         self.server.start()
-        self.channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+        self.channel = grpc.insecure_channel(f"127.0.0.1:{port}", options=GRPC_OPTIONS)
         grpc.channel_ready_future(self.channel).result(timeout=5)
         self.stub = pb2_grpc.ComputeServiceStub(self.channel)
         self.addCleanup(self.close_server)
@@ -62,6 +64,49 @@ class ComputeRPCContractTests(unittest.TestCase):
         self.channel.close()
         self.server.stop(0).wait(timeout=5)
         self.executor.shutdown(wait=True)
+
+    def test_large_compute_request_and_response_do_not_hit_old_four_mib_limit(self):
+        body = 'x' * (6 << 20)
+        response = self.stub.GradeHomework(pb2.GradeRequest(student_text=body, rubric_json='{"正确性":100}'), timeout=10)
+        self.assertEqual(response.total_score, 85)
+        self.assertEqual(len(response.merged_content), len(body))
+
+    def test_structured_reading_and_scoring_evidence_round_trip(self):
+        material = {'schema':'student-materials.v1', 'reading':{'status':'COMPLETE','warnings':[]},
+                    'files':[{'id':'F0001','path':'src/main.ts','role':'code','status':'READ','text':'Promise.all(tasks)'}]}
+        self.deepseek.grade_homework.return_value = {'total_score':85,'overall_feedback':'有依据',
+            'score_details':[{'criterion':'正确性','score':85,'max_score':100,'evidence_refs':['F0001.C0001']}], 'reading':material['reading']}
+        response = self.stub.GradeHomework(pb2.GradeRequest(student_text=json.dumps(material), rubric_json='{"正确性":100}'), timeout=5)
+        result = json.loads(response.merged_content)
+        self.assertEqual(result['schema'], 'grading-result.v1')
+        self.assertEqual(result['reading']['status'], 'COMPLETE')
+        self.assertIn('src/main.ts', result['text'])
+        self.assertEqual(result['score_details'][0]['evidence_refs'], ['F0001.C0001'])
+
+    def test_program_computed_total_reaches_both_rpc_response_formats(self):
+        service=DeepSeekService()
+        model_response={'total_score':90,'overall_feedback':'逐项有依据','score_details':[
+            {'criterion':name,'score':value,'max_score':maximum,'feedback':'实际材料依据','evidence_refs':['F0001.C0001']}
+            for name,value,maximum in [('功能',40,45),('质量',47,55)]]}
+        service._call_api_json=Mock(return_value=model_response)
+        self.deepseek.grade_homework=service.grade_homework
+        self.aigc._separate_content.return_value=('', 'code')
+        material={'schema':'student-materials.v1','reading':{'status':'COMPLETE','warnings':[]},
+                  'files':[{'id':'F0001','path':'main.ts','role':'code','status':'READ','text':'actual source'}]}
+        for student_text in [json.dumps(material), 'legacy source']:
+            with self.subTest(structured=student_text.startswith('{')):
+                model_response['total_score']=90
+                service._call_api_json.reset_mock()
+                response=self.stub.GradeHomework(pb2.GradeRequest(student_text=student_text,
+                    question='题目',rubric_json='{"功能":45,"质量":55}'),timeout=5)
+                self.assertEqual(response.total_score,87)
+                service._call_api_json.assert_called_once()
+                if student_text.startswith('{'):
+                    result=json.loads(response.merged_content)
+                    self.assertEqual(result['reading']['status'],'COMPLETE')
+                    self.assertEqual(sum(item['score'] for item in result['score_details']),87)
+                else:
+                    self.assertEqual(response.merged_content,student_text)
 
     def test_all_public_methods_round_trip(self):
         text = self.stub.ExtractText(
@@ -107,6 +152,20 @@ class ComputeRPCContractTests(unittest.TestCase):
         fetch.assert_called_once_with(
             username="test", password="fake", course_name="课程", assignment_name="作业"
         )
+
+    def test_non_code_and_code_only_submissions_skip_code_document_matching(self):
+        for prose, code in [("论文或答题正文", ""), ("", "print(1)"), ("汇报内容", "  ")]:
+            with self.subTest(prose=prose, code=code):
+                self.aigc._separate_content.return_value = (prose, code)
+                self.deepseek.analyze_code_doc_match.reset_mock()
+                grade = self.stub.GradeHomework(
+                    pb2.GradeRequest(student_id="s1", question="按提交内容评价", student_text=prose or code, rubric_json='{"正确性":100}'),
+                    timeout=5,
+                )
+                self.assertEqual(grade.total_score, 85)
+                self.deepseek.analyze_code_doc_match.assert_not_called()
+                self.assertIsNone(self.deepseek.grade_homework.call_args.kwargs["code_doc_match_report"])
+                self.assertEqual(json.loads(grade.code_doc_match_report_json), {})
 
     def test_legacy_fallback_responses_remain_compatible(self):
         self.plagiarism.check_plagiarism_in_batch.side_effect = ValueError("unavailable")

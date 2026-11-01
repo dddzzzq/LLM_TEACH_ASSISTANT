@@ -37,10 +37,9 @@
               maxlength="255"
           /></label>
           <label
-            >教务密码<input
+            >教务密码<PasswordInput
               v-model="password"
               name="portal_password"
-              type="password"
               autocomplete="new-password"
               :required="!view.has_password"
               :placeholder="view.has_password ? '留空保持原密码' : '请输入教务密码'"
@@ -60,7 +59,7 @@
           >重新认证</button
         >
         <button type="button" :disabled="busy || active || view.status !== 'READY'" @click="sync"
-          >更新课程</button
+          >更新课程与作业</button
         >
         <button
           type="button"
@@ -90,8 +89,8 @@
       ><h2>课程和作业</h2
       ><p
         >已同步
-        {{ courses.length }} 门课程。更新课程会直接创建或更新本地作业，并自动读取官网要求。</p
-      ><router-link to="/grade-homework">去选择作业并批改 →</router-link
+        {{ courses.length }} 门课程。更新课程与作业会创建或更新本地作业，并自动读取官网要求。</p
+      ><router-link to="/assignments">返回作业工作台选择作业 →</router-link
       ><ul
         ><li v-for="course in courses" :key="course.id"
           >{{ course.title }} · {{ course.term || '官网未提供学期' }}</li
@@ -121,6 +120,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import authApi from '../services/authApi';
 import { createPortalApi, operationActive, portalStatus } from '../services/portalApi';
 import RpaTaskPanel from '../components/RpaTaskPanel.vue';
+import PasswordInput from '../components/PasswordInput.vue';
 const api = createPortalApi(authApi.getClient());
 const view = ref({ status: 'UNCONFIGURED', credential_storage_ready: false }),
   operation = ref(null),
@@ -142,7 +142,10 @@ let disposed = false,
   timer,
   snapshot = '',
   eventOperation = '';
-const date = (value) => (value ? new Date(value).toLocaleString() : '尚无记录');
+const date = (value) =>
+  value
+    ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+    : '尚无记录';
 const eventText = (event) => {
   try {
     const value = JSON.parse(event.payload);

@@ -1,0 +1,344 @@
+{
+  "oneOf": [
+    {
+      "description": "在已授权登录页填写已保存账号密码并提交；不接收或返回凭据",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "fill_portal_credentials"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "在发送验证码页面获取后交还教师填写；企业微信动态码页直接等待输入，不发送短信",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "request_login_code"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "提交教师已在当前浏览器输入的验证码；不接收或返回验证码",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "submit_login_code"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "按教师保存的信任设备设置处理当前官网可信浏览器弹窗",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "apply_device_trust"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "只读取当前课程列表的真实标识和名称；不跳转、不下载",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "read_course_list"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "只读取当前已核验课程的班级和作业列表",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "read_homework_list"
+          ]
+        },
+        "course_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "course_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "选择当前已读取作业列表中的官网作业，随后点击该作业名称读取详情；不跳转",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "select_homework_detail"
+          ]
+        },
+        "homework_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "homework_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "只读取当前所选作业详情的题目文字、图片和附件；不读取学生答案、不批改、不查重",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "read_homework_detail"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "所有课程与作业页面读取完整后，提交本次目录结果",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "finish_catalog"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "返回 read_course_list 记录的原课程列表页；无作业也须返回并继续下一门课程",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "return_to_course_list"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "仅在 SOLVE_CAPTCHA 阶段处理当前登录页已检测到的滑块；本轮最多三次，失败交还用户",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "solve_slider_captcha"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "点击当前观察中的控件；引用由执行器核验",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "click"
+          ]
+        },
+        "element_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "element_ref"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "填写搜索字段；只能操作执行器认可的搜索控件",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "fill"
+          ]
+        },
+        "element_ref": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "element_ref",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "垂直滚动当前页面；执行器将幅度限制在 -1000 到 1000",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "scroll"
+          ]
+        },
+        "delta_y": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tool",
+        "delta_y"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "切换到当前观察中的页面 ID",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "switch_page"
+          ]
+        },
+        "page_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "page_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "仅在 can_open_export 为 true 时打开已核验作业的导出设置",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "open_export_settings"
+          ]
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "暂停自动操作并说明需要用户处理的事项",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "request_human"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "仅在课程/作业列表由大模型判断近似名称后，请教师弹窗确认；不点击候选",
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "request_target_confirmation"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "element_ref": {
+          "type": "string"
+        },
+        "actual_name": {
+          "type": "string"
+        },
+        "term": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "kind",
+        "element_ref",
+        "actual_name",
+        "term",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

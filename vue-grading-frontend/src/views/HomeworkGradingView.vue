@@ -144,6 +144,7 @@ import PortalHomeworkRequirements from '../components/PortalHomeworkRequirements
 import MaterialBatchPanel from '../components/MaterialBatchPanel.vue';
 import RpaTaskPanel from '../components/RpaTaskPanel.vue';
 import RubricEditor from '../components/RubricEditor.vue';
+import { createRubricFromTemplate } from '../services/rubricTemplates';
 const route = useRoute(),
   router = useRouter(),
   api = createPortalApi(authApi.getClient()),
@@ -161,13 +162,7 @@ const source = ref('upload'),
   usePortalRequirements = ref(true),
   requirementsReady = ref(false),
   activeRequirementTask = ref(''),
-  rubric = ref(
-    JSON.stringify({
-      正确性: { description: '程序运行正确，符合题目要求', score: 60 },
-      完成度: { description: '功能完整，提交材料齐全', score: 20 },
-      代码质量: { description: '结构清晰，命名合理', score: 20 },
-    })
-  ),
+  rubric = ref(createRubricFromTemplate()),
   directory = ref(''),
   file = ref(null),
   selection = ref({ snapshot_id: '', items: [] });

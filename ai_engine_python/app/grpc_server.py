@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 import os
+import signal
 import sys
 from concurrent import futures
 
@@ -13,6 +14,7 @@ if BASE_DIR not in sys.path:
 
 from app.rpc.protocol import pb2, pb2_grpc
 from app.rpc.compute import ComputeServices, ComputeServicer as _ComputeServicer
+from app.rpc.limits import GRPC_OPTIONS
 
 # 拦截子进程无意义的导入，只有主进程才加载大模型
 if multiprocessing.current_process().name == "MainProcess":
@@ -56,9 +58,11 @@ def serve():
     # 强制预热模型
     _ = aigc_detector_service
     _ = plagiarism_service
+    ocr_service_instance.warmup()
 
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=int(os.environ.get("AI_GRPC_WORKERS", "10")))
+        futures.ThreadPoolExecutor(max_workers=int(os.environ.get("AI_GRPC_WORKERS", "10"))),
+        options=GRPC_OPTIONS,
     )
     pb2_grpc.add_ComputeServiceServicer_to_server(ComputeServicer(), server)
 
@@ -67,7 +71,17 @@ def serve():
         raise RuntimeError(f"无法监听 AI gRPC 地址：{address}")
     server.start()
     logging.info("Python AI 节点启动成功，监听 %s", address)
-    server.wait_for_termination()
+
+    def stop_server(signum, frame):
+        server.stop(5)
+
+    signal.signal(signal.SIGTERM, stop_server)
+    signal.signal(signal.SIGINT, stop_server)
+    try:
+        server.wait_for_termination()
+    finally:
+        server.stop(0).wait(timeout=5)
+        ocr_service_instance.close()
 
 
 if __name__ == "__main__":

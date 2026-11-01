@@ -178,3 +178,49 @@ func TestIntegrationClassesUseOneSavedAssignmentAndStableClassIDs(t *testing.T) 
 		t.Fatal("incomplete requirements used for grading")
 	}
 }
+
+func TestIntegrationAllAssignmentClassesExpandsCurrentCatalogAndKeepsClassTargets(t *testing.T) {
+	r, owner, c, works := detailFixture(t)
+	ctx := context.Background()
+	work := works[0]
+	added := models.PortalCourseClass{ID: stableID(c.ID, "extra-class", "33"), CourseID: work.CourseID, SnapshotID: c.ActiveSnapshotID, PlatformID: "333", Name: "A班"}
+	stale := models.PortalCourseClass{ID: stableID(c.ID, "stale-class", "44"), CourseID: work.CourseID, SnapshotID: "old-snapshot", PlatformID: "444", Name: "已移除班级"}
+	if err := r.Service.DB.Create(&[]models.PortalCourseClass{added, stale}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Service.DB.Model(&models.Assignment{}).Where("id = ?", work.AssignmentID).Updates(map[string]any{"question": "完整题目", "requirements_status": "READY"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	flow, err := r.Service.GradeAllAssignmentClasses(ctx, owner, work.AssignmentID, "all-current-classes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := r.Service.GradeAllAssignmentClasses(ctx, owner, work.AssignmentID, "all-current-classes")
+	if err != nil || again.ID != flow.ID {
+		t.Fatal("all-class request was not idempotent", err)
+	}
+	var items []models.PortalWorkflowItem
+	if err := r.Service.DB.Where("workflow_id = ?", flow.ID).Find(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("wanted both current classes, got %d", len(items))
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		var target rpa.PortalTarget
+		if err := json.Unmarshal([]byte(item.TargetJSON), &target); err != nil {
+			t.Fatal(err)
+		}
+		if item.AssignmentID != work.AssignmentID || item.ClassID == stale.ID || target.ClassID == "444" || target.ClassID == "" {
+			t.Fatal("class binding lost or stale class included")
+		}
+		seen[target.ClassID] = true
+	}
+	if !seen["22"] || !seen["333"] {
+		t.Fatalf("wrong platform class targets: %v", seen)
+	}
+	if _, err := r.Service.GradeAllAssignmentClasses(ctx, owner+10000, work.AssignmentID, "foreign-all"); err == nil {
+		t.Fatal("cross-owner all-class request allowed")
+	}
+}

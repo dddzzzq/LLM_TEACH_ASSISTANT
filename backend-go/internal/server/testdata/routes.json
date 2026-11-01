@@ -81,6 +81,11 @@
   },
   {
     "Method": "GET",
+    "Path": "/api/materials/:id/file",
+    "Handler": "grading-gateway/internal/handlers.GetMaterialEvidence"
+  },
+  {
+    "Method": "GET",
     "Path": "/api/portal/assignments/:id",
     "Handler": "grading-gateway/internal/handlers.(*PortalHandler).AssignmentPortal-fm"
   },

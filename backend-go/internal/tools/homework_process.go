@@ -15,7 +15,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +32,9 @@ type GradingTask struct {
 	StudentName  string
 	AssignmentID string
 	FilePaths    []string
+	RootPath     string
+	Sources      []materials.ArchiveSource
+	SkippedFiles []materials.SkippedFile
 }
 
 // 提取压缩文件内容并分组
@@ -101,6 +103,7 @@ func extractAndGroupTasks(assignmentID string, zipPath string) ([]GradingTask, e
 				StudentName:  studentName,
 				AssignmentID: assignmentID,
 				FilePaths:    []string{},
+				RootPath:     extractDir,
 			}
 		}
 		studentMap[studentID].FilePaths = append(studentMap[studentID].FilePaths, savePath)
@@ -138,6 +141,13 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 	log.Printf("\n======================================================\n")
 	log.Printf("[调度中心] 启动全新批改流线, 作业ID: %s\n", assignmentID)
 	startTime := time.Now()
+	saveSubmission := database.SaveSubmission
+	var intent struct {
+		Regrade bool `json:"regrade"`
+	}
+	if json.Unmarshal([]byte(job.PayloadJSON), &intent) == nil && intent.Regrade && job.MaterialBatchID != "" {
+		saveSubmission = database.SaveRegradedSubmission
+	}
 
 	// 1. 获取作业信息及评分标准 (走缓存)
 	parsedID, _ := strconv.Atoi(assignmentID)
@@ -169,7 +179,7 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 			for _, file := range student.Files {
 				paths = append(paths, filepath.Join(filepath.Dir(batch.ManifestPath), filepath.FromSlash(file.Path)))
 			}
-			tasks = append(tasks, GradingTask{StudentID: student.ID, StudentName: student.Name, AssignmentID: assignmentID, FilePaths: paths})
+			tasks = append(tasks, GradingTask{StudentID: student.ID, StudentName: student.Name, AssignmentID: assignmentID, FilePaths: paths, RootPath: filepath.Dir(batch.ManifestPath), Sources: manifest.StudentSources(student), SkippedFiles: student.SkippedFiles})
 		}
 	} else {
 		tasks, err = extractAndGroupTasks(assignmentID, zipPath)
@@ -189,9 +199,6 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 	// 并发度20，并发提取文件
 	extractConcurrencyLimit := make(chan struct{}, 20)
 
-	// 预编译正则表达式，用于清理连续3个以上的莫名其妙空行
-	newlineRegex := regexp.MustCompile(`\n{3,}`)
-
 	for _, task := range tasks {
 		wgMap1.Add(1)
 		go func(t GradingTask) {
@@ -200,44 +207,11 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 			extractConcurrencyLimit <- struct{}{}
 			defer func() { <-extractConcurrencyLimit }()
 
-			var mergedStudentText strings.Builder
-			for _, filePath := range t.FilePaths {
-				fileBytes, err := os.ReadFile(filePath)
-				if err != nil {
-					continue
-				}
-
-				// 提取文件
-				extractedText := ExtractContent(filepath.Base(filePath), fileBytes, 0)
-
-				if extractedText != "" {
-					if !strings.HasPrefix(extractedText, "---") {
-						mergedStudentText.WriteString(fmt.Sprintf("--- 文件开始: %s ---\n\n%s\n\n--- 文件结束: %s ---\n\n", filepath.Base(filePath), extractedText, filepath.Base(filePath)))
-					} else {
-						// 针对嵌套压缩包返回的已经带有分隔符的文本，直接拼接
-						mergedStudentText.WriteString(extractedText + "\n")
-					}
-				}
-			}
-
-			// 清理掉所有无法被 UTF-8 识别的乱码字节（如 GBK 遗留等），用  代替
-			// 防止 gRPC 序列化崩溃 和 MySQL Error 1366
-			finalText := strings.ToValidUTF8(mergedStudentText.String(), "")
-
-			// 换行符清洗逻辑
-			// 1. 统一处理 Windows 和老式 Mac 的换行符为 \n
-			finalText = strings.ReplaceAll(finalText, "\r\n", "\n")
-			finalText = strings.ReplaceAll(finalText, "\r", "\n")
-			// 2. 将连续出现 3个及以上的 \n 强制压缩为 2个 \n
-			finalText = newlineRegex.ReplaceAllString(finalText, "\n\n")
-
-			if strings.TrimSpace(finalText) == "" {
-				finalText = "【系统容错记录】文件破损、非文本格式或内容全空。"
-			}
-			studentTextsMap.Store(t.StudentID, finalText)
+			parsed := prepareStudentMaterials(context.Background(), t, cachedStudentOCR)
+			studentTextsMap.Store(t.StudentID, parsed)
 
 			currentProg := atomic.AddInt32(&map1Completed, 1)
-			log.Printf("[Map 1 进度] 学生 %s 解析完成，内容长度: %d 字符 | 进度: %d/%d", t.StudentID, len(finalText), currentProg, totalTasks)
+			log.Printf("[Map 1 进度] 学生 %s 解析完成，读取状态: %s, 文件数: %d | 进度: %d/%d", t.StudentID, parsed.Reading.Status, len(parsed.Files), currentProg, totalTasks)
 		}(task)
 	}
 
@@ -247,7 +221,10 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 	// Reduce 阶段：全局查重
 	plagMap := make(map[string]string)
 	studentTextsMap.Range(func(key, value interface{}) bool {
-		plagMap[key.(string)] = value.(string)
+		parsed := value.(studentMaterials)
+		if parsed.Reading.Status == "COMPLETE" {
+			plagMap[key.(string)] = parsed.jsonText()
+		}
 		return true
 	})
 
@@ -256,7 +233,7 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 	ctxPlag, cancelPlag := context.WithTimeout(context.Background(), 60*time.Minute)
 	// defer cancelPlag()
 	// ctxPlag := context.Background()
-	plagRes, errPlag := grpcclient.Client.CheckPlagiarism(ctxPlag, &pb.PlagiarismRequest{StudentTexts: plagMap})
+	plagResults, errPlag := checkPlagiarismBatched(ctxPlag, grpcclient.Client, plagMap, 8<<20)
 	cancelPlag()
 
 	var globalPlagiarismResult map[string]interface{}
@@ -264,7 +241,7 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 		log.Printf("[降级警告] 全局查重失败: %v\n", errPlag)
 		globalPlagiarismResult = make(map[string]interface{})
 	} else {
-		json.Unmarshal([]byte(plagRes.PlagiarismResultsJson), &globalPlagiarismResult)
+		globalPlagiarismResult = plagResults
 	}
 
 	// Map 2 阶段：并发调用 AI 大模型评分
@@ -281,7 +258,27 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 
 			for t := range jobs {
 				textVal, _ := studentTextsMap.Load(t.StudentID)
-				studentText := textVal.(string)
+				parsed := textVal.(studentMaterials)
+				studentText := parsed.jsonText()
+				if len(studentText) > 24<<20 {
+					parsed.Reading.Status = "NEEDS_REVIEW"
+					parsed.Reading.ReviewStage = "TRANSPORT"
+					parsed.Reading.Warnings = append(parsed.Reading.Warnings, "材料传输超过24MiB预算，未截断后评分")
+				}
+				readingJSON, _ := json.Marshal(parsed.Reading)
+				if parsed.Reading.Status != "COMPLETE" || len(studentText) > 24<<20 {
+					feedback := "材料读取不完整，待教师复核；系统未将未读内容判为缺交。"
+					if len(studentText) > 24<<20 {
+						feedback = "材料传输超过预算，待复核，未截断后评分。"
+					}
+					atomic.AddInt32(&failedGrades, 1)
+					if err := saveSubmission(models.Submission{AssignmentID: uint(parsedID), StudentID: t.StudentID, StudentName: t.StudentName, Score: -1, Feedback: feedback, MergeContent: parsed.analysisText(), MaterialBatchID: job.MaterialBatchID, GradingJobID: job.ID, ReadingStatus: "NEEDS_REVIEW", ReadingReport: string(readingJSON)}); err != nil {
+						log.Printf("学生 [%s] 待复核记录保存失败: %v", t.StudentID, err)
+					}
+					currentProg := atomic.AddInt32(&map2Completed, 1)
+					log.Printf(" <- [Worker %d] 学生 [%s] 待复核，继续其他学生！进度: %d/%d", workerID, t.StudentID, currentProg, totalTasks)
+					continue
+				}
 
 				var studentPlagJSON string = "[]"
 				if reportList, ok := globalPlagiarismResult[t.StudentID]; ok {
@@ -316,20 +313,43 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 
 				finalScore := float64(-1.0)
 				finalFeedback := "【系统容错记录】AI 评分请求超时或失败"
-				mergedContent := studentText
+				mergedContent := parsed.analysisText()
 				matchJSON := "{}"
+				readingStatus := "ERROR"
+				scoreDetails := "[]"
+				if errGrade == nil && gradeRes != nil {
+					finalFeedback = gradeRes.Feedback
+					var result struct {
+						Schema  string          `json:"schema"`
+						Text    string          `json:"text"`
+						Reading readingReport   `json:"reading"`
+						Details json.RawMessage `json:"score_details"`
+					}
+					if json.Unmarshal([]byte(gradeRes.MergedContent), &result) == nil && result.Schema == "grading-result.v1" {
+						readingStatus = result.Reading.Status
+						readingJSON, _ = json.Marshal(result.Reading)
+						scoreDetails = string(result.Details)
+						mergedContent = result.Text
+					} else {
+						finalFeedback = "AI 节点未返回完整读取回执，待复核"
+					}
+				} else if errGrade != nil {
+					finalFeedback = "AI 评分通信失败：" + grpcFailureCode(errGrade) + "，请重试或复核"
+				}
 
-				if errGrade == nil && gradeRes != nil && gradeRes.TotalScore >= 0 && !math.IsNaN(float64(gradeRes.TotalScore)) && !math.IsInf(float64(gradeRes.TotalScore), 0) {
+				if errGrade == nil && gradeRes != nil && readingStatus == "COMPLETE" && gradeRes.TotalScore >= 0 && !math.IsNaN(float64(gradeRes.TotalScore)) && !math.IsInf(float64(gradeRes.TotalScore), 0) {
 					finalScore = float64(gradeRes.TotalScore)
 					finalFeedback = gradeRes.Feedback
-					mergedContent = gradeRes.MergedContent
 					matchJSON = gradeRes.CodeDocMatchReportJson
 				} else {
 					atomic.AddInt32(&failedGrades, 1)
 				}
 
-				if err := database.SaveAssignment(assignmentID, t.StudentID, t.StudentName, finalScore, finalFeedback, mergedContent, studentPlagJSON, aigcJSON, matchJSON, job.MaterialBatchID, job.ID); err != nil && finalScore >= 0 {
-					atomic.AddInt32(&failedGrades, 1)
+				if err := saveSubmission(models.Submission{AssignmentID: uint(parsedID), StudentID: t.StudentID, StudentName: t.StudentName, Score: finalScore, Feedback: finalFeedback, MergeContent: mergedContent, PlagiarismReport: studentPlagJSON, AIGCReport: aigcJSON, CodeDocMatchReport: matchJSON, MaterialBatchID: job.MaterialBatchID, GradingJobID: job.ID, ReadingStatus: readingStatus, ReadingReport: string(readingJSON), ScoreDetails: scoreDetails}); err != nil {
+					log.Printf("学生 [%s] 批改结果保存失败: %v", t.StudentID, err)
+					if finalScore >= 0 {
+						atomic.AddInt32(&failedGrades, 1)
+					}
 				}
 
 				currentProg := atomic.AddInt32(&map2Completed, 1)
@@ -345,7 +365,7 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 
 	wgMap2.Wait()
 	if failedGrades > 0 {
-		return fmt.Errorf("%d/%d 份学生作业评分失败，请查看已保存的结果", failedGrades, totalTasks)
+		return fmt.Errorf("%d/%d 份学生作业需复核或评分失败，其他结果已保存", failedGrades, totalTasks)
 	}
 	log.Printf("\n[调度中心] 作业 %s 批改任务全流程结束！\n总耗时: %v\n======================================================\n", assignmentID, time.Since(startTime))
 

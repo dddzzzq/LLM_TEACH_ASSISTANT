@@ -235,10 +235,16 @@
         class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm"
         role="status"
       >
-        <strong>请输入收到的验证码</strong>
-        <p class="mt-2"
-          >在下方填写验证码并提交，系统会将其填写到官网、点击登录，再按你的设置处理可信设备提示。</p
-        >
+        <strong>{{
+          job.login_code_method === 'wechat_work'
+            ? '请输入企业微信动态验证码'
+            : '请输入收到的验证码'
+        }}</strong>
+        <p class="mt-2">{{
+          job.login_code_method === 'wechat_work'
+            ? '打开企业微信查看当前动态验证码，在下方填写并提交。系统将继续登录，并按你的设置处理可信设备提示。'
+            : '在下方填写验证码并提交，系统会将其填写到官网、点击登录，再按你的设置处理可信设备提示。'
+        }}</p>
       </div>
       <RpaBrowserPanel
         v-if="active && (showBrowser || codeWaiting) && !ended"

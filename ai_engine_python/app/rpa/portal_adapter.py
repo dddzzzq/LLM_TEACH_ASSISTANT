@@ -132,6 +132,8 @@ def reconcile_exports(exports, rows, baseline):
 
 def match_new_exports(rows, baseline, assignment, scope):
     """Never associate by list position or by a transient 'exporting' status."""
+    if scope.get("baseline_observed") is False:
+        return []  # A named class alone cannot prove that an old archive is new.
     fresh = [r for r in rows if fresh_export(r, baseline) and not r.get("ambiguous")]
     names = [c["name"] for c in scope.get("classes", [])] if scope.get("mode") == "selected" else []
     matched = [
@@ -538,6 +540,30 @@ class PortalAdapter:
                         return page, frame, modal.nth(i)
         return None
 
+    async def close_export_settings(self, modal):
+        """Dismiss only unsubmitted settings before changing the review class."""
+        controls = modal.locator("button,a,[role=button],.close,.close_btn,.closePop")
+        matches = []
+        for index in range(await controls.count()):
+            control = controls.nth(index)
+            if not await control.is_visible():
+                continue
+            name = (await control.inner_text()).strip()
+            if (
+                name in {"取消", "关闭", "×", "✕"}
+                or await control.get_attribute("aria-label") == "关闭"
+            ):
+                matches.append(control)
+        # Prefer Cancel over an additional close icon in the same dialog.
+        cancel = [control for control in matches if (await control.inner_text()).strip() == "取消"]
+        choices = cancel or matches
+        if len(choices) != 1:
+            raise RpaIssue(
+                "EXPORT_CANCEL_UNAVAILABLE", "请先关闭导出设置，再选择目标班级；尚未提交导出"
+            )
+        await choices[0].click(timeout=5000)
+        await modal.wait_for(state="hidden", timeout=5000)
+
     async def classes(self, modal):
         self.class_locators = {}
         options = []
@@ -669,6 +695,30 @@ class PortalAdapter:
         }))""")
 
     async def apply_scope(self, modal, scope, options):
+        if scope.get("mode") == "current":
+            target = self.target.get("portal") or {}
+            expected = scope.get("platform_id")
+            if (
+                options
+                or not expected
+                or target.get("class_id") != expected
+                or await self.current_class_id(modal.page) != expected
+            ):
+                raise RpaIssue("CLASS_CHANGED", "当前批阅页的班级与指定班级不一致，未继续导出")
+            await self.select_attachments(modal)
+            if await self.current_class_id(modal.page) != expected:
+                raise RpaIssue("CLASS_CHANGED", "切换附件格式后班级发生变化，未继续导出")
+            return {
+                "mode": "selected",
+                "classes": [
+                    {
+                        "id": "current_page",
+                        "name": target["class_name"],
+                        "all": False,
+                        "platform_id": expected,
+                    }
+                ],
+            }
         requested = set(scope.get("class_ids", []))
         available = {o["id"]: o for o in options}
         if scope.get("mode") == "all":
@@ -858,14 +908,32 @@ class PortalAdapter:
                 ]
                 if len(visible) != 1:
                     continue
-                await visible[0].click(timeout=5000)
+                # The site uses an expanding floating menu. Moving the mouse
+                # can move this entry, and an export dialog can cover it. This
+                # grounded read-only entry must activate its own site handler,
+                # without a coordinate click against the dialog's backdrop.
+                activated = await visible[0].evaluate("""e => {
+                    if(!e.isConnected || !e.getClientRects().length ||
+                       getComputedStyle(e).visibility==='hidden' || e.disabled ||
+                       e.closest('[hidden],[aria-hidden=true],[aria-disabled=true],[inert],.disabled,.is-disabled')) return false;
+                    e.click(); return true;
+                }""")
+                if not activated:
+                    continue
                 center = frame.locator("#downloadcenter:visible,.downloadCenter:visible")
                 await center.first.wait_for(state="visible", timeout=5000)
                 # Wait for a pending list request, without relying on network-idle
                 # (the portal can keep background connections open).
-                await center.first.locator("tbody tr,.dataBody_td,.empty,.no-data").first.wait_for(
-                    state="visible", timeout=5000
+                ready = center.first.locator(
+                    "tbody tr,.dataBody_td,.empty,.no-data,.noData,.no_data"
+                ).or_(
+                    center.first.get_by_text(
+                        re.compile(
+                            r"暂无可下载内容|暂无(?:下载|导出|相关)?(?:任务|记录|数据)|没有(?:下载|导出)(?:任务|记录)|暂时没有下载任务"
+                        )
+                    )
                 )
+                await ready.first.wait_for(state="visible", timeout=5000)
                 rows = await self.export_rows()
                 await self.close_export_centers()
                 return rows, True

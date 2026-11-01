@@ -13,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import os
 from ..core.paths import model_path, model_cache_dir
+from .student_evidence import decode_materials, analysis_parts
 
 
 class PlagiarismService:
@@ -70,6 +71,11 @@ class PlagiarismService:
         separated_data = {}
         prose_extensions = [".md", ".docx", ".pdf", ".doc"]
         for student_id, merged_content in submissions.items():
+            materials = decode_materials(merged_content)
+            if materials is not None:
+                prose, code = analysis_parts(materials)
+                separated_data[student_id] = {"text": prose, "code": code}
+                continue
             prose_parts, code_parts = [], []
             file_blocks = re.split(r"--- 文件开始: (.*?) ---", merged_content)
             if len(file_blocks) < 2:

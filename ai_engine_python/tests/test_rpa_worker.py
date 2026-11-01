@@ -21,6 +21,7 @@ from websockets.exceptions import InvalidStatus
 from playwright.async_api import async_playwright
 
 from app.rpa.download_manager import safe_filename, verify_zip, save_download
+from app.rpa.errors import RpaIssue
 from app.rpa.portal_adapter import (
     fingerprint,
     match_new_exports,
@@ -152,6 +153,9 @@ class FileAndEvidenceTests(unittest.TestCase):
         self.assertEqual(match_new_exports(rows, ["old"], "第一次作业", scope), [])
         rows.append({"ref": "ours", "text": "第一次作业 A", "status": "READY"})
         self.assertEqual(match_new_exports(rows, ["old"], "第一次作业", scope)[0]["ref"], "ours")
+        self.assertEqual(
+            match_new_exports(rows, [], "第一次作业", {**scope, "baseline_observed": False}), []
+        )
 
     def test_all_class_export_associates_only_one_unique_new_matching_record(self):
         scope = {"mode": "all", "baseline_observed": True}
@@ -321,6 +325,58 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await task.page.evaluate("window.exports"), 1)
         self.assertIsNone(await task.page.evaluate("window.blocked"))
 
+    async def test_export_dialog_does_not_block_reading_download_baseline(self):
+        task = await self.bare_task()
+        await task.page.set_content("""<script>window.exports=0;window.centerClicks=0</script>
+          <button onclick="window.centerClicks++;document.querySelector('#downloadcenter').hidden=false">下载中心</button>
+          <div role=dialog style="position:fixed;inset:0;background:white;z-index:10">
+          <label class=export-range><input type=checkbox checked>班级A</label>
+          <button onclick="if(!document.querySelector('#downloadcenter').hidden){window.blocked=true;return};window.exports++">确定</button></div>
+          <div id=downloadcenter hidden style="position:fixed;inset:0;background:white;z-index:20">
+          <button aria-label=关闭 onclick="this.parentElement.hidden=true">关闭</button>
+          <p>暂无可下载内容</p></div>""")
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        task.scope_request = {
+            "mode": "selected",
+            "class_ids": ["class_0"],
+            "option_names": {"class_0": "班级A"},
+        }
+        task.gate.set()
+        await task.prepare_export(
+            (task.page, task.page.main_frame, task.page.locator("[role=dialog]"))
+        )
+        self.assertEqual(task.state["stage"], "WAIT_EXPORT")
+        self.assertTrue(task.state["class_scope"]["baseline_observed"])
+        self.assertTrue(await task.page.locator("#downloadcenter").is_hidden())
+        self.assertEqual(await task.page.evaluate("window.centerClicks"), 1)
+        self.assertEqual(await task.page.evaluate("window.exports"), 1)
+        self.assertIsNone(await task.page.evaluate("window.blocked"))
+
+    async def test_export_without_selected_class_reopens_settings_for_target_class(self):
+        task = await self.bare_task()
+        task.state["target"]["portal"] = {"class_id": "22", "class_name": "班级A"}
+        body = """<select name=clazzid><option value=0 selected>全部班级</option><option value=22>班级A</option><option value=23>班级B</option></select>
+          <a onclick="window.reopened=(window.reopened||0)+1;setTimeout(()=>document.querySelector('[role=dialog]').hidden=false,250)">导出作业附件</a>
+          <div role=dialog><fieldset><legend>导出格式</legend>
+          <label><input type=radio name=format checked>导出完整答题记录</label>
+          <label><input type=radio name=format>导出提交附件</label></fieldset>
+          <button onclick="window.cancelled=(window.cancelled||0)+1;this.parentElement.hidden=true">取消</button>
+          <button onclick="window.exports=(window.exports||0)+1">确定</button></div>"""
+        await task.page.route(
+            "**/*", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=body)
+        )
+        await task.page.goto("https://mooc1.chaoxing.com/work?courseid=11&clazzid=0")
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        modal = task.page.locator("[role=dialog]")
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, modal))
+        self.assertEqual(task.state["stage"], "WAIT_EXPORT")
+        self.assertEqual(await task.page.input_value("select"), "22")
+        self.assertEqual(task.state["class_scope"]["classes"][0]["platform_id"], "22")
+        self.assertEqual(
+            await task.page.evaluate("[window.cancelled,window.reopened,window.exports]"), [1, 1, 1]
+        )
+
     async def test_pause_waits_for_action_boundary_and_invalidates_old_decision(self):
         task = await self.bare_task()
         await task.lock.acquire()
@@ -444,6 +500,61 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await task.page.locator("input:checked").count(), 1)
         with self.assertRaises(ValueError):
             await task.adapter.apply_scope(modal, {"mode": "selected", "class_ids": []}, options)
+
+    async def test_export_without_scope_controls_uses_verified_current_class(self):
+        task = await self.bare_task()
+        task.state["target"]["portal"] = {"class_id": "22", "class_name": "班级A"}
+        body = """<select name=clazzid><option value=22 selected>班级A</option><option value=23>班级B</option></select>
+          <div role=dialog><fieldset><legend>导出格式</legend>
+          <label><input type=radio name=format checked>导出完整答题记录</label>
+          <label><input type=radio name=format>导出提交附件</label></fieldset>
+          <fieldset><legend>命名格式</legend><label><input type=radio checked>默认格式</label></fieldset>
+          <button onclick="window.exports=(window.exports||0)+1">确定</button></div>"""
+        await task.page.route(
+            "**/*", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=body)
+        )
+        await task.page.goto("https://mooc1.chaoxing.com/work?courseid=11&clazzid=22")
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        modal = task.page.locator("[role=dialog]")
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, modal))
+        self.assertEqual(task.state["stage"], "WAIT_EXPORT")
+        self.assertEqual(await task.page.evaluate("window.exports"), 1)
+        self.assertTrue(await task.page.locator("input[name=format]").nth(1).is_checked())
+        scope = task.state["class_scope"]
+        self.assertEqual(scope["mode"], "selected")
+        self.assertEqual(
+            [(c["platform_id"], c["name"]) for c in scope["classes"]], [("22", "班级A")]
+        )
+
+        # A concrete selected class overrides a stale class ID in the URL.
+        await task.page.select_option("select", "23")
+        with self.assertRaises(RpaIssue) as caught:
+            await task.adapter.apply_scope(modal, task.scope_request, [])
+        self.assertEqual(caught.exception.code, "CLASS_CHANGED")
+        self.assertEqual(await task.page.evaluate("window.exports"), 1)
+        with self.assertRaises(RpaIssue):
+            await task.adapter.apply_scope(modal, {"mode": "all"}, [])
+
+    async def test_attachment_format_is_selected_before_reading_revealed_scope(self):
+        task = await self.bare_task()
+        task.state["target"]["portal"] = {"class_id": "22", "class_name": "班级A"}
+        body = """<div role=dialog><fieldset><legend>导出格式</legend>
+          <label><input type=radio name=format checked>导出完整答题记录</label>
+          <label><input type=radio name=format onchange="document.querySelector('#scope').hidden=false">导出提交附件</label></fieldset>
+          <div id=scope hidden><label class=export-range data-classid=22><input type=radio name=scope checked>班级A</label>
+          <label class=export-range data-classid=23><input type=radio name=scope>班级B</label></div>
+          <button onclick="window.exports=(window.exports||0)+1">确定</button></div>"""
+        await task.page.set_content(body)
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = True
+        modal = task.page.locator("[role=dialog]")
+        self.assertEqual(await task.adapter.classes(modal), [])
+        task.gate.set()
+        await task.prepare_export((task.page, task.page.main_frame, modal))
+        self.assertEqual(task.state["stage"], "WAIT_EXPORT")
+        self.assertEqual(task.state["requested_scope"]["mode"], "selected")
+        self.assertEqual(task.state["class_scope"]["classes"][0]["platform_id"], "22")
+        self.assertEqual(await task.page.evaluate("window.exports"), 1)
 
     async def test_default_all_keeps_children_checked_by_the_site_master_checkbox(self):
         task = await self.bare_task()
@@ -799,6 +910,7 @@ class BrowserTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_auth_control_epoch_and_shared_viewers(self):
         task, _ = await self.human_input_task()
+        task.state["portal_session"] = {"connection_id": "fixture-portal-session"}
         self.manager.tasks[task.state["job_id"]] = task
         async with self.stream_server() as url:
             endpoint = f"{url}/tasks/{task.state['job_id']}/stream"

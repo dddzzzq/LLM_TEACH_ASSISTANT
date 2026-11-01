@@ -24,6 +24,10 @@ func FormatSubmission(sub models.Submission) map[string]interface{} {
 	if sub.CodeDocMatchReport != "" && sub.CodeDocMatchReport != "{}" {
 		json.Unmarshal([]byte(sub.CodeDocMatchReport), &match)
 	}
+	var reading map[string]interface{}
+	var details []interface{}
+	_ = json.Unmarshal([]byte(sub.ReadingReport), &reading)
+	_ = json.Unmarshal([]byte(sub.ScoreDetails), &details)
 
 	return map[string]interface{}{
 		"material_batch_id": sub.MaterialBatchID, "grading_job_id": sub.GradingJobID,
@@ -32,6 +36,9 @@ func FormatSubmission(sub models.Submission) map[string]interface{} {
 		"student_name":          sub.StudentName,
 		"score":                 sub.Score,
 		"feedback":              sub.Feedback,
+		"reading_status":        sub.ReadingStatus,
+		"reading_report":        reading,
+		"score_details":         details,
 		"merged_content":        sub.MergeContent,
 		"plagiarism_reports":    plag,
 		"aigc_report":           aigc,

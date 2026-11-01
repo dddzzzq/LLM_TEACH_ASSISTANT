@@ -70,6 +70,41 @@ func TestPrepareNestedArchivesPreservesFilesAndValidatesSnapshot(t *testing.T) {
 		t.Fatal("mutated material accepted")
 	}
 }
+
+func TestPrepareKeepsModernScriptsAndArchiveProvenance(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "class.zip")
+	save(t, source, archiveBytes(t, map[string]string{"20260001_张三.zip": string(archiveBytes(t, map[string]string{
+		"project.zip": string(archiveBytes(t, map[string]string{"src/main.ts": "code", "test/main.test.mjs": "node test", "demo/server.cjs": "server", "src/view.tsx": "view", "src/page.jsx": "page", "报告.md": "report", "notes.unknown": "not supported"})),
+	}))}))
+	m, err := prepare(t.Context(), "batch", 1, source, filepath.Join(root, "out"))
+	if err != nil || len(m.Students) != 1 {
+		t.Fatal(err, m)
+	}
+	if m.ReaderVersion != CurrentReaderVersion || len(m.Sources) != 3 {
+		t.Fatal("missing archive chain", m.Sources)
+	}
+	student := m.Students[0]
+	if len(student.Files) != 6 || len(student.SkippedFiles) != 1 || len(student.SourceIDs) != 3 {
+		t.Fatal("scripts or omitted-file inventory lost", student)
+	}
+	for _, file := range student.Files {
+		if strings.HasSuffix(file.Path, ".mjs") || strings.HasSuffix(file.Path, ".cjs") {
+			if file.Kind != "code" {
+				t.Fatal("script was not source", file)
+			}
+		}
+	}
+	sources := m.StudentSources(student)
+	if sources[0].Name != "class.zip" || sources[0].StudentID != "" || sources[1].Name != "20260001_张三.zip" || sources[1].StudentID != student.ID || sources[2].ParentID != sources[1].ID || sources[1].ParentID != sources[0].ID {
+		t.Fatal("archive attribution lost", sources)
+	}
+	for _, source := range sources {
+		if source.SHA256 == "" || source.Format != "zip" || source.Size <= 0 {
+			t.Fatal("archive identity missing", source)
+		}
+	}
+}
 func TestPrepareReportsConflictsAndTraversal(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "input")

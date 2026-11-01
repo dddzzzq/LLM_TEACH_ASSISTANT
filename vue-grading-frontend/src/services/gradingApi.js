@@ -56,6 +56,13 @@ export default {
     return apiClient.delete(`/assignments/${assignmentId}/results`);
   },
 
+  deleteClassSubmissions(assignmentId, classId) {
+    if (!classId) throw new Error('删除本班作业必须指定班级');
+    return apiClient.delete(`/assignments/${assignmentId}/results`, {
+      params: { class_id: classId },
+    });
+  },
+
   deleteSubmission(submissionId) {
     return apiClient.delete(`/submissions/${submissionId}`);
   },

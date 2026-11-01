@@ -14,6 +14,8 @@ import grpc
 from app.rpc.protocol import pb2, pb2_grpc
 from app.schemas.models import PlagiarismReport, AIGCReport, CodeDocMatchReport
 from app.tools.rpa_tools import fetch_homework_sync
+from app.services.ocr_runtime import OCRCancelled, OCRTimeout, OCRUnavailable
+from app.services.student_evidence import decode_materials, analysis_parts, evidence_chunks, render_chunks
 
 
 @dataclass(frozen=True)
@@ -32,8 +34,12 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
 
     # 作业批改
     def ExtractText(self, request, context):
-        start_time = time.time()
+        tmp_path = None
         try:
+            if not context.is_active():
+                raise OCRCancelled("OCR request cancelled")
+            if self.services.ocr_service_instance is None:
+                raise OCRUnavailable("OCR service unavailable")
             suffix = os.path.splitext(request.filename)[1]
             if not suffix:
                 suffix = ".png"
@@ -41,14 +47,34 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 tmp.write(request.file_content)
                 tmp_path = tmp.name
 
-            ocr_text = self.services.ocr_service_instance.get_concatenated_text([tmp_path])
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+            ocr_text = self.services.ocr_service_instance.get_concatenated_text(
+                [tmp_path],
+                cancelled=lambda: not context.is_active(),
+                timeout=context.time_remaining(),
+            )
 
             return pb2.ExtractResponse(text_content=ocr_text)
-        except Exception as e:
+        except (OCRCancelled, OCRTimeout, OCRUnavailable) as exc:
+            code = (
+                grpc.StatusCode.CANCELLED
+                if isinstance(exc, OCRCancelled)
+                else (
+                    grpc.StatusCode.DEADLINE_EXCEEDED
+                    if isinstance(exc, OCRTimeout)
+                    else grpc.StatusCode.UNAVAILABLE
+                )
+            )
+            context.set_code(code)
+            context.set_details(str(exc))
+            return pb2.ExtractResponse()
+        except Exception:
+            logging.exception("OCR RPC failed")
             context.set_code(grpc.StatusCode.INTERNAL)
-            return pb2.ExtractResponse(text_content=f"【系统降级】图片识别失败: {str(e)}")
+            context.set_details("图片识别失败")
+            return pb2.ExtractResponse(text_content="【系统降级】图片识别失败")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def CheckPlagiarism(self, request, context):
         try:
@@ -137,14 +163,19 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 except:
                     pass
 
-            prose_content, code_content = self.services.aigc_detector_service._separate_content(
-                request.student_text
-            )
-            match_analysis, _ = self.services.deepseek_service.analyze_code_doc_match(
-                code_content=code_content,
-                doc_content=prose_content,
-                assignment_requirement=request.question,
-            )
+            materials = decode_materials(request.student_text)
+            if materials is not None:
+                prose_content, code_content = analysis_parts(materials)
+            else:
+                prose_content, code_content = self.services.aigc_detector_service._separate_content(request.student_text)
+            match_analysis = None
+            if (code_content.strip() and prose_content.strip()
+                    and (materials is None or len(code_content) <= 100000 and len(prose_content) <= 75000)):
+                match_analysis, _ = self.services.deepseek_service.analyze_code_doc_match(
+                    code_content=code_content,
+                    doc_content=prose_content,
+                    assignment_requirement=request.question,
+                )
             code_doc_match_report = None
             if match_analysis and "score" in match_analysis:
                 try:
@@ -161,10 +192,19 @@ class ComputeServicer(pb2_grpc.ComputeServiceServicer):
                 code_doc_match_report=code_doc_match_report,
             )
 
+            merged_content = request.student_text
+            if materials is not None:
+                try:
+                    text = render_chunks(evidence_chunks(materials))
+                except (ValueError, TypeError, KeyError):
+                    text = '\n'.join(f.get('text', '') for f in materials.get('files', []))
+                merged_content = json.dumps({"schema": "grading-result.v1", "text": text,
+                                             "reading": ai_result.get('reading', {"status": "NEEDS_REVIEW", "warnings": ["缺少完整读取回执"]}),
+                                             "score_details": ai_result.get('score_details', [])}, ensure_ascii=False)
             return pb2.GradeResponse(
                 total_score=ai_result.get("total_score", -1.0),
                 feedback=ai_result.get("overall_feedback", "评分失败"),
-                merged_content=request.student_text,
+                merged_content=merged_content,
                 code_doc_match_report_json=json.dumps(match_analysis, ensure_ascii=False)
                 if match_analysis
                 else "{}",

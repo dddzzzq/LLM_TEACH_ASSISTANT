@@ -173,11 +173,15 @@ class HomeworkDetailReader:
                 await response.dispose()
         raise ValueError("题目资源跳转次数过多")
 
-    async def read(self):
+    async def read(self, *, finish_task=True):
         task = self.task
         frame = await self.frame()
         if not frame:
-            raise RpaIssue("DETAIL_TARGET_UNVERIFIED", "请打开所选作业名称对应的作业详情页")
+            raise RpaIssue(
+                "DETAIL_TARGET_UNVERIFIED",
+                "请打开所选作业名称对应的作业详情页",
+                {"reason": self.reason},
+            )
         roots = frame.locator(QUESTION_ROOTS)
         if not await roots.count():
             # A semantic main region is an explicit fallback, never the whole
@@ -322,15 +326,18 @@ class HomeworkDetailReader:
         if not task.automatic():
             raise RpaIssue("DETAIL_STOPPED", "作业详情读取已暂停或取消")
         selected = task.state["target"]["portal"]
+        detail = {
+            "course_id": selected["course_id"],
+            "homework_id": selected["homework_id"],
+            "title": task.state["target"]["assignment_name"],
+            "sources": sources,
+            "warnings": warnings,
+            "complete": not warnings,
+        }
+        if not finish_task:
+            return detail
         task.update(
-            homework_detail={
-                "course_id": selected["course_id"],
-                "homework_id": selected["homework_id"],
-                "title": task.state["target"]["assignment_name"],
-                "sources": sources,
-                "warnings": warnings,
-                "complete": not warnings,
-            },
+            homework_detail=detail,
             status="SUCCEEDED",
             stage="DONE",
             message="作业详情已读取，正在解析文字、图片和附件",

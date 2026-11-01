@@ -63,12 +63,7 @@
           >
         </div>
       </header>
-      <div class="assistant-task-toolbar"
-        ><span>拉取作业、批改与成绩查询</span
-        ><button v-if="canFetch" type="button" @click="openConsole()"
-          ><AppIcon name="download" />任务控制台</button
-        ></div
-      >
+      <div class="assistant-task-toolbar">拉取作业、批改与成绩查询</div>
       <div class="floating-chat-body"><AgentChatWidget @fetch-task="openConsole" /></div>
     </section>
 
@@ -414,18 +409,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
   border-bottom: 1px solid var(--color-line);
   flex-shrink: 0;
-}
-.assistant-task-toolbar button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  color: var(--color-accent);
-  white-space: nowrap;
-}
-.assistant-task-toolbar button svg {
-  width: 15px;
-  height: 15px;
 }
 .floating-chat-body {
   flex: 1;

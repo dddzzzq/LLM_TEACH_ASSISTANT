@@ -128,6 +128,10 @@ func (r *Runner) Tick(ctx context.Context) {
 			r.parseDetail(ctx, op, state)
 			continue
 		}
+		if (op.Type == "AUTH_BOOTSTRAP" || op.Type == "CATALOG_SYNC") && state.Status == "SUCCEEDED" && catalogHasDetails(state.Catalog) {
+			r.parseCatalogDetails(ctx, op, state)
+			continue
+		}
 		if err = r.apply(ctx, op, state); err != nil {
 			_ = r.apply(ctx, op, operationState{Status: "FAILED", Stage: "FAILED", Message: "目录或身份核验未通过，已保留上次成功目录", ErrorCode: "RESULT_REJECTED", StateVersion: state.StateVersion + 1})
 		}
@@ -235,6 +239,16 @@ func (r *Runner) apply(ctx context.Context, prior models.PortalOperation, state 
 				}
 				if err := publishCatalog(tx, &c, *state.Catalog); err != nil {
 					return err
+				}
+				for _, course := range state.Catalog.Courses {
+					for _, work := range course.Homeworks {
+						if work.Detail != nil {
+							selected := catalogDetailTarget(c.ID, c.ActiveSnapshotID, course, work)
+							if err := publishSelectedDetail(tx, &c, &op, selected, work.Detail); err != nil {
+								return err
+							}
+						}
+					}
 				}
 			}
 		}

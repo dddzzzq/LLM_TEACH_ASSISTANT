@@ -17,11 +17,21 @@ export function createMaterialsApi(client) {
     get(id) {
       return client.get(`${base}/${id}`);
     },
+    file(id, path) {
+      return client.get(`${base}/${id}/file`, { params: { path }, responseType: 'blob' });
+    },
     retry(id) {
       return client.post(`${base}/${id}/retry`);
     },
     grade(id, allowPartial) {
       return client.post(`${base}/${id}/grade`, { allow_partial: allowPartial });
+    },
+    regrade(id, allowPartial, previousJobId, idempotencyKey) {
+      return client.post(
+        `${base}/${id}/grade`,
+        { allow_partial: allowPartial, regrade: true, previous_job_id: previousJobId },
+        { headers: { 'Idempotency-Key': idempotencyKey } }
+      );
     },
     cancel(id) {
       return client.post(`${base}/${id}/cancel`);

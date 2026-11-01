@@ -18,7 +18,7 @@ from playwright.async_api import async_playwright
 
 from app.rpa.errors import RpaIssue
 from app.rpa.portal_auth import PortalAuth
-from app.rpa.portal_catalog import PortalCatalog, clean_url, normalize_record
+from app.rpa.portal_catalog import CatalogCollection, PortalCatalog, clean_url, normalize_record
 from app.rpa.portal_download import selected_scope
 from app.rpa.portal_sessions import PortalSessions
 from app.rpa.task_controller import Task
@@ -170,7 +170,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             work = "33" if course == "11" else "34"
             body = f'<ul><li><a href="/work?workid={work}&courseid={course}" title="第一次作业">第一次作业</a></li></ul><a href="https://learning.xidian.edu.cn/portal">返回课程列表</a>'
         elif p.hostname == "mooc1.chaoxing.com" and p.path == "/work":
-            body = '<h1>第一次作业</h1><a title="作业">作业</a>'
+            body = '<h1>第一次作业</h1><div class="mark_item">实现并发程序并提交报告</div><a title="作业">作业</a>'
         else:
             raise AssertionError("Unexpected external request: " + p.hostname + p.path)
         await route.fulfill(content_type="text/html; charset=utf-8", body=body)
@@ -333,9 +333,20 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             await self.click(task, "同名课程", course.split(":")[0])
             await self.click(task, "作业")
             await self.action(task, "read_homework_list", course_id=course)
+            await self.read_pending_details(task)
             await self.action(task, "return_to_course_list")
         await self.action(task, "finish_catalog")
         await asyncio.wait_for(task.runner, 10)
+
+    async def read_pending_details(self, task):
+        while pending := await task.catalog_collection.pending_homeworks():
+            work = pending[0]
+            await self.action(task, "select_homework_detail", homework_id=work["homework_id"])
+            await self.click(task, work["title"])
+            await self.action(task, "read_homework_detail")
+            await wait_until(lambda: task.detail_operation is None)
+            self.assertEqual(task.state["status"], "RUNNING", task.state)
+            self.assertIsNone(task.detail_reader, task.state)
 
     async def test_same_task_handles_credentials_mfa_trust_and_profile_reuse(self):
         task = self.start_task()
@@ -427,6 +438,93 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("654321", journal)
         self.assertNotIn("654321", json.dumps(await task.observe()))
 
+    async def test_wechat_dynamic_code_requests_code_before_waiting_for_teacher(self):
+        self.mfa_body = """<p>Please use the dynamic code(<span>WeChat Work</span>) to complete reAuth</p>
+        <a role=tab aria-selected=true>WeChat Work</a><a role=tab>Wechat scanning</a>
+        <div><button onclick='window.sent=(window.sent||0)+1'>Send code</button><button onclick='window.switched=true'>SMS</button></div>
+        <label>Username<input value=teacher-test readonly></label><label>Code<input id=dynamicCode placeholder=请输入></label>
+        <input type=button value="Sign in" onclick="setTimeout(()=>{if(document.querySelector('#dynamicCode').value==='765432') document.querySelector('#trust').hidden=false},200)">
+        <div id=trust hidden><h2>Trust this browser?</h2><button onclick="document.cookie='fixture_trusted=yes;Domain=xidian.edu.cn;Path=/;Max-Age=3600;Secure;SameSite=Lax';location.href='https://learning.xidian.edu.cn/portal'">Trust this device</button><button>Not now</button></div>"""
+        task = self.start_task()
+        await self.action(task, "fill_portal_credentials")
+        self.assertNotEqual(task.state.get("waiting_reason"), "LOGIN_CODE")
+        self.assertFalse(task.portal_auth.last_code_request)
+        await self.action(task, "request_login_code")
+        self.assertEqual(task.state["waiting_reason"], "LOGIN_CODE")
+        self.assertEqual(task.portal_result()["status"], "WAITING_OTP")
+        self.assertEqual(task.state["login_code_method"], "wechat_work")
+        self.assertIn("企业微信", task.state["message"])
+        self.assertIn("已请求", task.state["message"])
+        self.assertTrue(task.portal_auth.last_code_request)
+        self.assertFalse(task.state.get("last_error"))
+        self.assertTrue(any(r["tool"] == "request_login_code" for r in task.recent))
+        self.assertEqual(await task.page.evaluate("window.sent"), 1)
+        # A repeated decision during the cooldown must not send another code.
+        await task.portal_auth.request_code()
+        self.assertEqual(await task.page.evaluate("window.sent"), 1)
+        self.assertEqual((await task.portal_auth.observation())["code_method"], "wechat_work")
+        with self.assertRaisesRegex(RpaIssue, "请先输入"):
+            await task.resume()
+        _, meta, _ = await task.frame()
+        await task.browser_input(
+            {
+                "kind": "login_code",
+                "text": "765432",
+                "epoch": meta["epoch"],
+                "page_id": meta["page_id"],
+                "revision": meta["revision"],
+            }
+        )
+        await task.resume()
+        self.assertEqual(task.state["auth_status"], "REQUIRED")
+        await self.action(task, "submit_login_code")
+        await self.wait_auth(task, "trust_prompt")
+        await self.action(task, "apply_device_trust")
+        self.assertTrue((await self.ready(task))["observation"]["authentication"]["authenticated"])
+        journal = (task.manager.root / (task.state["job_id"] + ".json")).read_text()
+        self.assertNotIn("765432", journal)
+        self.assertNotIn("765432", json.dumps(await task.observe()))
+
+    async def test_hidden_wechat_hint_or_visible_send_button_does_not_skip_code_request(self):
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body=""))
+            await page.goto("https://ids.xidian.edu.cn/mfa")
+            for hidden in [True, False]:
+                await page.set_content(
+                    f"<p {'hidden' if hidden else ''}>Please use the dynamic code(WeChat Work) to complete reAuth</p><input name=otp><button onclick='window.sent=true'>Send code</button>"
+                )
+                await page.evaluate("window.sent=false")
+                auth = PortalAuth(Owner(context, page), dict(self.credentials), True)
+                self.assertEqual(
+                    (await auth.observation())["code_method"], "" if hidden else "wechat_work"
+                )
+                await auth.request_code()
+                self.assertTrue(await page.evaluate("window.sent"))
+        finally:
+            await browser.close()
+
+    async def test_dynamic_code_button_waits_for_delayed_render_and_clicks_by_id(self):
+        browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body=""))
+            await page.goto("https://ids.xidian.edu.cn/mfa")
+            await page.set_content("""<input name=otp><div id=controls></div><script>
+                setTimeout(() => document.querySelector('#controls').innerHTML =
+                  '<button id="getDynamicCode" title="获取验证码" class="dynamicCode_btn auth_login_btn" onclick="sendDynamicCodeByPhone(this)">获取验证码</button>', 150);
+                function sendDynamicCodeByPhone(button) { window.sent = (window.sent || 0) + 1; }
+            </script>""")
+            auth = PortalAuth(Owner(context, page), dict(self.credentials), True)
+            await auth.request_code()
+            self.assertEqual(await page.evaluate("window.sent"), 1)
+            self.assertTrue(auth.last_code_request)
+        finally:
+            await browser.close()
+
     async def test_code_request_adapts_visible_labels_and_preserves_send_failure_reason(self):
         browser = await self.playwright.chromium.launch(headless=True, args=["--no-sandbox"])
         context = await browser.new_context()
@@ -496,6 +594,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             await self.click(task, "同名课程", course.split(":")[0])
             await self.click(task, "作业")
             await self.action(task, "read_homework_list", course_id=course)
+            await self.read_pending_details(task)
             if index == 0:
                 with self.assertRaises(RpaIssue):
                     await task.catalog_collection.read_homeworks("12:23")
@@ -547,6 +646,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
                 await self.click(task, f"课程{index + 11}")
                 await self.click(task, "作业")
                 await self.action(task, "read_homework_list", course_id=course)
+                await self.read_pending_details(task)
                 if index == 0:
                     await self.action(task, "return_to_course_list")
             await self.action(task, "finish_catalog")
@@ -656,6 +756,8 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
                         if course in {"11", "13"}
                         else '<a href="/work?workid=34&courseid=12">作业一</a>'
                     )
+                elif p.path == "/work":
+                    body = '<h1>作业一</h1><div class="mark_item">实现课程实验</div>'
                 else:
                     return await original(route)
                 await route.fulfill(content_type="text/html; charset=utf-8", body=body)
@@ -675,6 +777,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
                     if index == 0:
                         task.update(auto_actions=59)
                     await self.action(task, "read_homework_list", course_id=course)
+                    await self.read_pending_details(task)
                     progress = task.catalog_collection.observation()
                     self.assertEqual(progress["current_course_id"], course)
                     self.assertTrue(progress["return_required"])
@@ -746,6 +849,7 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
             await self.click(task, "课程11")
             await self.click(task, "作业")
             await self.action(task, "read_homework_list", course_id="11:22")
+            await self.read_pending_details(task)
             await self.action(task, "return_to_course_list")
             self.assertTrue(task.catalog_collection.observation()["courses_complete"])
             self.assertEqual(task.catalog_collection.observation()["next_course_id"], "12:23")
@@ -997,13 +1101,9 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
         exports = 0
         html = """<h1 class=courseName>同名课程</h1><div id=grade><h2>第一次作业</h2><div><ul class=morePop><a onclick="document.querySelector('[role=dialog]').hidden=false">导出作业附件</a></ul></div></div>
         <div role=dialog hidden>导出设置<label class=export-range><input type=checkbox>A班</label><label class=export-range><input type=checkbox>B班</label>
-        <a class=confirmDown onclick="fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=task-a><td>第一次作业 A班 导出成功 <a class=download_ic href=/download>下载</a></td></tr></tbody></table>'">确定</a></div><div id=downloadcenter></div>"""
+        <a class=confirmDown onclick="fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=task-a><td>第一次作业 A班 导出成功 <a class=download_ic href=/download>下载</a></td></tr></tbody></table>'">确定</a></div><div id=downloadcenter><p class=empty>暂无下载记录</p></div>"""
 
         if all_classes:
-            html = html.replace(
-                "<div id=downloadcenter></div>",
-                "<div id=downloadcenter><p class=empty>暂无下载记录</p></div>",
-            )
             html = html.replace("第一次作业 A班 导出成功", "第一次作业 全部班级 导出成功")
         if replace_rows:
             from datetime import datetime, timedelta, timezone
@@ -1119,6 +1219,24 @@ class PortalBrowserTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CatalogValidationTests(unittest.TestCase):
+    def test_partial_class_read_preserves_previously_discovered_classes(self):
+        course = {
+            "classes": [{"platform_id": "22", "name": "A班"}, {"platform_id": "23", "name": "B班"}]
+        }
+        CatalogCollection.merge_classes(course, [{"platform_id": "22", "name": "A班新名称"}])
+        CatalogCollection.merge_classes(course, [])
+        self.assertEqual(
+            course["classes"],
+            [{"platform_id": "22", "name": "A班新名称"}, {"platform_id": "23", "name": "B班"}],
+        )
+
+    def test_no_scope_controls_require_exact_current_class_evidence(self):
+        target = {"class_id": "22", "class_name": "A班"}
+        self.assertEqual(selected_scope(target, [], "22")["mode"], "current")
+        for current in ("", "23", "0"):
+            with self.subTest(current=current), self.assertRaises(RpaIssue):
+                selected_scope(target, [], current)
+
     def test_current_class_alias_requires_matching_platform_evidence(self):
         options = [
             {"id": "current", "name": "导出本班级作业附件", "all": False},

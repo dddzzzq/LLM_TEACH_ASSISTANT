@@ -18,11 +18,12 @@ type CatalogClass struct {
 	Name       string `json:"name"`
 }
 type CatalogHomework struct {
-	PlatformID string `json:"platform_id"`
-	Title      string `json:"title"`
-	State      string `json:"state"`
-	Deadline   string `json:"deadline"`
-	URL        string `json:"url"`
+	PlatformID string          `json:"platform_id"`
+	Title      string          `json:"title"`
+	State      string          `json:"state"`
+	Deadline   string          `json:"deadline"`
+	URL        string          `json:"url"`
+	Detail     *HomeworkDetail `json:"detail,omitempty"`
 }
 type CatalogCourse struct {
 	PlatformID string            `json:"platform_id"`
@@ -33,8 +34,9 @@ type CatalogCourse struct {
 	Homeworks  []CatalogHomework `json:"homeworks"`
 }
 type Catalog struct {
-	Complete bool            `json:"complete"`
-	Courses  []CatalogCourse `json:"courses"`
+	Complete        bool            `json:"complete"`
+	Courses         []CatalogCourse `json:"courses"`
+	DetailsIncluded bool            `json:"details_included,omitempty"`
 }
 
 func targetURL(raw string) bool {
@@ -79,6 +81,12 @@ func validateCatalog(c Catalog) error {
 				return errors.New("作业目录结构无效")
 			}
 			works[work.PlatformID] = true
+			if c.DetailsIncluded && work.Detail == nil {
+				return errors.New("作业详情尚未完整读取")
+			}
+			if d := work.Detail; d != nil && (d.CourseID != course.PlatformID || d.HomeworkID != work.PlatformID || d.Title != work.Title || len(d.Sources) == 0 || len(d.Sources) > 40) {
+				return errors.New("作业详情与目录目标不一致")
+			}
 		}
 		for _, class := range course.Classes {
 			if !validText(class.PlatformID, 255) || !validText(class.Name, 255) || classes[class.PlatformID] {

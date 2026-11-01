@@ -6,9 +6,10 @@ cd "$TEACH_ROOT/ai_engine_python"
 uv sync --locked --no-dev
 # Install browser libraries as root separately; browser cache belongs to teacher.
 sudo -n service mysql start
-"$PYTHON" -m playwright install chromium
 cd "$TEACH_ROOT/backend-go"
 go mod download
+go run ./cmd/browser-worker --install
+go build -o "$RUNTIME_DIR/browser-worker" ./cmd/browser-worker
 go build -o "$RUNTIME_DIR/grading-gateway" .
 cd "$TEACH_ROOT/vue-grading-frontend"
 npm ci

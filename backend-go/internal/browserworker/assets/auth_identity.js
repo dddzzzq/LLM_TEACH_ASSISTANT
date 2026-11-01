@@ -1,0 +1,1 @@
+e => (e.getAttribute('data-teacher-account') || e.getAttribute('data-login-account') || e.value || e.textContent || '').trim()

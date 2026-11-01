@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,28 @@ func materialActor(c *gin.Context) materials.Actor {
 	id, _ := middleware.GetUserIDFromContext(c)
 	role, _ := middleware.GetRoleFromContext(c)
 	return materials.Actor{UserID: id, Role: role}
+}
+
+func GetMaterialEvidence(c *gin.Context) {
+	file, entry, err := materials.Default().OpenEvidence(c.Request.Context(), materialActor(c), c.Param("id"), c.Query("path"))
+	if err != nil {
+		c.JSON(404, gin.H{"error": "证据不存在、已变化或无权访问"})
+		return
+	}
+	defer file.Close()
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "sandbox")
+	name := filepath.Base(entry.Path)
+	contentType := mime.TypeByExtension(filepath.Ext(name))
+	if contentType != "application/pdf" && contentType != "image/png" && contentType != "image/jpeg" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	if filepath.Ext(name) == ".docx" || filepath.Ext(name) == ".doc" {
+		contentType = "application/octet-stream"
+		c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	}
+	c.DataFromReader(200, entry.Size, contentType, file, nil)
 }
 func CreateMaterials(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
@@ -98,14 +121,24 @@ func GetMaterials(c *gin.Context) {
 }
 func GradeMaterials(c *gin.Context) {
 	var request struct {
-		AllowPartial bool `json:"allow_partial"`
+		AllowPartial  bool   `json:"allow_partial"`
+		Regrade       bool   `json:"regrade"`
+		PreviousJobID string `json:"previous_job_id"`
 	}
 	if c.ShouldBindJSON(&request) != nil {
 		c.JSON(400, gin.H{"error": "批改参数无效"})
 		return
 	}
 	actor := materialActor(c)
-	result, err := grading.SubmitBatch(c.Request.Context(), grading.Actor{UserID: actor.UserID, Role: actor.Role}, grading.Request{Kind: "homework", BatchID: c.Param("id"), AllowPartial: request.AllowPartial})
+	gradingActor := grading.Actor{UserID: actor.UserID, Role: actor.Role}
+	payload := grading.Request{Kind: "homework", BatchID: c.Param("id"), AllowPartial: request.AllowPartial}
+	var result grading.Result
+	var err error
+	if request.Regrade {
+		result, err = grading.RegradeBatch(c.Request.Context(), gradingActor, payload, request.PreviousJobID, c.GetHeader("Idempotency-Key"))
+	} else {
+		result, err = grading.SubmitBatch(c.Request.Context(), gradingActor, payload)
+	}
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

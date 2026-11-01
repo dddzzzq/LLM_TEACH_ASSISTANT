@@ -1,0 +1,17 @@
+{
+  "homework_detail.QUESTION_ROOTS": "[data-question-content],.mark_item,.question-item,.questionLi,.TiMu,.questionContent,.work-question,.subject-item",
+  "page_snapshot.CONTROLS": "a,button,input:not([type=hidden]):not([type=password]),select,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=combobox],[role=treeitem],[role=option],li,dd,[onclick],[tabindex]:not([tabindex=\"-1\"]),.grade_check,:is(div,span,p):text-matches(\"^\\\\s*[0-9]{4}\\\\s*[-—–/]\\\\s*[0-9]{4}\\\\s*第[一二三123]学期\\\\s*$\")",
+  "page_snapshot.EXPORT_LABEL": "^(?:导出(?:作业|提交)?附件|export\\s+(?:(?:homework|assignment|submission)(?:\\s+(?:attachments?|files?))?|attachments?))(?:\\s*[（(].*[）)])?$",
+  "portal_export.ATTACHMENT_LABEL": "^(?:导出(?:学生)?(?:提交|作业)?(?:的)?附件|export\\s+(?:the\\s+)?(?:students?['’]?\\s+)?(?:(?:submitted|submission|commit|committed|homework|assignment)\\s+)?(?:attachments?|files?))",
+  "portal_export.OTHER_FORMAT_LABEL": "^(?:导出完整答题记录|仅导出文档|export\\s+(?:the\\s+)?(?:complete|full|all)\\s+(?:answer|response)|(?:only\\s+)?export\\s+(?:only\\s+)?(?:document|annotation))",
+  "portal_export.CURRENT_CLASS_LABEL": "^(?:(?:导出)?(?:本班级|当前班级)|(?:export\\s+)?(?:(?:the\\s+)?(?:current|this)\\s+class\\b|(?:the\\s+)?class\\s+work\\s+attachments?\\b))",
+  "portal_export.ALL_CLASSES_LABEL": "^(?:(?:导出(?:作业下)?)?(?:所有|全部)班级|(?:export\\s+)?all\\s+(?:classes\\b|class\\s+(?:work|homework)\\s+attachments?\\b))",
+  "portal_adapter.CHOICES": "label:has(input[type=checkbox]),label:has(input[type=radio]),input[type=checkbox],input[type=radio],[role=checkbox],[role=radio],.grade_check,.grade_checked",
+  "portal_adapter.TARGET_URL": "https://learning.xidian.edu.cn/portal",
+  "portal_auth.OTP": "input[autocomplete=one-time-code]:visible,#dynamicCode:visible,input[name=otp]:visible,input[placeholder*=验证码]:visible,input[placeholder=请输入]:visible,input[placeholder*='verification code' i]:visible,input[placeholder*='security code' i]:visible",
+  "portal_auth.PASSWORD": "input[type=password]:visible",
+  "portal_auth.USERNAME": "#username:visible,#account:visible,input[name=username]:visible,input[autocomplete=username]:visible",
+  "portal_catalog.CLASS_SELECTOR": "[data-clazzid],[data-clazz-id],[data-classid],[data-class-id],[clazzid],[classid],select[name*='clazz' i] option,select[name*='class' i] option,select[id*='clazz' i] option,select[id*='class' i] option,li[onclick*='changeClass' i],li[onclick*='changeClazz' i],li[onclick*='selectClass' i]",
+  "portal_catalog.COURSE_SELECTOR": "a[href*='courseid=' i],[data-courseid],[data-course-id],[courseid],[cname],.myde_course_item",
+  "portal_catalog.WORK_SELECTOR": "a[href*='workid=' i],a[href*='homeworkid=' i],a[href*='taskid=' i],[data-workid],[data-work-id],[workid],[data-homework-id],[homeworkid],[data-task-id],[taskid],[onclick*='workid' i],[onclick*='homeworkid' i],input[name='workid' i],input[name='homeworkid' i],li:has(.list_li_tit),li:has(a.piyueBtn)"
+}

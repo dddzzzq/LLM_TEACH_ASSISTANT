@@ -1,0 +1,1 @@
+e => ['absolute','fixed','sticky'].includes(getComputedStyle(e).position) || e.getAttribute('role') === 'dialog'

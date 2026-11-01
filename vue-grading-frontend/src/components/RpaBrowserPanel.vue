@@ -59,8 +59,11 @@
       :class="codeWaiting ? 'order-2' : 'order-4'"
       @submit.prevent="sendText"
     >
-      <label v-if="codeWaiting" :for="'login-code-' + job.job_id" class="w-full text-sm font-medium"
-        >验证码</label
+      <label
+        v-if="codeWaiting"
+        :for="'login-code-' + job.job_id"
+        class="w-full text-sm font-medium"
+        >{{ codeLabel }}</label
       >
       <input
         :id="'login-code-' + job.job_id"
@@ -71,11 +74,11 @@
         :maxlength="codeWaiting ? 12 : 2000"
         :placeholder="
           codeWaiting
-            ? '请输入收到的验证码'
+            ? '请输入' + codeLabel
             : '可在这里输入中文、密码或验证码，再填写到网页当前输入框'
         "
         class="min-w-0 flex-1 border rounded px-3 py-2 text-sm"
-        :aria-label="codeWaiting ? '验证码' : '填写到网页当前输入框的内容'"
+        :aria-label="codeWaiting ? codeLabel : '填写到网页当前输入框的内容'"
         :disabled="sending"
         @input="codeError = ''"
       />
@@ -104,6 +107,9 @@ const props = defineProps({ job: { type: Object, required: true } });
 const emit = defineEmits(['login-code-filled']);
 const human = computed(() => props.job.control_mode === 'HUMAN');
 const codeWaiting = computed(() => human.value && props.job.waiting_reason === 'LOGIN_CODE');
+const codeLabel = computed(() =>
+  props.job.login_code_method === 'wechat_work' ? '企业微信动态验证码' : '验证码'
+);
 const sending = ref(false);
 const codeError = ref('');
 const frame = ref(null),

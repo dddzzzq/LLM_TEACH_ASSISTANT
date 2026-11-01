@@ -66,24 +66,6 @@ class BrowserFrames:
 
     async def capture_page(self):
         task = self.task
-        if task.state.get("portal_session"):
-            # CDP screencasts cannot mask credential fields. Persistent portal jobs
-            # use the masked capture path and never publish raw authentication frames.
-            data, meta, pages = await task.frame()
-            self.publish(
-                {
-                    "type": "frame",
-                    "image": base64.b64encode(data).decode(),
-                    "revision": meta["revision"],
-                    "page_id": meta["page_id"],
-                    "epoch": meta["epoch"],
-                    "pages": pages,
-                    "width": 1440,
-                    "height": 1000,
-                }
-            )
-            await asyncio.sleep(0.2)
-            return
         async with task.lock:
             page, context, epoch = task.page, task.context, task.state["control_epoch"]
             if not page or page.is_closed():

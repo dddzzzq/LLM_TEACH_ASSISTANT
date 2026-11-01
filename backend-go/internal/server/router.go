@@ -71,6 +71,7 @@ func NewRouter(db *gorm.DB, logService *logbook.Service) *gin.Engine {
 		materialGroup.GET("", handlers.ListMaterials)
 		materialGroup.POST("", handlers.CreateMaterials)
 		materialGroup.GET("/:id", handlers.GetMaterials)
+		materialGroup.GET("/:id/file", handlers.GetMaterialEvidence)
 		materialGroup.POST("/:id/retry", handlers.RetryMaterials)
 		materialGroup.POST("/:id/grade", handlers.GradeMaterials)
 		materialGroup.POST("/:id/cancel", handlers.CancelMaterials)

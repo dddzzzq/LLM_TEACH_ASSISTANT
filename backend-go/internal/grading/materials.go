@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,14 +20,37 @@ import (
 
 var PublishMaterialTask = mq.PublishHomeworkTask
 
-// SubmitBatch shares one durable job per batch; repeated clicks never regrade it.
+// SubmitBatch reuses the current job. A new attempt requires explicit RegradeBatch.
 func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
+	return submitBatch(ctx, actor, r, "", "", false)
+}
+
+func RegradeBatch(ctx context.Context, actor Actor, r Request, previousID, requestID string) (Result, error) {
+	if strings.TrimSpace(previousID) == "" || strings.TrimSpace(requestID) == "" || len(requestID) > 128 {
+		return Result{}, fmt.Errorf("重新批改需要原任务ID和有效的幂等键，请刷新后重试")
+	}
+	return submitBatch(ctx, actor, r, previousID, requestID, true)
+}
+
+func submitBatch(ctx context.Context, actor Actor, r Request, previousID, requestID string, regrade bool) (Result, error) {
 	if err := actor.Check(); err != nil {
 		return Result{}, err
 	}
 	batch, err := materials.Default().Owned(ctx, materials.Actor{UserID: actor.UserID, Role: actor.Role}, r.BatchID)
 	if err != nil {
 		return Result{}, err
+	}
+	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("batch-grade:"+batch.ID)).String()
+	if regrade {
+		id = uuid.NewSHA1(uuid.NameSpaceURL, []byte("batch-regrade:"+batch.ID+":"+previousID+":"+requestID)).String()
+		var old models.AsyncJob
+		err := database.DB.WithContext(ctx).First(&old, "id = ? AND owner_id = ? AND material_batch_id = ?", id, actor.UserID, batch.ID).Error
+		if err == nil {
+			return receipt(old), nil
+		}
+		if err != gorm.ErrRecordNotFound {
+			return Result{}, err
+		}
 	}
 	if batch.AssignmentID == 0 {
 		if r.ResourceID == "" {
@@ -51,7 +75,7 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 	if r.ResourceID != "" && r.ResourceID != fmt.Sprint(batch.AssignmentID) {
 		return Result{}, fmt.Errorf("材料批次与指定作业不一致")
 	}
-	if batch.GradingJobID != "" {
+	if batch.GradingJobID != "" && !regrade {
 		return Default().Status(ctx, actor, batch.GradingJobID)
 	}
 	if batch.Status != "READY" && !(batch.Status == "NEEDS_REVIEW" && r.AllowPartial) {
@@ -61,18 +85,26 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 	if err != nil || checked.Outcome == "needs_input" {
 		return checked, err
 	}
-	if _, err := materials.LoadManifest(batch.ManifestPath, batch.ManifestSHA256); err != nil {
+	batch, err = materials.Default().EnsureCurrentReader(ctx, materials.Actor{UserID: actor.UserID, Role: actor.Role}, batch.ID)
+	if err != nil {
 		return Result{}, err
+	}
+	if batch.Status != "READY" && !(batch.Status == "NEEDS_REVIEW" && r.AllowPartial) {
+		return Result{Outcome: "needs_input", Message: "材料清单已更新，请查看新增异常并确认后批改", Missing: []string{"核对更新后的材料异常"}}, nil
 	}
 	var a models.Assignment
 	if err := database.DB.WithContext(ctx).First(&a, batch.AssignmentID).Error; err != nil {
 		return Result{}, err
 	}
-	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("batch-grade:"+batch.ID)).String()
-	payload := Request{Kind: "homework", ResourceID: fmt.Sprint(batch.AssignmentID), BatchID: batch.ID, FilePath: batch.ManifestPath, SkillName: r.SkillName, SkillVersion: r.SkillVersion}
+	payload := Request{Kind: "homework", ResourceID: fmt.Sprint(batch.AssignmentID), BatchID: batch.ID, FilePath: batch.ManifestPath, SkillName: r.SkillName, SkillVersion: r.SkillVersion, Regrade: regrade}
 	raw, _ := json.Marshal(payload)
 	job := models.AsyncJob{ID: id, OwnerID: actor.UserID, JobType: models.JobTypeHomework, ReferenceID: fmt.Sprint(batch.AssignmentID), MaterialBatchID: batch.ID, Status: models.JobStatusPending, Message: "材料已确认，等待批改队列", PayloadJSON: string(raw), DispatchState: "READY", SkillName: r.SkillName, SkillVersion: r.SkillVersion, QuestionSnapshot: a.Question, RubricSnapshot: a.Rubric}
-	if batch.SourceJobID != "" {
+	if regrade {
+		job.Message = "重新批改已受理，将按当前题目与评分标准更新AI评分，保留人工复核"
+	}
+	// Initial automatic grading uses the download-time snapshot. An explicit
+	// regrade intentionally uses the teacher's current question and rubric.
+	if batch.SourceJobID != "" && !regrade {
 		var download models.RPAJob
 		if database.DB.WithContext(ctx).First(&download, "id = ? AND user_id = ? AND assignment_id = ?", batch.SourceJobID, actor.UserID, a.ID).Error == nil && download.PortalWorkflowItemID != "" {
 			var item models.PortalWorkflowItem
@@ -85,6 +117,7 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 			job.QuestionSnapshot, job.RubricSnapshot = item.Question, item.Rubric
 		}
 	}
+	created := false
 	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked models.MaterialBatch
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", batch.ID).Error; err != nil {
@@ -96,10 +129,38 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 		if locked.AssignmentID != batch.AssignmentID {
 			return fmt.Errorf("材料所属作业已变化，请刷新")
 		}
-		if locked.GradingJobID != "" {
-			return tx.First(&job, "id = ?", locked.GradingJobID).Error
+		if locked.ManifestPath != batch.ManifestPath || locked.ManifestSHA256 != batch.ManifestSHA256 {
+			return fmt.Errorf("材料清单已更新，请刷新后重试")
 		}
-		if locked.SourceJobID != "" && locked.AutoGrade {
+		if regrade {
+			var replay models.AsyncJob
+			if err := tx.First(&replay, "id = ?", id).Error; err == nil {
+				job = replay
+				return nil
+			} else if err != gorm.ErrRecordNotFound {
+				return err
+			}
+			if locked.GradingJobID != previousID {
+				return fmt.Errorf("批次已有新的批改任务，请刷新后查看")
+			}
+			var previous models.AsyncJob
+			if err := tx.First(&previous, "id = ? AND owner_id = ? AND material_batch_id = ?", previousID, actor.UserID, locked.ID).Error; err != nil {
+				return fmt.Errorf("原批改任务不可用，请刷新后重试")
+			}
+			if previous.Status != models.JobStatusSuccess && previous.Status != models.JobStatusFailed && previous.Status != models.JobStatusCancelled {
+				return fmt.Errorf("本批次正在排队或批改，请等待当前任务完成")
+			}
+		} else if locked.GradingJobID != "" {
+			if err := tx.First(&job, "id = ?", locked.GradingJobID).Error; err != nil {
+				return err
+			}
+			id = job.ID
+			return nil
+		}
+		if locked.Status != "READY" && !(locked.Status == "NEEDS_REVIEW" && r.AllowPartial) {
+			return fmt.Errorf("材料状态已变化，请刷新后核对")
+		}
+		if locked.SourceJobID != "" && locked.AutoGrade && !regrade {
 			var parent models.RPAJob
 			if err := tx.First(&parent, "id = ?", locked.SourceJobID).Error; err != nil {
 				return err
@@ -111,6 +172,7 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&job).Error; err != nil {
 			return err
 		}
+		created = true
 		if err := tx.Model(&locked).Updates(map[string]any{"grading_job_id": id, "grading_state": "PENDING", "auto_grade": false}).Error; err != nil {
 			return err
 		}
@@ -122,7 +184,9 @@ func SubmitBatch(ctx context.Context, actor Actor, r Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	_ = DispatchMaterialJob(context.Background(), id)
+	if created {
+		_ = DispatchMaterialJob(context.Background(), id)
+	}
 	if err := database.DB.First(&job, "id = ?", id).Error; err != nil {
 		return Result{}, err
 	}

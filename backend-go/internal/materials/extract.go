@@ -3,6 +3,8 @@ package materials
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -29,9 +31,9 @@ var errPreparationLimit = errors.New("材料数量或体积超过限制")
 
 var studentName = regexp.MustCompile(`^([0-9]{5,20})(?:[-_\s]*)([^0-9].*)?$`)
 var ignored = map[string]bool{".git": true, ".runtime": true, "node_modules": true, "venv": true, ".venv": true, "__macosx": true, "__pycache__": true, "target": true, "dist": true, "build": true}
-var codeExt = map[string]bool{".py": true, ".java": true, ".c": true, ".cpp": true, ".cc": true, ".h": true, ".hpp": true, ".js": true, ".ts": true, ".vue": true, ".html": true, ".css": true, ".go": true, ".rs": true, ".sql": true, ".sh": true, ".ipynb": true, ".m": true, ".r": true}
+var codeExt = map[string]bool{".py": true, ".java": true, ".c": true, ".cpp": true, ".cc": true, ".h": true, ".hpp": true, ".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".vue": true, ".svelte": true, ".html": true, ".css": true, ".go": true, ".rs": true, ".cs": true, ".kt": true, ".swift": true, ".php": true, ".rb": true, ".sql": true, ".sh": true, ".ipynb": true, ".m": true, ".r": true}
 var reportExt = map[string]bool{".pdf": true, ".doc": true, ".docx": true, ".md": true, ".txt": true}
-var otherExt = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".json": true, ".xml": true, ".yaml": true, ".yml": true, ".toml": true, ".csv": true}
+var otherExt = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".gif": true, ".json": true, ".xml": true, ".yaml": true, ".yml": true, ".toml": true, ".csv": true, ".log": true}
 
 func identity(value string) (string, string) {
 	value = strings.TrimSuffix(filepath.Base(value), filepath.Ext(value))
@@ -63,17 +65,40 @@ func kind(path string) string {
 	return ""
 }
 
+// FileKind is shared with the grading reader so accepted source formats cannot
+// disappear between material preparation and model input.
+func FileKind(path string) string { return kind(path) }
+
 type preparer struct {
-	ctx         context.Context
-	root        string
-	manifest    Manifest
-	students    map[string]*Student
-	origins     map[string]string
-	originDepth map[string]int
-	conflicts   map[string]bool
-	incomplete  map[string]bool
-	expanded    int64
-	files       int
+	ctx          context.Context
+	root         string
+	manifest     Manifest
+	students     map[string]*Student
+	origins      map[string]string
+	originDepth  map[string]int
+	conflicts    map[string]bool
+	incomplete   map[string]bool
+	expanded     int64
+	files        int
+	archiveChain []string
+}
+
+func (p *preparer) student(id, name string) *Student {
+	student := p.students[id]
+	if student == nil {
+		student = &Student{ID: id, Name: name, Files: []File{}, Warnings: []string{}}
+		p.students[id] = student
+	}
+	for _, source := range p.archiveChain {
+		found := false
+		for _, old := range student.SourceIDs {
+			found = found || old == source
+		}
+		if !found {
+			student.SourceIDs = append(student.SourceIDs, source)
+		}
+	}
+	return student
 }
 
 func (p *preparer) budgetError() error {
@@ -230,6 +255,19 @@ func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr err
 		if err := p.unpack(path, tmp); err != nil {
 			return err
 		}
+		hash, err := HashFile(path)
+		if err != nil {
+			return err
+		}
+		parent := ""
+		if len(p.archiveChain) > 0 {
+			parent = p.archiveChain[len(p.archiveChain)-1]
+		}
+		digest := sha256.Sum256([]byte(parent + "\x00" + filepath.ToSlash(prefix) + "\x00" + hash))
+		sourceID := hex.EncodeToString(digest[:])
+		p.manifest.Sources = append(p.manifest.Sources, ArchiveSource{ID: sourceID, Name: filepath.Base(path), Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), SHA256: hash, Size: info.Size(), ParentID: parent, EntryPath: filepath.ToSlash(prefix), StudentID: id})
+		p.archiveChain = append(p.archiveChain, sourceID)
+		defer func() { p.archiveChain = p.archiveChain[:len(p.archiveChain)-1] }()
 		base := strings.TrimSuffix(prefix, filepath.Ext(prefix))
 		if id == "" {
 			base = ""
@@ -237,17 +275,16 @@ func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr err
 		return p.visit(tmp, id, name, base, depth+1)
 	}
 	if kind(path) == "" || strings.HasPrefix(filepath.Base(path), ".") {
+		if id != "" && !strings.HasPrefix(filepath.Base(path), ".") {
+			p.student(id, name).SkippedFiles = append(p.student(id, name).SkippedFiles, SkippedFile{Path: filepath.ToSlash(prefix), Reason: "格式暂不支持，原始附件保留"})
+		}
 		return nil
 	}
 	if id == "" {
 		p.issue(prefix, fmt.Errorf("无法从文件名或上级目录识别学号姓名"))
 		return nil
 	}
-	student := p.students[id]
-	if student == nil {
-		student = &Student{ID: id, Name: name, Files: []File{}, Warnings: []string{}}
-		p.students[id] = student
-	}
+	student := p.student(id, name)
 	if student.Name != name && name != "未知" {
 		p.conflicts[id] = true
 		p.issue(prefix, fmt.Errorf("同一学号对应不同姓名"))
@@ -444,7 +481,7 @@ func (p *preparer) unpack(source, dest string) error {
 }
 
 func prepare(ctx context.Context, batchID string, assignmentID uint, source, root string) (Manifest, error) {
-	p := &preparer{ctx: ctx, root: root, manifest: Manifest{Version: 1, BatchID: batchID, AssignmentID: assignmentID, Students: []Student{}, Issues: []Issue{}}, students: map[string]*Student{}, origins: map[string]string{}, originDepth: map[string]int{}, conflicts: map[string]bool{}, incomplete: map[string]bool{}}
+	p := &preparer{ctx: ctx, root: root, manifest: Manifest{Version: 1, ReaderVersion: CurrentReaderVersion, BatchID: batchID, AssignmentID: assignmentID, Students: []Student{}, Issues: []Issue{}}, students: map[string]*Student{}, origins: map[string]string{}, originDepth: map[string]int{}, conflicts: map[string]bool{}, incomplete: map[string]bool{}}
 	if err := os.MkdirAll(filepath.Join(root, ".prepare"), 0700); err != nil {
 		return p.manifest, err
 	}

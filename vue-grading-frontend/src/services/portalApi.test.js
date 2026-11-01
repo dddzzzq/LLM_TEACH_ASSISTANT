@@ -35,3 +35,18 @@ test('authentication waits remain active while completed operations stop polling
     assert.equal(operationActive({ status }), false);
   }
 });
+
+test('assignment grading distinguishes concrete classes from server-expanded all classes', async () => {
+  const calls = [];
+  const api = createPortalApi({
+    post: (...args) => {
+      calls.push(args);
+      return Promise.resolve({});
+    },
+  });
+  await api.gradeClasses(11, ['class-b'], 'single');
+  await api.gradeClasses(11, [], 'all', true);
+  assert.deepEqual(calls[0][1], { class_ids: ['class-b'] });
+  assert.deepEqual(calls[1][1], { class_ids: [], all_classes: true });
+  assert.equal(calls[1][2].headers['Idempotency-Key'], 'all');
+});

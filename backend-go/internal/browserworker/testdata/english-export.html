@@ -1,0 +1,21 @@
+<meta charset="utf-8"><h1 class="courseName">操作系统</h1>
+<ul><li id="work"><h2>第一次作业</h2><a onclick="document.querySelector('#work').hidden=true;document.querySelector('#grade').hidden=false">批阅</a></li></ul>
+<div id="grade" hidden><h2>第一次作业</h2>
+  <button onclick="window.moreClicks=(window.moreClicks||0)+1;document.querySelector('#menu').hidden=false;document.querySelector('#menu').innerHTML='<li role=menuitem><a onclick=&quot;document.querySelector(\'#settings\').hidden=false&quot;>Export homework</a></li>'">More</button>
+  <ul id="menu" class="morePop" hidden></ul>
+</div>
+<div id="settings" role="dialog" hidden><h3>Choose Type</h3>
+  <fieldset><legend>Export range</legend>
+    <label><input type="radio" name="scope" checked>Export the class work attachment</label>
+    <label><input id="all" type="radio" name="scope">Export all class work attachments<p>If no student in the class submits, the export is automatically skipped</p></label>
+  </fieldset>
+  <fieldset><legend>Export format</legend>
+    <label><input type="radio" name="format" checked>Export the complete answer record<p>The exported content contains students answers, teachers corrections, and students submission of attachments</p></label>
+    <label><input type="radio" name="format">Export only document marking annotations<p>Export only the teachers document marking annotation attachments in zip format</p></label>
+    <label><input id="attachment" type="radio" name="format">Export commit attachments<p>Export only attachments submitted by students in compressed package format</p></label>
+  </fieldset>
+  <fieldset><legend>Naming format</legend><label><input id="naming" type="radio" name="naming" checked>Default format</label></fieldset>
+  <button onclick="this.closest('[role=dialog]').hidden=true">Cancel</button>
+  <button onclick="if(!document.querySelector('#all').checked||!document.querySelector('#attachment').checked||!document.querySelector('#naming').checked)return;fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=english-task><td>第一次作业 All classes Export successful <a href=/download>Download</a></td></tr></tbody></table>'">Confirm</button>
+</div>
+<div id="downloadcenter"><p class="no-data">No downloads</p></div>

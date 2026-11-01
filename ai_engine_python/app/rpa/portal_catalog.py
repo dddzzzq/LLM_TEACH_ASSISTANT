@@ -262,16 +262,67 @@ class CatalogCollection:
         self.list_page = None
         self.list_url = ""
         self.list_sources = set()
+        self.detail_list = None
+        self.original_target = dict(task.state["target"])
+
+    @staticmethod
+    def requirements_complete(course):
+        return all(work.get("detail") for work in course["homeworks"].values())
+
+    @staticmethod
+    def merge_classes(course, classes):
+        known = {value["platform_id"]: value for value in course["classes"]}
+        known.update({value["platform_id"]: value for value in classes})
+        course["classes"] = list(known.values())
+
+    @staticmethod
+    def manifest(course):
+        return [
+            {
+                "homework_id": key,
+                "title": work["title"],
+                "status": "READ" if work.get("detail") else "PENDING",
+            }
+            for key, work in course["homeworks"].items()
+        ]
 
     def observation(self):
         courses = self.progress["courses"]
         current = self.task.catalog_course_pages.get(self.task.page)
-        completed = sum(bool(c.get("complete")) for c in courses.values())
+        selected = courses.get(current)
+        completed = sum(
+            bool(c.get("complete")) and self.requirements_complete(c) for c in courses.values()
+        )
         return {
             "courses_complete": self.progress["courses_complete"],
             "current_course_id": current,
-            "return_required": bool(current and courses[current].get("complete")),
-            "next_course_id": next((k for k, c in courses.items() if not c.get("complete")), None),
+            "phase": "COURSE_LIST"
+            if not selected
+            else "READ_REQUIREMENTS"
+            if selected.get("complete")
+            else "COLLECT_HOMEWORKS",
+            "manifest_ready": bool(selected and selected.get("complete")),
+            "homework_manifest": self.manifest(selected)
+            if selected and selected.get("complete")
+            else [],
+            "next_homework_id": next(
+                (key for key, work in selected["homeworks"].items() if not work.get("detail")), None
+            )
+            if selected and selected.get("complete")
+            else None,
+            "return_required": bool(
+                current
+                and courses[current].get("complete")
+                and self.requirements_complete(courses[current])
+            ),
+            "next_course_id": next(
+                (
+                    k
+                    for k, c in courses.items()
+                    if not c.get("complete") or not self.requirements_complete(c)
+                ),
+                None,
+            ),
             "total_courses": len(courses),
             "completed_courses": completed,
             "courses": [
@@ -280,7 +331,13 @@ class CatalogCollection:
                     "title": value["title"],
                     "term": value["term"],
                     "homework_count": len(value["homeworks"]),
+                    "class_count": len(value["classes"]),
+                    "classes": value["classes"],
                     "complete": value.get("complete", False),
+                    "requirements_read": sum(
+                        bool(w.get("detail")) for w in value["homeworks"].values()
+                    ),
+                    "requirements_complete": self.requirements_complete(value),
                     "empty": value.get("empty", False),
                     "identity_pending": not bool(value["platform_id"]),
                 }
@@ -443,7 +500,7 @@ class CatalogCollection:
                 await reader.diagnostics("homework"),
             )
         classes = await reader.classes(page, course)
-        course["classes"] = classes or course["classes"]
+        self.merge_classes(course, classes)
         for row in rows:
             prior = course["homeworks"].get(row["platform_id"])
             if prior and prior["title"] != row["title"]:
@@ -451,8 +508,13 @@ class CatalogCollection:
             course["homeworks"][row["platform_id"]] = {
                 key: row[key] for key in ("platform_id", "title", "url", "state", "deadline")
             }
+            if prior and prior.get("detail"):
+                course["homeworks"][row["platform_id"]]["detail"] = prior["detail"]
         course["empty"] = empty and not course["homeworks"]
-        course["complete"] = bool(empty) or await self.at_end(page, "homework")
+        was_complete = course.get("complete", False)
+        # This is accumulated list coverage, not the current scroll position.
+        # Returning from a detail or revisiting page one cannot undo it.
+        course["complete"] = was_complete or bool(empty) or await self.at_end(page, "homework")
         self.task.state["last_catalog_read"] = {
             "course_id": course_id,
             "rows": len(rows),
@@ -463,16 +525,137 @@ class CatalogCollection:
         if len(course["homeworks"]) > 2000 or len(course["classes"]) > 500:
             raise RpaIssue("CATALOG_LIMIT", "课程目录超过本次读取上限")
         self.task.update(catalog_progress=self.progress)
+        if course["complete"] and not was_complete and course["homeworks"]:
+            self.task.event(
+                f"已确认课程“{course['title']}”作业清单，共 {len(course['homeworks'])} 份、{len(course['classes'])} 个班级；将按清单逐份读取要求"
+            )
         self.task.event(
             f"已读取课程“{course['title']}”：当前页 {len(rows)} 个作业，累计 {len(course['homeworks'])} 个"
             + (
                 "；官网明确无作业，可返回课程列表"
                 if course["empty"]
-                else "；已读完，可返回课程列表"
+                else "；作业列表已读完，请继续读取作业详情"
                 if course["complete"]
                 else "；继续读取下一页或滚动加载"
             )
         )
+
+    async def homework_navigation(self, viewport):
+        """Expose a verified list first, then an ordered requirement-reading queue."""
+        current = self.task.catalog_course_pages.get(self.task.page)
+        if not current or self.task.detail_reader:
+            summary = self.observation()
+            return {
+                "pending_homeworks": [],
+                "next_step": "FINISH_CATALOG"
+                if summary["courses_complete"]
+                and summary["completed_courses"] == summary["total_courses"]
+                else "VISIT_NEXT_COURSE",
+            }
+        course = self.progress["courses"][current]
+        reader = PortalCatalog(_SinglePageContext(self.task.page), self.task.update)
+        rows = await reader.records("homework", allow_unresolved=True)
+        ready = bool(rows) or await reader.empty("homework")
+        next_id = next(
+            (key for key, work in course["homeworks"].items() if not work.get("detail")), None
+        )
+        visible = {row["platform_id"] for row in rows}
+        pending = (
+            [{"homework_id": next_id, "title": course["homeworks"][next_id]["title"]}]
+            if course.get("complete") and next_id in visible
+            else []
+        )
+        if course.get("complete") and next_id is None:
+            step = "RETURN_TO_COURSE_LIST"
+        elif not ready:
+            step = "OPEN_HOMEWORK_LIST"
+        elif not course.get("complete"):
+            if (
+                not course["homeworks"]
+                or any(row["platform_id"] not in course["homeworks"] for row in rows)
+                or viewport["at_end"]
+            ):
+                step = "READ_HOMEWORK_LIST"
+            elif viewport["loading"]:
+                step = "WAIT_FOR_LIST"
+            elif viewport["has_next"]:
+                step = "NEXT_HOMEWORK_PAGE"
+            else:
+                step = "SCROLL_HOMEWORK_LIST"
+        elif next_id is not None:
+            step = "SELECT_HOMEWORK_DETAIL" if pending else "LOCATE_HOMEWORK"
+        else:
+            step = "RETURN_TO_COURSE_LIST"
+        return {"homework_list_ready": ready, "pending_homeworks": pending, "next_step": step}
+
+    async def pending_homeworks(self):
+        viewport = await self.viewport().observation()
+        return (await self.homework_navigation(viewport))["pending_homeworks"]
+
+    async def select_detail(self, homework_id):
+        from .homework_detail import HomeworkDetailReader
+
+        task = self.task
+        if task.detail_reader or homework_id not in {
+            row["homework_id"] for row in await self.pending_homeworks()
+        }:
+            raise RpaIssue("DETAIL_SELECTION_INVALID", "请从当前已读取作业列表选择待读取的作业")
+        current = task.catalog_course_pages[task.page]
+        course = self.progress["courses"][current]
+        work = course["homeworks"][homework_id]
+        self.detail_list = (
+            task.page,
+            task.page.url,
+            [(frame, frame.url) for frame in task.page.frames],
+            current,
+            homework_id,
+        )
+        target = {
+            "course_name": course["title"],
+            "assignment_name": work["title"],
+            "term": course["term"],
+            "portal": {"course_id": course["platform_id"], "homework_id": homework_id},
+        }
+        task.adapter.target = target
+        task.adapter.course_confirmed, task.adapter.assignment_confirmed = True, False
+        task.adapter.assignment_pages.clear()
+        task.detail_page, task.detail_page_url = None, ""
+        task.detail_navigation = None
+        task.detail_reader = HomeworkDetailReader(task)
+        task.update(
+            target=target, stage="READING_DETAIL", message="请进入作业“" + work["title"] + "”的详情"
+        )
+
+    def complete_detail(self, detail):
+        task = self.task
+        _, _, _, current, homework_id = self.detail_list
+        course = self.progress["courses"][current]
+        work = course["homeworks"][homework_id]
+        if (detail["course_id"], detail["homework_id"], detail["title"]) != (
+            course["platform_id"],
+            homework_id,
+            work["title"],
+        ):
+            raise RpaIssue("DETAIL_TARGET_UNVERIFIED", "读取结果与当前作业不一致")
+        if not task.automatic():
+            raise RpaIssue("DETAIL_STOPPED", "作业详情读取已暂停或取消")
+        work["detail"] = detail
+        task.detail_reader = None
+        task.detail_page, task.detail_page_url = None, ""
+        task.detail_navigation = None
+        task.adapter.target = dict(self.original_target)
+        task.adapter.course_confirmed = task.adapter.assignment_confirmed = False
+        task.adapter.refs = {}
+        task.update(
+            target=dict(self.original_target),
+            catalog_progress=self.progress,
+            stage="READING_CATALOG",
+        )
+        read_count = sum(bool(w.get("detail")) for w in course["homeworks"].values())
+        task.event(
+            f"已读取作业“{work['title']}”要求并返回作业列表，清单进度 {read_count}/{len(course['homeworks'])}"
+        )
+        self.detail_list = None
 
     async def record_navigation(self, locator, page):
         raw = await locator.evaluate("e => (" + EXTRACT + ")([e])[0]")
@@ -493,22 +676,24 @@ class CatalogCollection:
                 page, course
             )
             if classes:
-                course["classes"] = classes
+                self.merge_classes(course, classes)
                 self.task.update(catalog_progress=self.progress)
         return current
 
     def finish(self):
         courses = self.progress["courses"]
         if not self.progress["courses_complete"] or any(
-            not c["complete"] or not c["platform_id"] for c in courses.values()
+            not c["complete"] or not c["platform_id"] or not self.requirements_complete(c)
+            for c in courses.values()
         ):
-            raise ValueError("课程或作业目录尚未完整读取，请继续读取未完成的页面")
+            raise ValueError("课程、作业列表或作业详情尚未完整读取，请继续未完成的页面")
         if sum(len(c["homeworks"]) for c in courses.values()) > 10000:
             raise RpaIssue("CATALOG_LIMIT", "作业数超过本次读取上限")
         if len({c["platform_id"] for c in courses.values()}) != len(courses):
             raise RpaIssue("CATALOG_AMBIGUOUS", "多个课程卡片指向同一官网标识，请核对课程列表")
         return {
             "complete": True,
+            "details_included": True,
             "courses": [
                 {
                     **{k: c[k] for k in ("platform_id", "title", "term", "url", "classes")},

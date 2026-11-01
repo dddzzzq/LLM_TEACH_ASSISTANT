@@ -24,6 +24,8 @@ test('material API preserves filters, response objects and request payloads', as
   await api.grade('batch-1', false);
   await api.grade('batch-1', true);
   await api.cancel('batch-1');
+  await api.file('batch-1', 'students/张三/src/main.ts');
+  await api.regrade('batch-1', true, 'old-job', 'same-retry-key');
   assert.deepEqual(calls, [
     ['get', '/api/materials', { params: { assignment_id: 42, source_job_id: 'job-1' } }],
     ['get', '/api/materials', { params: { assignment_id: undefined, source_job_id: undefined } }],
@@ -33,6 +35,17 @@ test('material API preserves filters, response objects and request payloads', as
     ['post', '/api/materials/batch-1/grade', { allow_partial: false }],
     ['post', '/api/materials/batch-1/grade', { allow_partial: true }],
     ['post', '/api/materials/batch-1/cancel'],
+    [
+      'get',
+      '/api/materials/batch-1/file',
+      { params: { path: 'students/张三/src/main.ts' }, responseType: 'blob' },
+    ],
+    [
+      'post',
+      '/api/materials/batch-1/grade',
+      { allow_partial: true, regrade: true, previous_job_id: 'old-job' },
+      { headers: { 'Idempotency-Key': 'same-retry-key' } },
+    ],
   ]);
 });
 

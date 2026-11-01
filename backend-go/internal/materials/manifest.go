@@ -11,6 +11,24 @@ import (
 	"strings"
 )
 
+const CurrentReaderVersion = 2
+
+type ArchiveSource struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Format    string `json:"format"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	ParentID  string `json:"parent_id,omitempty"`
+	EntryPath string `json:"entry_path"`
+	StudentID string `json:"student_id,omitempty"`
+}
+
+type SkippedFile struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 type File struct {
 	Path   string `json:"path"`
 	Kind   string `json:"kind"`
@@ -18,23 +36,41 @@ type File struct {
 	Size   int64  `json:"size"`
 }
 type Student struct {
-	ID       string   `json:"student_id"`
-	Name     string   `json:"student_name"`
-	Files    []File   `json:"files"`
-	Warnings []string `json:"warnings"`
+	ID           string        `json:"student_id"`
+	Name         string        `json:"student_name"`
+	Files        []File        `json:"files"`
+	Warnings     []string      `json:"warnings"`
+	SourceIDs    []string      `json:"source_ids,omitempty"`
+	SkippedFiles []SkippedFile `json:"skipped_files,omitempty"`
 }
 type Issue struct {
 	Path    string `json:"path"`
 	Message string `json:"message"`
 }
 type Manifest struct {
-	Version         int       `json:"version"`
-	BatchID         string    `json:"batch_id"`
-	AssignmentID    uint      `json:"assignment_id"`
-	Students        []Student `json:"students"`
-	Issues          []Issue   `json:"issues"`
-	FilteredEntries int       `json:"filtered_entries,omitempty"`
-	SkippedSymlinks int       `json:"skipped_symlinks,omitempty"`
+	Version         int             `json:"version"`
+	ReaderVersion   int             `json:"reader_version,omitempty"`
+	Sources         []ArchiveSource `json:"sources,omitempty"`
+	BatchID         string          `json:"batch_id"`
+	AssignmentID    uint            `json:"assignment_id"`
+	Students        []Student       `json:"students"`
+	Issues          []Issue         `json:"issues"`
+	FilteredEntries int             `json:"filtered_entries,omitempty"`
+	SkippedSymlinks int             `json:"skipped_symlinks,omitempty"`
+}
+
+func (m Manifest) StudentSources(student Student) []ArchiveSource {
+	ids := map[string]bool{}
+	for _, id := range student.SourceIDs {
+		ids[id] = true
+	}
+	var sources []ArchiveSource
+	for _, source := range m.Sources {
+		if ids[source.ID] {
+			sources = append(sources, source)
+		}
+	}
+	return sources
 }
 
 func HashFile(path string) (string, error) {

@@ -45,6 +45,23 @@ func TestPortalReturnToolMigrationAndSkillScope(t *testing.T) {
 	}
 }
 
+func TestCatalogDetailSelectionMigrationKeepsTargetSchemaStrict(t *testing.T) {
+	old := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`)
+	added := `{"type":"object","properties":{"tool":{"type":"string","enum":["select_homework_detail"]},"homework_id":{"type":"string"}},"required":["tool","homework_id"],"additionalProperties":false}`
+	current := json.RawMessage(strings.TrimSuffix(string(old), "]}") + "," + added + "]}")
+	if !portalToolExtension(old, current) {
+		t.Fatal("known detail-selection extension rejected")
+	}
+	for _, invalid := range []string{
+		strings.ReplaceAll(string(current), "homework_id", "url"),
+		strings.Replace(string(current), `"additionalProperties":false`, `"additionalProperties":true`, 1),
+	} {
+		if portalToolExtension(old, json.RawMessage(invalid)) {
+			t.Fatal("detail selection accepted a changed target contract")
+		}
+	}
+}
+
 func TestSliderMigrationPreservesExistingActionContracts(t *testing.T) {
 	old := json.RawMessage(`{"oneOf":[{"type":"object","properties":{"tool":{"enum":["click"]},"element_ref":{"type":"string"}},"required":["tool","element_ref"]}]}`)
 	added := `{"type":"object","properties":{"tool":{"type":"string","enum":["solve_slider_captcha"]}},"required":["tool"],"additionalProperties":false}`
@@ -124,6 +141,55 @@ func TestNoBrowserActionWithoutDurableIntent(t *testing.T) {
 		t.Fatal("action ran before durable intent")
 	}
 }
+
+func TestSyncJobUsesDetailSkillForSelectionAndRestoresCatalogSkill(t *testing.T) {
+	skills, err := catalog.Default("portal-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sync-teacher-portal", "collect-homework"} {
+		t.Run(name, func(t *testing.T) {
+			snapshot := NavigationSnapshot{Skill: skills[name]}
+			for _, phase := range []struct {
+				observation, want string
+			}{
+				{`{"task_type":"AUTH_BOOTSTRAP","homework_detail":{"open":false,"ready":false},"catalog":{"courses":[{"complete":false}]}}`, "read-homework-detail"},
+				{`{"task_type":"AUTH_BOOTSTRAP","homework_detail":{"open":true,"ready":true}}`, "read-homework-detail"},
+				{`{"task_type":"AUTH_BOOTSTRAP","catalog":{"pending_homeworks":[]}}`, name},
+			} {
+				var sentVersion string
+				request := func(_ context.Context, method, path string, payload any) ([]byte, error) {
+					if !strings.HasPrefix(path, "/tasks/original-job/") {
+						t.Fatal("detail phase created another browser task", path)
+					}
+					if method == "GET" {
+						return []byte(`{"ready":true,"observation_id":"o1","revision":1,"epoch":1,"observation":` + phase.observation + `}`), nil
+					}
+					var body struct {
+						SkillVersion string `json:"skill_version"`
+					}
+					wire, _ := json.Marshal(payload)
+					_ = json.Unmarshal(wire, &body)
+					sentVersion = body.SkillVersion
+					return []byte(`{"outcome":"completed","state":{"status":"RUNNING"}}`), nil
+				}
+				decide := func(_ context.Context, _ json.RawMessage, doc catalog.Document, _ json.RawMessage) (json.RawMessage, error) {
+					if doc.Name != phase.want {
+						t.Fatalf("phase skill = %s, want %s", doc.Name, phase.want)
+					}
+					return []byte(`{"tool":"click","element_ref":"p0"}`), nil
+				}
+				if _, err := drivePage(context.Background(), "original-job", snapshot, request, decide, &memoryJournal{}); err != nil {
+					t.Fatal(err)
+				}
+				if sentVersion != skills[phase.want].Version || snapshot.Skill.Name != name {
+					t.Fatal("wrong skill receipt or lost the original sync snapshot")
+				}
+			}
+		})
+	}
+}
+
 func TestPageModelFailureHandsControlToHuman(t *testing.T) {
 	epoch := int64(0)
 	req := func(_ context.Context, method, path string, body any) ([]byte, error) {

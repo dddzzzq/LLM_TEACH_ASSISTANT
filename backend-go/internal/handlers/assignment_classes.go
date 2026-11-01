@@ -20,11 +20,16 @@ const unassignedClassID = "__unassigned__"
 // AssignmentClass describes a read scope. Only classes in the current portal
 // catalog can be sent back as a portal execution/import target.
 type AssignmentClass struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Source    string `json:"source"`
-	CanGrade  bool   `json:"can_grade"`
-	CanImport bool   `json:"can_import"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Source         string `json:"source"`
+	CanGrade       bool   `json:"can_grade"`
+	CanImport      bool   `json:"can_import"`
+	MaterialStatus string `json:"material_status"`
+	GradingStatus  string `json:"grading_status"`
+	IssueCount     int    `json:"issue_count"`
+	GradedCount    int    `json:"graded_count"`
+	ReviewedCount  int    `json:"reviewed_count"`
 }
 
 func namedClass(name string) bool {
@@ -89,7 +94,7 @@ func assignmentClassCatalog(ctx context.Context, db *gorm.DB, a models.Assignmen
 		}
 	}
 	var batches []models.MaterialBatch
-	if err := db.WithContext(ctx).Select("id,portal_class_id,class_name").Where("assignment_id = ?", a.ID).Find(&batches).Error; err != nil {
+	if err := db.WithContext(ctx).Where("assignment_id = ?", a.ID).Find(&batches).Error; err != nil {
 		return nil, err
 	}
 	for _, batch := range batches {
@@ -119,7 +124,100 @@ func assignmentClassCatalog(ctx context.Context, db *gorm.DB, a models.Assignmen
 		}
 		return classes[i].Name < classes[j].Name
 	})
+	if err := summarizeAssignmentClasses(ctx, db, a, classes, batches); err != nil {
+		return nil, err
+	}
 	return classes, nil
+}
+
+func summarizeAssignmentClasses(ctx context.Context, db *gorm.DB, a models.Assignment, classes []AssignmentClass, batches []models.MaterialBatch) error {
+	byID := make(map[string]*AssignmentClass, len(classes))
+	for i := range classes {
+		classes[i].MaterialStatus = "EMPTY"
+		classes[i].GradingStatus = "NOT_STARTED"
+		byID[classes[i].ID] = &classes[i]
+	}
+	batchClasses := map[string]string{}
+	classBatches := map[string][]models.MaterialBatch{}
+	jobIDs := []string{}
+	for _, batch := range batches {
+		classID := batchClass(batch).ID
+		batchClasses[batch.ID] = classID
+		classBatches[classID] = append(classBatches[classID], batch)
+		if class := byID[classID]; class != nil {
+			class.IssueCount += batch.IssueCount
+		}
+		if batch.GradingJobID != "" {
+			jobIDs = append(jobIDs, batch.GradingJobID)
+		}
+	}
+	var jobRows []struct {
+		ID     string
+		Status models.AsyncJobStatus
+	}
+	if len(jobIDs) > 0 {
+		if err := db.WithContext(ctx).Model(&models.AsyncJob{}).Select("id,status").Where("id IN ?", jobIDs).Scan(&jobRows).Error; err != nil {
+			return err
+		}
+	}
+	jobs := map[string]models.AsyncJobStatus{}
+	for _, job := range jobRows {
+		jobs[job.ID] = job.Status
+	}
+	var counts []struct {
+		MaterialBatchID string
+		Graded          int
+		Reviewed        int
+	}
+	if err := db.WithContext(ctx).Model(&models.Submission{}).Select(`material_batch_id,
+		SUM(CASE WHEN score >= 0 OR (is_human_reviewed = true AND human_score >= 0) THEN 1 ELSE 0 END) AS graded,
+		SUM(CASE WHEN is_human_reviewed = true THEN 1 ELSE 0 END) AS reviewed`).Where("assignment_id = ?", a.ID).Group("material_batch_id").Scan(&counts).Error; err != nil {
+		return err
+	}
+	legacyID := legacyAssignmentClass(a).ID
+	for _, count := range counts {
+		classID, ok := batchClasses[count.MaterialBatchID]
+		if !ok {
+			classID = legacyID
+		}
+		if class := byID[classID]; class != nil {
+			class.GradedCount += count.Graded
+			class.ReviewedCount += count.Reviewed
+		}
+	}
+	for classID, rows := range classBatches {
+		class := byID[classID]
+		if class == nil {
+			continue
+		}
+		preparing, materialAttention, grading, gradingAttention, ready := false, false, false, false, false
+		for _, batch := range rows {
+			preparing = preparing || batch.Status == "PENDING" || batch.Status == "PROCESSING"
+			materialAttention = materialAttention || batch.Status == "FAILED" || batch.Status == "NEEDS_REVIEW" || batch.Status == "PARTIAL_SUCCESS" || batch.IssueCount > 0
+			gradingAttention = gradingAttention || batch.GradingState == "WAITING_REQUIREMENTS" || jobs[batch.GradingJobID] == models.JobStatusFailed
+			grading = grading || batch.GradingState == "PENDING" || batch.GradingState == "PROCESSING" || batch.GradingState == "REQUESTED" || jobs[batch.GradingJobID] == models.JobStatusPending || jobs[batch.GradingJobID] == models.JobStatusProcessing
+			ready = ready || (batch.Status == "READY" && batch.GradingJobID == "")
+		}
+		switch {
+		case materialAttention:
+			class.MaterialStatus = "ATTENTION"
+		case preparing:
+			class.MaterialStatus = "PROCESSING"
+		default:
+			class.MaterialStatus = "READY"
+		}
+		switch {
+		case grading:
+			class.GradingStatus = "GRADING"
+		case gradingAttention:
+			class.GradingStatus = "ATTENTION"
+		case class.GradedCount > 0:
+			class.GradingStatus = "GRADED"
+		case ready:
+			class.GradingStatus = "READY"
+		}
+	}
+	return nil
 }
 
 func GetAssignmentClasses(c *gin.Context) {

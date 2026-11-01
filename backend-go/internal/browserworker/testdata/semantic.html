@@ -1,0 +1,8 @@
+<meta charset="utf-8"><header><div role=heading aria-level=1>操作系统</div></header>
+    <section role=list><article role=listitem id=work><h3>第一次作业</h3>
+    <div role=button aria-label="查看提交" onclick="document.querySelector('#work').hidden=true;document.querySelector('#grade').hidden=false">进入详情</div></article></section>
+    <section id=grade hidden><div role=heading aria-level=1>第一次作业</div>
+    <button aria-label="导出附件" onclick="document.querySelector('[role=dialog]').hidden=false">附件导出</button></section>
+    <section role=dialog hidden>导出设置<label><input type=checkbox>班级A</label><label><input type=checkbox>班级B</label>
+    <button onclick="fetch('/export');this.closest('[role=dialog]').hidden=true;document.querySelector('#downloadcenter').innerHTML='<table><tbody><tr data-id=task-a><td>第一次作业 全部班级 导出成功 <a class=download_ic href=/download>下载</a></td></tr></tbody></table>'">确定</button>
+    </section><div id=downloadcenter><p class=empty>暂无下载记录</p></div>

@@ -58,8 +58,10 @@ class Service:
         args = info['args']
         cwd = Path(info['cwd']).resolve()
         if self.name == 'rpa':
-            return cwd == self.root / 'ai_engine_python' and any(
+            go_worker = bool(args) and cwd == self.root / 'backend-go' and args[0] == str(self.runtime / 'browser-worker')
+            legacy_worker = cwd == self.root / 'ai_engine_python' and any(
                 args[i:i+2] == ['-m', 'app.rpa.worker'] for i in range(len(args)-1))
+            return go_worker or legacy_worker
         if self.name == 'ai':
             return cwd == self.root / 'ai_engine_python' and any(
                 arg in ('app/grpc_server.py', str(self.root / 'ai_engine_python/app/grpc_server.py')) for arg in args[1:])
@@ -152,7 +154,7 @@ class Service:
         if current:
             if not self.matches(current) or current['start_ticks'] != start:
                 raise ServiceError('停止前进程身份发生变化，未发送信号')
-            # Let Python shut down its own Playwright/Chromium children first.
+            # Let the Worker shut down its Playwright/Chromium children first.
             # Sending TERM to the whole group kills the driver before cleanup.
             print(f'{self.name}：发送 SIGTERM（主进程 {pid}）', flush=True)
             os.kill(pid, signal.SIGTERM)

@@ -1,5 +1,7 @@
 # 官网作业下载：人工协作 Agent
 
+2026-10-31 更新：默认浏览器执行器改为独立 Go Playwright Worker，主助手和页面 Agent 的组织、后台调度与前端协议继续沿用。本文 Python 路径保留作历史行为参考；当前安装、运行与回归命令见 [Go Playwright 浏览器执行迁移](go-playwright-worker.md)。
+
 入口为「AI 教学助手」对话区，快捷指令提供「从教务系统下载作业并批改」和「查询学生成绩」。对话创建下载任务后，右侧自动弹出作业控制台并选中该任务；可收起控制台，之后从任务消息或「打开作业控制台」按钮重新进入。收起只停止前端浏览器连接与状态轮询，后台任务继续执行。目标固定为西电教学平台，课程、作业名称及可选学期由用户提供；新任务默认自动导出全部班级。
 
 ## 模块职责
@@ -77,7 +79,7 @@ Worker 为每个任务共享一个 Chromium CDP screencast，推送 JPEG 画面�
 
 项目位于 Windows 磁盘并由 WSL 启动 Vite 时启用 500ms 文件轮询，避免 Windows 写入没有触发 Linux 文件通知而继续提供旧版组件；其他环境保持默认文件监听。
 
-安装 `ai_engine_python/requirements.txt`（含 `websockets==15.0.1`）和 Playwright Chromium 后，在 Python 项目目录运行 `python -m app.rpa.worker`；现有 `scripts/start.sh` 已加入独立 Worker，并检查 `browser.stream.v1` 能力，防止复用缺少流式接口的旧服务。默认端口8765，配置代理后需重启 Worker。更新中的 Go 后端需重新编译并重启，前端需重新构建或由 Vite 热更新。
+在 `backend-go/` 执行 `go run ./cmd/browser-worker --install` 安装匹配的驱动及 Chromium，再编译运行 `cmd/browser-worker`；`scripts/start.sh` 已切换 Go Worker，并检查 `browser.stream.v1` 与 `execution_driver=go-playwright`，防止复用旧 Python 服务。默认端口8765，配置代理后需重启 Worker。Go 后端需重新编译并重启，前端需重新构建或由 Vite 热更新。
 
 ```bash
 cd ai_engine_python
@@ -113,3 +115,5 @@ Go Tool 创建和控制持久任务；页面 Tool 执行受限的浏览器动作
 Worker 的 `/tasks/{id}/export-diagnostics` 是受控制令牌保护的只读诊断入口，用于检查导出记录和班级控件；不提交导出、不修改页面，也不返回下载签名地址。
 
 官网的自定义班级列表通过 `selectClass(this)` 配合 `li.classli` 的数值 `data` 属性，或 `selectClass(this, 班级ID)` 切换，且切换后网址仍保留旧班级参数。目录读取支持这些控件；具体班级下载先按目录 ID 选择官网选项，再核验页面实际选中状态。明确选中“全部班级”时不能回退使用网址里的旧班级 ID。`fetch-homework` 优先进入作业行的批阅入口，进入仅含题目和答案的预览页时返回列表，不调用题目读取工具。
+
+导出设置没有班级范围控件时，按已核验的批阅页班级处理；未选中目标班级则关闭未提交弹窗、切班并重新打开核验。下载中心的“暂无可下载内容”同样表示已读到空的导出历史，不能等待列表行直到超时。读取历史通过唯一可见的官网入口自身处理函数激活，避免浮动菜单位移或导出弹窗遮挡坐标点击；已有历史快照不反复打开下载中心。没有核验历史的情况不自动把旧的同名班级文件当作本次导出。

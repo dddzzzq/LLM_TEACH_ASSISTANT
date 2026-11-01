@@ -112,7 +112,8 @@ class PortalSessions:
                 viewport={"width": 1440, "height": 1000},
                 accept_downloads=True,
                 downloads_path=str(downloads),
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                + ([] if self.manager.proxy else ["--no-proxy-server"]),
                 proxy={"server": self.manager.proxy} if self.manager.proxy else None,
             )
             yield context

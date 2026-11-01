@@ -16,23 +16,14 @@
         :aria-label="item.name"
         ><AppIcon :name="item.icon" />{{ item.name }}</router-link
       >
-      <div class="sidebar-views" v-if="route.path.startsWith('/assignments')">
-        <router-link
-          :to="{ path: '/assignments', query: { view: 'attention' } }"
-          :class="{ 'is-current': route.query.view === 'attention' }"
-          >需要处理</router-link
-        >
-        <router-link
-          :to="{ path: '/assignments', query: { view: 'processing' } }"
-          :class="{ 'is-current': route.query.view === 'processing' }"
-          >正在批改</router-link
-        >
-        <router-link
-          :to="{ path: '/assignments', query: { view: 'graded' } }"
-          :class="{ 'is-current': route.query.view === 'graded' }"
-          >已有成绩</router-link
-        >
-      </div>
+      <button
+        type="button"
+        class="sidebar-link sidebar-console"
+        aria-haspopup="dialog"
+        aria-controls="homework-console"
+        @click="openTaskConsole"
+        ><AppIcon name="download" />任务控制台</button
+      >
     </nav>
     <div class="sidebar-helper"
       ><AppIcon name="chat" /><p>AI 助手随时在侧<br /><span>点击右下角图标开始对话</span></p></div
@@ -104,6 +95,7 @@ onMounted(async () => {
 });
 
 const filteredMenuItems = computed(() => mainNavigation);
+const openTaskConsole = () => window.dispatchEvent(new CustomEvent('rpa-open-console'));
 // 处理退出登录
 const handleLogout = async () => {
   try {
@@ -187,20 +179,9 @@ const handleLogout = async () => {
   font-weight: 650;
   box-shadow: var(--shadow-subtle);
 }
-.sidebar-views {
-  display: grid;
-  padding: 8px 0 0 40px;
-  gap: 2px;
-}
-.sidebar-views a {
-  padding: 9px 0;
-  font-size: 12px;
-  min-height: 36px;
-  color: var(--color-muted);
-}
-.sidebar-views a:hover,
-.sidebar-views .is-current {
-  color: var(--color-accent);
+.sidebar-console {
+  width: 100%;
+  text-align: left;
 }
 .sidebar-helper {
   display: flex;
@@ -314,7 +295,6 @@ const handleLogout = async () => {
     height: 25px;
   }
   .sidebar-brand small,
-  .sidebar-views,
   .sidebar-helper,
   .sidebar-user {
     display: none;

@@ -27,6 +27,9 @@ root = Path(os.environ['ROOT'])
 for k, v in dotenv_values(root / 'ai_engine_python/app/.env').items():
     if v is not None and k not in os.environ:
         os.environ[k] = v
+for k, v in dotenv_values(root / 'ai_engine_python/app/.env.rpa').items():
+    if v is not None and k == 'RPA_PROXY_URL':
+        os.environ.setdefault(k, v)
 for k, v in dotenv_values(Path(os.environ['RUNTIME_DIR']) / '.database.env').items():
     if v is not None:
         os.environ.setdefault(k, v)
@@ -88,9 +91,13 @@ for topic in topic_grading_homework topic_grading_exam topic_rpa_fetch; do
   "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server localhost:9092 \
     --create --if-not-exists --topic "$topic" --partitions 1 --replication-factor 1 >>"$RUNTIME_DIR/kafka-topics.log" 2>&1
 done
-start rpa "$RPA_CONTROL_PORT" "$ROOT/ai_engine_python" 60 "$PYTHON" -u -m app.rpa.worker
-# A listening port may belong to the old Python decision loop. Verify the
-# authenticated execution-only protocol before starting its Go decision driver.
+if ! port_open "$RPA_CONTROL_PORT"; then
+  echo '编译 Go Playwright 浏览器 Worker…'
+  (cd "$ROOT/backend-go" && go build -o "$RUNTIME_DIR/browser-worker" ./cmd/browser-worker)
+fi
+start rpa "$RPA_CONTROL_PORT" "$ROOT/backend-go" 60 "$RUNTIME_DIR/browser-worker"
+# A listening port may belong to the previous Python execution provider. Verify
+# both the decision and execution drivers before reusing a running service.
 "$PYTHON" - <<'PY'
 import json, os, sys
 from pathlib import Path
@@ -108,10 +115,11 @@ except (OSError, ValueError, HTTPError, URLError):
 if (not isinstance(health, dict) or health.get('ok') is not True
         or health.get('protocol_version') != 'browser.v1'
         or health.get('decision_driver') != 'go-eino'
+        or health.get('execution_driver') != 'go-playwright'
         or health.get('browser_stream') != 'browser.stream.v1'
         or health.get('portal_automation') != 'teacher.portal.agent.v2'):
-    sys.exit('浏览器 Worker 与 Go/Eino 不兼容，请用 scripts/kill.bash 停止旧服务后重新启动')
-print('rpa：已验证 browser.v1 和流式浏览器，页面决策由 Go/Eino 执行')
+    sys.exit('浏览器 Worker 不是兼容的 Go Playwright 版本，请在现有任务结束后停止旧服务并重新启动')
+print('rpa：已验证 browser.v1、流式浏览器和 Go Playwright 执行器，页面决策继续由 Go/Eino 执行')
 PY
 start ai 50051 "$ROOT/ai_engine_python" "${AI_START_TIMEOUT:-300}" "$PYTHON" -u app/grpc_server.py
 if ! port_open 8000; then

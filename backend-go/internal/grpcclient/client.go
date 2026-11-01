@@ -23,8 +23,8 @@ func InitGrpcClient() {
 	conn, err = grpc.Dial(address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(1024*1024*50), // 50MB
-			grpc.MaxCallSendMsgSize(1024*1024*50), // 50MB
+			grpc.MaxCallRecvMsgSize(32<<20),
+			grpc.MaxCallSendMsgSize(32<<20),
 		),
 	)
 	if err != nil {

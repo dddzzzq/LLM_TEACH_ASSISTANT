@@ -79,7 +79,9 @@ class Task:
         self.detail_reader = None
         self.detail_page = None
         self.detail_page_url = ""
+        self.detail_navigation = None
         self.detail_operation = None
+        self.detail_switch_streak = 0
         if state.get("task_type") == "HOMEWORK_DETAIL":
             from .homework_detail import HomeworkDetailReader
 
@@ -113,6 +115,10 @@ class Task:
         # or page text. Only application-owned messages and stack locations leave
         # this boundary; no raw exception strings, HTML, or form values.
         known = isinstance(exc, RpaIssue)
+        stack = traceback.extract_tb(exc.__traceback__)
+        locations = [f for f in stack if Path(f.filename).parent == Path(__file__).parent][-4:]
+        if stack and stack[-1] not in locations:
+            locations.append(stack[-1])
         report = {
             "code": exc.code
             if known
@@ -125,10 +131,7 @@ class Task:
             "message": exc.public_message
             if known
             else "页面操作暂未完成（" + type(exc).__name__ + "）",
-            "locations": [
-                f"{Path(f.filename).name}:{f.lineno}:{f.name}"
-                for f in traceback.extract_tb(exc.__traceback__)[-5:]
-            ],
+            "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in locations],
         }
         if details:
             report["controls"] = details
@@ -248,7 +251,8 @@ class Task:
             else:
                 self.browser = await self.manager.playwright.chromium.launch(
                     headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                    + ([] if proxy else ["--no-proxy-server"]),
                     proxy={"server": proxy} if proxy else None,
                     downloads_path=str(browser_downloads),
                 )
@@ -467,12 +471,79 @@ class Task:
             and not auth["otp_entered"]
             and not auth["trust_prompt"]
         ):
-            self.update(stage="AUTHENTICATE")
-            self.wait_human(
-                "LOGIN_CODE",
-                "验证码已请求，请输入本人收到的验证码，提交后将自动点击登录并处理可信设备提示",
-            )
+            self.wait_login_code(auth.get("code_method", ""))
         return auth
+
+    def wait_login_code(self, method=""):
+        self.update(stage="AUTHENTICATE", login_code_method=method)
+        self.wait_human(
+            "LOGIN_CODE",
+            "验证码已请求，请在企业微信中查看本人动态验证码，在下方输入并提交；系统将继续登录并处理可信设备提示"
+            if method == "wechat_work"
+            else "验证码已请求，请输入本人收到的验证码，提交后将自动点击登录并处理可信设备提示",
+        )
+
+    async def detail_observation(self):
+        """Expose the controller-owned detail binding as an explicit recovery state."""
+        await self.reconcile_detail_navigation()
+        detail = await self.detail_reader.observation()
+        page = self.detail_page
+        pages = self.context.pages if self.context else []
+        opened = bool(page and not page.is_closed() and page in pages)
+        active = opened and page is self.page
+        detail.update(
+            open=opened,
+            active=active,
+            page_id=str(pages.index(page)) if opened else None,
+        )
+        if self.detail_navigation and not opened:
+            detail.update(ready=False, pending=True, reason="DETAIL_NAVIGATION_PENDING")
+        if opened and not active:
+            # Another page may coincidentally look readable. Only the bound page
+            # is a valid continuation once a target detail has been opened.
+            detail.update(ready=False, reason="DETAIL_PAGE_NOT_ACTIVE")
+        return detail
+
+    async def reconcile_detail_navigation(self):
+        entry = self.detail_navigation
+        if not entry or not self.detail_reader:
+            return
+        source = entry["source"]
+        candidates = [
+            page
+            for page in self.context.pages
+            if page not in entry["pages"] and not page.is_closed() and await page.opener() is source
+        ]
+        if len(candidates) > 1:
+            self.wait_human("DETAIL_NAVIGATION", "作业入口打开了多个页面，请核对唯一的目标详情")
+            return
+        destination = candidates[0] if candidates else source
+        if destination.is_closed() or destination.url == "about:blank":
+            return
+        changed = (
+            destination is not source
+            or source.url != entry["url"]
+            or any(not frame.is_detached() and frame.url != url for frame, url in entry["frames"])
+        )
+        original_page = self.page
+        self.page = destination
+        self.detail_page, self.detail_page_url = destination, destination.url
+        # A click on a list row/heading may do nothing. Only a real navigation
+        # or a verified question on the same URL may establish the detail lock.
+        if not changed:
+            from .homework_detail import QUESTION_ROOTS
+
+            frame = await self.detail_reader.frame()
+            if (
+                not frame
+                or not await frame.locator(QUESTION_ROOTS + ",[data-homework-detail]").count()
+            ):
+                self.detail_page, self.detail_page_url = None, ""
+                self.page = original_page
+                return
+        if destination is not original_page:
+            self.event("已进入作业详情页面 page=" + str(self.context.pages.index(destination)))
+        self.detail_navigation = None
 
     async def navigation_view(self):
         if self.detail_operation and not self.detail_operation.done():
@@ -486,19 +557,31 @@ class Task:
             self.wait_human("LOGIN", "官网需要重新验证身份，请完成登录")
             return None
         self.adapter.active_page = self.page
-        if not self.catalog_collection and (not auth or auth["authenticated"]):
+        if (not self.catalog_collection or self.detail_reader) and (
+            not auth or auth["authenticated"]
+        ):
             await self.adapter.reconcile()
             if not captcha and not self.detail_reader and await self.adapter.export_area():
                 return None
+        detail = await self.detail_observation() if self.detail_reader else None
+        # A delayed popup can become active while reconciling the detail entry.
+        self.adapter.active_page = self.page
+        if detail and detail.get("pending"):
+            if time.monotonic() - self.detail_navigation["started"] >= 15:
+                self.wait_human(
+                    "DETAIL_NAVIGATION",
+                    "作业详情入口尚未打开，请核对页面加载；已保留本次入口，不重复点击",
+                )
+            return None
         stage = (
             "SOLVE_CAPTCHA"
             if captcha
             else "AUTHENTICATE"
             if auth and not auth["authenticated"]
+            else "READING_DETAIL"
+            if detail and (self.catalog_collection or detail["open"] or detail["ready"])
             else "READING_CATALOG"
             if self.catalog_collection
-            else "READING_DETAIL"
-            if self.detail_reader and (await self.detail_reader.observation())["ready"]
             else "EXPORT"
             if self.adapter.assignment_confirmed
             else "LOCATE_ASSIGNMENT"
@@ -511,12 +594,16 @@ class Task:
         view["task_type"] = self.state.get("task_type") or "DOWNLOAD"
         if auth:
             view["authentication"] = auth
-        if self.catalog_collection:
+        if self.catalog_collection and not self.detail_reader:
             view["catalog"] = self.catalog_collection.observation()
             if not captcha and (not auth or auth["authenticated"]):
-                view["catalog"]["viewport"] = await self.catalog_collection.viewport().observation()
-        if self.detail_reader:
-            view["homework_detail"] = await self.detail_reader.observation()
+                viewport = await self.catalog_collection.viewport().observation()
+                view["catalog"]["viewport"] = viewport
+                view["catalog"].update(await self.catalog_collection.homework_navigation(viewport))
+                if view["catalog"]["next_step"] == "WAIT_FOR_LIST":
+                    return None
+        if detail:
+            view["homework_detail"] = detail
             view["can_open_export"] = False
         return view
 
@@ -652,8 +739,8 @@ class Task:
                         "NO_PROGRESS", "连续三次相同操作后页面仍没有变化，请协助检查页面"
                     )
                 # A semester may require more actions than a single download.
-                # Extra budget is earned only by verified new works/courses;
-                # the existing 1000-receipt ceiling still applies.
+                # Each verified work also needs selection, navigation and a
+                # detail read. Budget those actions within the existing cap.
                 completed = (
                     self.catalog_collection.observation()["completed_courses"]
                     if self.catalog_collection
@@ -667,7 +754,10 @@ class Task:
                     if self.catalog_collection
                     else 0
                 )
-                if count >= min(1000, 60 + 12 * completed + min(400, works)) and self.automatic():
+                if (
+                    count >= min(1000, 60 + 12 * completed + min(900, 4 * works))
+                    and self.automatic()
+                ):
                     self.wait_human(
                         "ACTION_BUDGET", "自动页面操作已达到本轮预算，请检查页面后交还自动化"
                     )
@@ -776,6 +866,8 @@ class Task:
     async def execute(self, decision):
         validate_action(decision)
         tool = decision["tool"]
+        if self.detail_reader and tool != "switch_page":
+            self.detail_switch_streak = 0
         if tool == "read_homework_detail":
             if not self.detail_reader or not self.automatic():
                 raise ValueError("当前任务不处于作业详情读取流程")
@@ -806,9 +898,8 @@ class Task:
                     raise ValueError("当前页面不可填写凭据，请核对登录页")
             elif tool == "request_login_code":
                 await self.portal_auth.request_code()
-                self.wait_human(
-                    "LOGIN_CODE",
-                    "验证码已请求，请输入本人收到的验证码，提交后将自动点击登录并处理可信设备提示",
+                self.wait_login_code(
+                    await self.portal_auth.code_method(await self.portal_auth.otp_frame())
                 )
             elif tool == "submit_login_code":
                 await self.portal_auth.submit_entered_code()
@@ -819,6 +910,7 @@ class Task:
         if tool in {
             "read_course_list",
             "read_homework_list",
+            "select_homework_detail",
             "finish_catalog",
             "return_to_course_list",
         }:
@@ -827,16 +919,22 @@ class Task:
                 or not (await self.authentication_view())["authenticated"]
             ):
                 raise ValueError("当前任务不处于已认证的目录采集阶段")
+            if self.detail_reader:
+                raise RpaIssue("DETAIL_NAVIGATION_LOCKED", "请先读取当前作业详情，再继续目录同步")
             if tool == "read_course_list":
                 await self.catalog_collection.read_courses()
             elif tool == "read_homework_list":
                 await self.catalog_collection.read_homeworks(decision["course_id"])
+            elif tool == "select_homework_detail":
+                await self.catalog_collection.select_detail(decision["homework_id"])
             elif tool == "return_to_course_list":
                 await self.return_to_course_list()
             else:
                 # Finishing must restore and verify the original course list,
                 # even when the Agent skips its final explicit return action.
-                await self.return_to_course_list()
+                if await self.return_to_course_list() is False:
+                    self.recent.append({"tool": tool, "result": "course_incomplete"})
+                    return
                 await self.catalog_collection.read_courses()
                 if not self.catalog_collection.progress["courses_complete"]:
                     self.event("已返回课程列表，尚需滚动或翻页核验课程清单末尾，再完成同步")
@@ -845,11 +943,14 @@ class Task:
                 catalog = self.catalog_collection.finish()
                 if len(json.dumps(catalog).encode()) > 6 * 1024 * 1024:
                     raise RpaIssue("CATALOG_LIMIT", "目录超过本次读取上限")
+                # The final catalog already contains the acquired questions;
+                # duplicating progress here can exceed the worker response cap.
+                self.state.pop("catalog_progress", None)
                 self.update(
                     portal_catalog=catalog,
                     status="SUCCEEDED",
                     stage="DONE",
-                    message="课程与作业目录读取完成，已返回课程列表",
+                    message="课程、作业及作业详情读取完成，正在整理要求",
                 )
             self.recent.append({"tool": tool})
             return
@@ -933,15 +1034,36 @@ class Task:
             self.page = await self.adapter.open_export()
         elif tool == "switch_page":
             idx = int(decision["page_id"])
-            if self.detail_reader and self.context.pages[idx] is self.page:
+            destination = self.context.pages[idx]
+            if self.detail_reader and destination is self.page:
                 raise RpaIssue(
                     "PAGE_ALREADY_ACTIVE",
-                    "该标签已是当前页，请读取详情或根据详情核验原因返回原作业列表，不要重复切换同一页",
+                    "该标签已是当前页，请按 homework_detail.ready 读取或请求人工核对，不要重复切换同一页",
                 )
-            self.page = self.context.pages[idx]
+            if (
+                self.detail_reader
+                and self.detail_page
+                and not self.detail_page.is_closed()
+                and self.page is self.detail_page
+                and destination is not self.detail_page
+            ):
+                raise RpaIssue(
+                    "DETAIL_NAVIGATION_LOCKED",
+                    "目标详情已打开，自动读取期间不能返回列表重进；请在当前详情读取或请求人工核对",
+                )
+            if self.detail_reader:
+                self.detail_switch_streak += 1
+                if self.detail_switch_streak >= 4:
+                    self.detail_switch_streak = 0
+                    self.wait_human(
+                        "DETAIL_NAVIGATION",
+                        "详情任务连续切换标签页但没有读取进展，请核对已打开的作业详情，避免重复切换",
+                    )
+                    return
+            self.page = destination
         elif tool == "scroll":
             delta = max(-1000, min(1000, int(decision.get("delta_y", 600))))
-            if self.catalog_collection:
+            if self.catalog_collection and not self.detail_reader:
                 await self.catalog_collection.viewport().scroll(delta)
             else:
                 await self.page.mouse.wheel(0, delta)
@@ -982,6 +1104,35 @@ class Task:
                     "如需切换学期，请在任务浏览器中手动操作，完成后点击“交还自动化”继续。",
                 )
                 return
+            if (
+                tool == "click"
+                and self.detail_reader
+                and item["name"].strip() == self.state["target"]["assignment_name"]
+                and self.detail_navigation
+            ):
+                await self.reconcile_detail_navigation()
+                self.recent.append({"tool": tool, "result": "waiting_for_detail_navigation"})
+                return
+            if (
+                tool == "click"
+                and self.detail_reader
+                and item["name"].strip() == self.state["target"]["assignment_name"]
+                and self.detail_page
+                and not self.detail_page.is_closed()
+            ):
+                # A model may return to the list when detail verification fails.
+                # Never let that recovery open the same assignment in another tab.
+                self.page = self.detail_page
+                detail = await self.detail_reader.observation()
+                if not detail["ready"]:
+                    raise RpaIssue(
+                        "DETAIL_ALREADY_OPEN",
+                        "作业详情已打开，但当前页面仍不可读取（"
+                        + detail["reason"]
+                        + "），请核对已打开详情，不要重复创建标签页",
+                    )
+                self.recent.append({"tool": tool, "element_ref": ref, "result": "reused_detail"})
+                return
             if tool == "fill":
                 if not any(
                     x in (item["name"] + item["context"]).lower()
@@ -995,11 +1146,24 @@ class Task:
                     self.adapter.assignment_confirmed,
                 )
                 catalog_course = None
-                if self.catalog_collection:
+                if self.catalog_collection and not self.detail_reader:
                     catalog_course = await self.catalog_collection.record_navigation(loc, page)
                 else:
                     await self.adapter.record_navigation(loc, item, page)
                 old_pages = set(self.context.pages)
+                opening_detail = bool(
+                    self.detail_reader
+                    and item["name"].strip() == self.state["target"]["assignment_name"]
+                    and self.adapter.assignment_confirmed
+                )
+                if opening_detail:
+                    self.detail_navigation = {
+                        "source": page,
+                        "url": page.url,
+                        "pages": old_pages,
+                        "frames": [(frame, frame.url) for frame in page.frames],
+                        "started": time.monotonic(),
+                    }
                 popup = asyncio.get_running_loop().create_future()
 
                 def opened(new_page):
@@ -1009,7 +1173,7 @@ class Task:
                 self.context.on("page", opened)
                 try:
                     await loc.click(timeout=8000)
-                    if item.get("opens_new_page"):
+                    if item.get("opens_new_page") or opening_detail:
                         try:
                             await asyncio.wait_for(asyncio.shield(popup), 2.5)
                         except asyncio.TimeoutError:
@@ -1017,6 +1181,8 @@ class Task:
                     else:
                         await asyncio.sleep(0.2)
                 except Exception:
+                    if opening_detail:
+                        self.detail_navigation = None
                     self.adapter.course_confirmed, self.adapter.assignment_confirmed = (
                         old_course,
                         old_assignment,
@@ -1032,17 +1198,12 @@ class Task:
                     self.event(
                         "已进入新打开的页面 page=" + str(self.context.pages.index(self.page))
                     )
-                if (
-                    self.detail_reader
-                    and item["name"].strip() == self.state["target"]["assignment_name"]
-                    and self.adapter.assignment_confirmed
-                ):
+                if opening_detail:
                     try:
                         await self.page.wait_for_load_state("domcontentloaded", timeout=2500)
                     except Exception:
                         pass  # The bound URL is checked again after loading.
-                    self.detail_page = self.page
-                    self.detail_page_url = self.page.url
+                    await self.reconcile_detail_navigation()
                 if catalog_course:
                     self.catalog_course_pages[self.page] = catalog_course
         self.recent.append({k: v for k, v in decision.items() if k != "value"})
@@ -1051,7 +1212,12 @@ class Task:
         try:
             for attempt in range(3):
                 try:
-                    await self.detail_reader.read()
+                    if self.catalog_collection:
+                        detail = await self.detail_reader.read(finish_task=False)
+                        await self.return_to_homework_list()
+                        self.catalog_collection.complete_detail(detail)
+                    else:
+                        await self.detail_reader.read()
                     break
                 except RpaIssue as exc:
                     if (
@@ -1075,6 +1241,35 @@ class Task:
         finally:
             self.detail_operation = None
 
+    async def return_to_homework_list(self):
+        from .portal_catalog import PortalCatalog, _SinglePageContext, portal_url
+
+        collection = self.catalog_collection
+        page, url, frames, current, homework_id = collection.detail_list
+        title = collection.progress["courses"][current]["homeworks"][homework_id]["title"]
+        if page.is_closed():
+            raise RpaIssue("DETAIL_LIST_UNAVAILABLE", "原作业列表页已关闭，请核查后继续")
+        # Restore only controller-captured URLs, including an embedded list.
+        self.page = page
+        if page.url != url:
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        else:
+            for frame, source_url in frames:
+                if not frame.is_detached() and frame.url != source_url and portal_url(source_url):
+                    await frame.goto(source_url, wait_until="domcontentloaded", timeout=15000)
+        reader = PortalCatalog(_SinglePageContext(page), self.update)
+        for _ in range(20):
+            rows = await reader.records("homework", allow_unresolved=True)
+            if any(r["platform_id"] == homework_id and r["title"] == title for r in rows):
+                break
+            await asyncio.sleep(0.2)
+        else:
+            raise RpaIssue("DETAIL_LIST_UNAVAILABLE", "返回后未核验到原作业列表，请核查后继续")
+        if not self.automatic():
+            raise RpaIssue("DETAIL_STOPPED", "作业详情读取已暂停或取消")
+        if self.detail_page and self.detail_page is not page and not self.detail_page.is_closed():
+            await self.detail_page.close()
+
     async def return_to_course_list(self):
         collection = self.catalog_collection
         page = collection.list_page
@@ -1082,6 +1277,12 @@ class Task:
             raise RpaIssue(
                 "CATALOG_LIST_UNAVAILABLE", "原课程列表页不可用，请返回本学期课程页并重新读取列表"
             )
+        current = self.catalog_course_pages.get(self.page)
+        if current:
+            course = collection.progress["courses"][current]
+            if not course.get("complete") or not collection.requirements_complete(course):
+                self.event("当前课程尚未完成作业清单核验或要求读取，继续当前课程，暂不返回课程列表")
+                return False
         self.page = page
         if not await collection.is_course_list(page):
             # Restore only the URL captured by a verified live list read. The
@@ -1108,12 +1309,40 @@ class Task:
             )
             return
         await self.adapter.close_export_centers()
+        # Some portals reveal scope controls only after attachment format is
+        # selected; others export the verified class of the current review page.
+        try:
+            await self.adapter.select_attachments(modal)
+        except RpaIssue as exc:
+            report = self.record_failure(
+                exc, "select_attachments", await self.adapter.scope_diagnostics(modal)
+            )
+            self.wait_human("EXPORT_FORMAT", report["message"])
+            return
         options = await self.adapter.classes(modal)
         target = self.state["target"].get("portal")
         if target and target.get("class_id"):
             from .portal_download import selected_scope
 
             current_id = await self.adapter.current_class_id(page)
+            if not options and current_id != target["class_id"]:
+                # A generic page click may open settings before selecting a
+                # class. Dismiss unsubmitted settings, use the real class menu,
+                # then reopen and revalidate the new dialog.
+                await self.adapter.close_export_settings(modal)
+                self.page = await self.adapter.open_export()
+                area = None
+                for _ in range(20):
+                    area = await self.adapter.export_area()
+                    if area:
+                        break
+                    await asyncio.sleep(0.1)
+                if not area:
+                    raise RpaIssue("EXPORT_SETTINGS_UNAVAILABLE", "切换班级后尚未打开附件导出设置")
+                page, frame, modal = area
+                await self.adapter.select_attachments(modal)
+                options = await self.adapter.classes(modal)
+                current_id = await self.adapter.current_class_id(page)
             self.scope_request = selected_scope(self.state["target"]["portal"], options, current_id)
             self.update(requested_scope=self.scope_request)
         elif target or not self.scope_request:
@@ -1149,7 +1378,7 @@ class Task:
             return
         baseline = getattr(self.adapter, "pre_export_baseline", None)
         before, observed = (
-            baseline if baseline and baseline[1] else await self.adapter.export_baseline()
+            baseline if baseline is not None else await self.adapter.export_baseline()
         )
         scope["baseline_observed"] = observed
         if scope.get("mode") == "all":
@@ -1193,6 +1422,8 @@ class Task:
     @staticmethod
     def reconcile_scope(request, options):
         """Retain explicit intent after excluding an unrelated option or reordering."""
+        if request.get("mode") == "current":
+            return request if request.get("platform_id") and not options else None
         names = {option["id"]: option["name"] for option in options}
         if request.get("mode") == "all":
             # All classes is the default intent for the verified assignment.
@@ -1487,17 +1718,7 @@ class Task:
                 if not page or page.is_closed():
                     raise ValueError("浏览器当前不可用")
                 url = page.url
-            if self.state.get("portal_session"):
-                from .portal_auth import SENSITIVE
-
-                data = await page.screenshot(
-                    type="jpeg",
-                    quality=55,
-                    timeout=8000,
-                    mask=[frame.locator(SENSITIVE) for frame in page.frames],
-                )
-            else:
-                data = await page.screenshot(type="jpeg", quality=55, timeout=8000)
+            data = await page.screenshot(type="jpeg", quality=55, timeout=8000)
             pages = [
                 {"id": str(i), "title": (await p.title())[:100]}
                 for i, p in enumerate(context.pages)

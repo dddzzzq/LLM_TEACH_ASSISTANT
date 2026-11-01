@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"grading-gateway/internal/materials"
 	"path/filepath"
 	"strings"
 )
@@ -20,7 +21,7 @@ func IsIgnoredFile(filePath string) bool {
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
-	if !allowedExtensions[ext] {
+	if !allowedExtensions[ext] && materials.FileKind(filePath) == "" {
 		return true
 	}
 

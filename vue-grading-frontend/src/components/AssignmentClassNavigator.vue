@@ -19,7 +19,7 @@
         <span class="class-monogram" aria-hidden="true">{{
           item.source === 'unassigned' ? '未' : '班'
         }}</span>
-        <span
+        <span class="class-copy"
           >{{ item.name
           }}<small>{{
             item.source === 'unassigned'
@@ -27,7 +27,11 @@
               : item.source === 'portal'
                 ? '官网班级'
                 : '历史班级'
-          }}</small></span
+          }}</small
+          ><em v-if="item.material_status" class="class-summary" :class="classSummary(item).tone"
+            >{{ classSummary(item).label
+            }}<span v-if="classSummary(item).detail"> · {{ classSummary(item).detail }}</span></em
+          ></span
         >
       </button>
       <p v-if="!classes.length">暂无可查看班级</p>
@@ -35,6 +39,7 @@
   </nav>
 </template>
 <script setup>
+import { classSummary } from '../services/classWorkspace';
 defineProps({
   classes: { type: Array, default: () => [] },
   modelValue: String,
@@ -107,6 +112,28 @@ defineEmits(['update:modelValue', 'retry']);
   color: var(--color-muted);
   margin-top: 4px;
 }
+.class-summary {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.class-summary.warning {
+  color: var(--color-warning);
+}
+.class-summary.active {
+  color: var(--color-accent);
+}
+.class-summary.success {
+  color: var(--color-success);
+}
+.class-summary span {
+  color: var(--color-muted);
+  font-weight: 400;
+}
 @media (max-width: 1000px) {
   .class-navigator {
     padding: 0;
@@ -116,11 +143,14 @@ defineEmits(['update:modelValue', 'retry']);
   }
   .class-nav-list {
     display: flex;
-    flex-wrap: wrap;
-    max-height: 200px;
+    flex-wrap: nowrap;
+    max-height: none;
+    padding-bottom: 6px;
+    overflow-x: auto;
   }
   .class-nav-list button {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+    max-width: 230px;
     border: 1px solid var(--color-line);
   }
 }

@@ -21,7 +21,7 @@ async def main():
     router = next(p for p in re.findall(r'from "([^"]+)"', router_source) if "vue-router" in p)
     job = dict(job_id="auth-fixture", task_type="AUTH_BOOTSTRAP", status="WAITING_USER",
                stage="AUTHENTICATE", control_mode="HUMAN", control_epoch=3,
-               waiting_reason="LOGIN_CODE", message="验证码已请求，请输入收到的验证码",
+               waiting_reason="LOGIN_CODE", login_code_method="wechat_work", message="请在企业微信中查看本人动态验证码，在下方输入并提交",
                target=dict(course_name="教务账号", assignment_name="首次认证"),
                grading_files=[], material_batches=[], events=[])
     received, acknowledge = asyncio.Event(), asyncio.Event()
@@ -84,9 +84,10 @@ async def main():
         await page.route_web_socket("**/api/rpa/jobs/*/stream", socket)
         await page.route(base + "/auth-fixture", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=harness))
         await page.goto(base + "/auth-fixture")
-        field = page.get_by_label("验证码", exact=True)
+        field = page.get_by_label("企业微信动态验证码", exact=True)
         await expect(field).to_be_visible()
-        await expect(page.get_by_text("请输入收到的验证码", exact=True)).to_be_visible()
+        await expect(page.get_by_text("请输入企业微信动态验证码", exact=True)).to_be_visible()
+        assert await page.get_by_text("验证码已请求", exact=False).count() == 0
         await expect(page.get_by_text("实时连接", exact=True)).to_be_visible()
         await field.fill("12x")
         await page.get_by_role("button", name="提交验证码并继续登录", exact=True).click()

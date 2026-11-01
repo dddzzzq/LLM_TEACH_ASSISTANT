@@ -47,6 +47,7 @@ test-results/
 !/docs/tool-skill-management-design.md
 !/docs/go-eino-python-architecture-design.md
 !/docs/go-eino-python-implementation.md
+!/docs/go-playwright-worker.md
 !/docs/rpa-implementation.md
 !/docs/homework-materials-workflow.md
 !/docs/homework-requirements.md

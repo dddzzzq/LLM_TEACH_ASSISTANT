@@ -87,12 +87,23 @@ func (h *PortalHandler) GradeAssignmentClasses(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ClassIDs []string `json:"class_ids"`
+		ClassIDs   []string `json:"class_ids"`
+		AllClasses bool     `json:"all_classes"`
 	}
 	if !portalBody(c, &req) {
 		return
 	}
-	flow, err := h.Runner.Service.GradeAssignmentClasses(c.Request.Context(), portalOwner(c), id, req.ClassIDs, c.GetHeader("Idempotency-Key"))
+	if req.AllClasses && len(req.ClassIDs) != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "全部班级与指定班级不能同时提交"})
+		return
+	}
+	var flow models.PortalWorkflow
+	var err error
+	if req.AllClasses {
+		flow, err = h.Runner.Service.GradeAllAssignmentClasses(c.Request.Context(), portalOwner(c), id, c.GetHeader("Idempotency-Key"))
+	} else {
+		flow, err = h.Runner.Service.GradeAssignmentClasses(c.Request.Context(), portalOwner(c), id, req.ClassIDs, c.GetHeader("Idempotency-Key"))
+	}
 	if err != nil {
 		portalError(c, err)
 		return

@@ -26,6 +26,13 @@ import (
 	"gorm.io/gorm"
 )
 
+func defaultJSON(value, fallback string) string {
+	if !json.Valid([]byte(value)) {
+		return fallback
+	}
+	return value
+}
+
 // 创建作业handler
 func CreateAssignment(c *gin.Context) {
 	var req schemas.AssignmentCreate
@@ -216,6 +223,9 @@ func GetAssignment(c *gin.Context) {
 			"is_human_reviewed":     sub.IsHumanReviewed,
 			"human_feedback":        sub.HumanFeedback,
 			"human_score":           sub.HumanScore,
+			"reading_status":        sub.ReadingStatus,
+			"reading_report":        json.RawMessage(defaultJSON(sub.ReadingReport, "{}")),
+			"score_details":         json.RawMessage(defaultJSON(sub.ScoreDetails, "[]")),
 		})
 	}
 
@@ -359,8 +369,46 @@ func UploadAssignment(c *gin.Context) {
 // 一键清空所有学生提交handler
 func ClearAllSubmissions(c *gin.Context) {
 	assignmentID := c.Param("id")
+	classID := strings.TrimSpace(c.Query("class_id"))
+	if _, supplied := c.Request.URL.Query()["class_id"]; supplied && classID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "删除本班作业必须提供班级ID"})
+		return
+	}
+	var assignment models.Assignment
+	if database.DB.WithContext(c.Request.Context()).First(&assignment, "id = ?", assignmentID).Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "作业不存在"})
+		return
+	}
+	db := database.DB.WithContext(c.Request.Context())
+	batches := db.Model(&models.MaterialBatch{}).Where("assignment_id = ?", assignmentID)
+	if classID != "" {
+		batches = materialClassScope(batches, classID)
+	}
+	activeJobs := db.Model(&models.AsyncJob{}).Where("job_type = ? AND reference_id = ? AND status IN ?", models.JobTypeHomework, assignmentID, []models.AsyncJobStatus{models.JobStatusPending, models.JobStatusProcessing})
+	if classID != "" {
+		ids := batches.Session(&gorm.Session{}).Select("id")
+		if legacyAssignmentClass(assignment).ID == classID {
+			activeJobs = activeJobs.Where("(material_batch_id IN (?) OR material_batch_id = '' OR material_batch_id IS NULL)", ids)
+		} else {
+			activeJobs = activeJobs.Where("material_batch_id IN (?)", ids)
+		}
+	}
+	var pending, automatic int64
+	if err := activeJobs.Count(&pending).Error; err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "无法核对批改状态，请稍后重试"})
+		return
+	}
+	if err := batches.Session(&gorm.Session{}).Where("auto_grade = ? AND status NOT IN ?", true, []string{"FAILED", "CANCELLED"}).Count(&automatic).Error; err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "无法核对材料状态，请稍后重试"})
+		return
+	}
+	if pending > 0 || automatic > 0 {
+		c.JSON(http.StatusConflict, gin.H{"detail": "所选范围仍有批改或自动批改任务，请等待完成或取消后再删除"})
+		return
+	}
 
-	if err := database.DB.Where("assignment_id = ?", assignmentID).Delete(&models.Submission{}).Error; err != nil {
+	query := submissionClassScope(db.Where("assignment_id = ?", assignmentID), db, assignmentID, classID)
+	if err := query.Delete(&models.Submission{}).Error; err != nil {
 		log.Printf("一键清空失败： %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "一键清空失败", "error": err.Error()})
 		return

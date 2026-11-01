@@ -14,6 +14,14 @@ def all_scope(options):
 
 
 def selected_scope(target, options, current_class_id=""):
+    if not options and target.get("class_id") and current_class_id == target["class_id"]:
+        return {
+            "mode": "current",
+            "platform_id": target["class_id"],
+            "class_name": target["class_name"],
+            "class_ids": [],
+            "option_names": {},
+        }
     identified = [option for option in options if not option["all"] and option.get("platform_id")]
     matches = [
         option

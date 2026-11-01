@@ -462,8 +462,7 @@
     flex-direction: column;
   }
   .workspace-header {
-    min-height: 44px;
-    padding: 0 var(--space-4);
+    display: none;
   }
   .workspace-content {
     padding: var(--space-5) var(--space-4) 84px;

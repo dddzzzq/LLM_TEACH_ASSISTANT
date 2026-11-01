@@ -137,11 +137,27 @@ onBeforeUnmount(() => {
   background: var(--color-soft);
 }
 .app-modal.is-drawer {
+  display: flex;
+  flex-direction: column;
   width: min(760px, 100%);
   height: 100dvh;
   max-height: 100dvh;
   margin: 0 0 0 auto;
   border-radius: 16px 0 0 16px;
+  overflow: hidden;
+}
+.app-modal.is-drawer .modal-heading,
+.app-modal.is-drawer .modal-footer {
+  flex-shrink: 0;
+}
+.app-modal.is-drawer .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.app-modal.is-drawer .modal-footer {
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 @media (max-width: 600px) {
   .modal-heading,

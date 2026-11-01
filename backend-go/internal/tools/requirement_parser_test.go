@@ -65,8 +65,10 @@ func questionPDFFixture(content string) []byte {
 }
 
 func TestRequirementPDFTextAndScannedPageFallback(t *testing.T) {
-	if _, err := exec.LookPath("pdfinfo"); err != nil {
-		t.Skip("requires poppler-utils")
+	for _, tool := range []string{"pdfinfo", "pdftotext", "pdfimages", "pdftoppm"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("requires complete poppler-utils")
+		}
 	}
 	prior := grpcclient.Client
 	t.Cleanup(func() { grpcclient.Client = prior })
