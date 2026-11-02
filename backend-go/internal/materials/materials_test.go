@@ -75,7 +75,7 @@ func TestPrepareKeepsModernScriptsAndArchiveProvenance(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "class.zip")
 	save(t, source, archiveBytes(t, map[string]string{"20260001_张三.zip": string(archiveBytes(t, map[string]string{
-		"project.zip": string(archiveBytes(t, map[string]string{"src/main.ts": "code", "test/main.test.mjs": "node test", "demo/server.cjs": "server", "src/view.tsx": "view", "src/page.jsx": "page", "报告.md": "report", "notes.unknown": "not supported"})),
+		"project.zip": string(archiveBytes(t, map[string]string{"src/main.ts": "code", "test/main.test.mjs": "node test", "demo/server.cjs": "server", "src/view.tsx": "view", "src/page.jsx": "page", "报告.md": "report", "notes.unknown": "not supported", "run.bat": "node src/main.js", "run.cmd": "node src/main.js", "bin/tool": "#!/usr/bin/env node\nconsole.log('run')"})),
 	}))}))
 	m, err := prepare(t.Context(), "batch", 1, source, filepath.Join(root, "out"))
 	if err != nil || len(m.Students) != 1 {
@@ -85,7 +85,7 @@ func TestPrepareKeepsModernScriptsAndArchiveProvenance(t *testing.T) {
 		t.Fatal("missing archive chain", m.Sources)
 	}
 	student := m.Students[0]
-	if len(student.Files) != 6 || len(student.SkippedFiles) != 1 || len(student.SourceIDs) != 3 {
+	if len(student.Files) != 9 || len(student.SkippedFiles) != 1 || len(student.SourceIDs) != 3 {
 		t.Fatal("scripts or omitted-file inventory lost", student)
 	}
 	for _, file := range student.Files {

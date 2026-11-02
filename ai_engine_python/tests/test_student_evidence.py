@@ -51,19 +51,52 @@ class StudentEvidenceTests(unittest.TestCase):
         self.assertEqual(result['score_details'][0]['evidence'][-1]['line_end'],2)
 
     def test_unreadable_material_never_becomes_a_zero_or_calls_the_model(self):
-        data=materials();data['reading']['status']='NEEDS_REVIEW'
+        data=materials('');data['reading']['status']='NEEDS_REVIEW'
+        data['files'][0]['status']='FAILED'
         call=Mock()
         result=grade_materials(data,'题目',{'正确性':100},call)
         self.assertEqual(result['total_score'],-1)
         self.assertEqual(result['reading']['status'],'NEEDS_REVIEW')
         call.assert_not_called()
 
-    def test_invalid_scores_or_invented_references_require_review(self):
-        for result in [score(['F9999.C0001']),score(['F0001.C0001'],101),score([])]:
+    def test_invalid_scores_require_review(self):
+        for result in [score(['F0001.C0001'],101)]:
             with self.subTest(result=result):
                 actual=grade_materials(materials(),'题目',{'正确性':100},Mock(return_value=result))
                 self.assertEqual(actual['total_score'],-1)
                 self.assertEqual(actual['reading']['status'],'NEEDS_REVIEW')
+
+    def test_partial_documents_do_not_withhold_scores_for_readable_content(self):
+        data=materials('可识别的源码')
+        data['reading']={'status':'NEEDS_REVIEW','review_stage':'READING','warnings':['截图2 OCR失败']}
+        data['files'] += [
+            {'id':'F0002','path':'report.docx','role':'report','status':'PARTIAL','text':'报告中已经识别的设计说明','warnings':['内嵌图识别失败']},
+            {'id':'F0003','path':'截图2.png','role':'evidence','status':'PARTIAL','text':'','warnings':['OCR失败']},
+            {'id':'F0004','path':'missing.docx','role':'report','status':'FAILED','text':''}]
+        call=Mock(return_value=score(['F0001.C0001','F0002.C0001'],86))
+        result=grade_materials(data,'题目',{'正确性':100},call)
+        self.assertEqual(result['total_score'],86)
+        self.assertEqual(result['reading']['status'],'PARTIAL')
+        self.assertNotIn('review_stage',result['reading'])
+        self.assertIn('截图2 OCR失败',result['reading']['warnings'])
+        self.assertEqual(result['reading']['chunks_read'],['F0001.C0001','F0002.C0001'])
+        self.assertIn('报告中已经识别的设计说明',call.call_args.args[0])
+        self.assertIn('不能作为学生格式或表达扣分依据',call.call_args.args[0])
+        self.assertIn('已根据能够识别的内容给分',result['overall_feedback'])
+        self.assertEqual(analysis_parts(data),('报告中已经识别的设计说明','可识别的源码'))
+
+    def test_missing_or_invalid_citations_warn_without_inventing_evidence(self):
+        for refs in [None,[],['F9999.C0001'],['F0001.C0001','unknown'],['F0001.C0001']*2]:
+            with self.subTest(refs=refs):
+                call=Mock(side_effect=lambda *args: score(copy.deepcopy(refs),83))
+                result=grade_materials(materials(),'题目',{'正确性':100},call)
+                self.assertEqual(result['total_score'],83)
+                self.assertEqual(result['reading']['status'],'PARTIAL')
+                self.assertEqual(call.call_count,2)
+                item=result['score_details'][0]
+                self.assertTrue(item['evidence_warning'])
+                self.assertEqual(item['evidence_refs'],['F0001.C0001'] if refs and 'F0001.C0001' in refs else [])
+                self.assertEqual(len(item['evidence']),len(item['evidence_refs']))
 
     def test_total_is_computed_from_all_validated_criteria(self):
         rubric={'功能':45,'设计':{'score':20},'异常':15,'验证':10,'说明':10}

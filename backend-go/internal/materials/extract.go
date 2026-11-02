@@ -31,7 +31,7 @@ var errPreparationLimit = errors.New("材料数量或体积超过限制")
 
 var studentName = regexp.MustCompile(`^([0-9]{5,20})(?:[-_\s]*)([^0-9].*)?$`)
 var ignored = map[string]bool{".git": true, ".runtime": true, "node_modules": true, "venv": true, ".venv": true, "__macosx": true, "__pycache__": true, "target": true, "dist": true, "build": true}
-var codeExt = map[string]bool{".py": true, ".java": true, ".c": true, ".cpp": true, ".cc": true, ".h": true, ".hpp": true, ".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".vue": true, ".svelte": true, ".html": true, ".css": true, ".go": true, ".rs": true, ".cs": true, ".kt": true, ".swift": true, ".php": true, ".rb": true, ".sql": true, ".sh": true, ".ipynb": true, ".m": true, ".r": true}
+var codeExt = map[string]bool{".py": true, ".java": true, ".c": true, ".cpp": true, ".cc": true, ".h": true, ".hpp": true, ".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".vue": true, ".svelte": true, ".html": true, ".css": true, ".go": true, ".rs": true, ".cs": true, ".kt": true, ".swift": true, ".php": true, ".rb": true, ".sql": true, ".sh": true, ".bat": true, ".cmd": true, ".ps1": true, ".ipynb": true, ".m": true, ".r": true}
 var reportExt = map[string]bool{".pdf": true, ".doc": true, ".docx": true, ".md": true, ".txt": true}
 var otherExt = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".gif": true, ".json": true, ".xml": true, ".yaml": true, ".yml": true, ".toml": true, ".csv": true, ".log": true}
 
@@ -53,6 +53,9 @@ func archive(path string) bool {
 }
 func kind(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == "" && strings.ToLower(filepath.Base(filepath.Dir(path))) == "bin" {
+		return "code"
+	}
 	if codeExt[ext] {
 		return "code"
 	}
@@ -236,6 +239,12 @@ func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr err
 	}
 	if archive(path) {
 		archiveID, _ := identity(filepath.Base(path))
+		role := "nested_archive"
+		if id == "" {
+			role = "batch_export"
+		} else if archiveID == id && p.origins[id] == "" {
+			role = "student_submission"
+		}
 		if id != "" && archiveID == id {
 			// A repeated student archive needs a teacher's choice; never silently select one.
 			if previous := p.origins[id]; previous != "" && previous != prefix && depth <= p.originDepth[id] {
@@ -265,7 +274,7 @@ func (p *preparer) visit(path, id, name, prefix string, depth int) (visitErr err
 		}
 		digest := sha256.Sum256([]byte(parent + "\x00" + filepath.ToSlash(prefix) + "\x00" + hash))
 		sourceID := hex.EncodeToString(digest[:])
-		p.manifest.Sources = append(p.manifest.Sources, ArchiveSource{ID: sourceID, Name: filepath.Base(path), Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), SHA256: hash, Size: info.Size(), ParentID: parent, EntryPath: filepath.ToSlash(prefix), StudentID: id})
+		p.manifest.Sources = append(p.manifest.Sources, ArchiveSource{ID: sourceID, Role: role, Name: filepath.Base(path), Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), SHA256: hash, Size: info.Size(), ParentID: parent, EntryPath: filepath.ToSlash(prefix), StudentID: id})
 		p.archiveChain = append(p.archiveChain, sourceID)
 		defer func() { p.archiveChain = p.archiveChain[:len(p.archiveChain)-1] }()
 		base := strings.TrimSuffix(prefix, filepath.Ext(prefix))

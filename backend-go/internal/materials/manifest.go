@@ -15,6 +15,7 @@ const CurrentReaderVersion = 2
 
 type ArchiveSource struct {
 	ID        string `json:"id"`
+	Role      string `json:"role"`
 	Name      string `json:"name"`
 	Format    string `json:"format"`
 	SHA256    string `json:"sha256"`

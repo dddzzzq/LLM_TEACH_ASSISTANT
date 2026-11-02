@@ -17,7 +17,7 @@
       <div
         ><span>AI 原始评分</span
         ><strong>{{
-          submission.reading_status === 'NEEDS_REVIEW'
+          submission.score < 0 && submission.reading_status === 'NEEDS_REVIEW'
             ? '待复核'
             : submission.score < 0
               ? '评分失败'
@@ -29,11 +29,13 @@
     <div class="review-evidence">
       <details
         v-if="submission.reading_report && submission.reading_status"
-        :open="submission.reading_status === 'NEEDS_REVIEW'"
+        :open="['NEEDS_REVIEW', 'PARTIAL'].includes(submission.reading_status)"
       >
         <summary>材料读取与原始文件</summary>
         <p>{{
-          submission.reading_report.review_stage === 'SCORING'
+          submission.score >= 0 && submission.reading_status === 'PARTIAL'
+            ? '已根据能够识别的内容给分；部分材料读取或引用核验受限，未将系统识别失败直接视为缺交。'
+            : submission.reading_report.review_stage === 'SCORING'
             ? '材料已读取，评分结果尚未通过核验，请复核。'
             : submission.reading_status === 'ERROR'
               ? '材料读取记录已保留，评分服务调用失败。'
@@ -94,6 +96,7 @@
             ><strong>{{ item.criterion }}：{{ item.score }} / {{ item.max_score }}</strong></p
           >
           <p>{{ item.feedback }}</p>
+          <p v-if="item.evidence_warning">{{ item.evidence_warning }}</p>
           <p v-for="evidence in item.evidence || []" :key="evidence.id">
             {{ evidence.id }} · {{ evidence.path }} ·
             {{

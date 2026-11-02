@@ -137,13 +137,15 @@ func cachedStudentOCR(ctx context.Context, name string, data []byte) (string, er
 
 func prepareStudentMaterials(ctx context.Context, task GradingTask, readImage requirementImageReader) studentMaterials {
 	result := studentMaterials{Schema: "student-materials.v1", Files: []materialEvidence{}, Reading: readingReport{Status: "COMPLETE", Warnings: []string{}, Files: []materialEvidence{}}}
-	result.Archives, result.SkippedFiles = task.Sources, task.SkippedFiles
-	result.Reading.Archives, result.Reading.SkippedFiles = task.Sources, task.SkippedFiles
+	result.Archives = task.Sources
+	result.Reading.Archives = task.Sources
 	for _, skipped := range task.SkippedFiles {
 		// Download payloads and build bookkeeping are inventory, not evidence.
 		if role := materialRole(skipped.Path); role == "artifact" || role == "dependency" || strings.HasSuffix(strings.ToLower(skipped.Path), ".map") || strings.HasSuffix(strings.ToLower(skipped.Path), ".tsbuildinfo") {
 			continue
 		}
+		result.SkippedFiles = append(result.SkippedFiles, skipped)
+		result.Reading.SkippedFiles = append(result.Reading.SkippedFiles, skipped)
 		result.Reading.Status = "NEEDS_REVIEW"
 		result.Reading.Warnings = append(result.Reading.Warnings, skipped.Path+"："+skipped.Reason)
 	}

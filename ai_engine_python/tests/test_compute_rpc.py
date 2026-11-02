@@ -83,6 +83,22 @@ class ComputeRPCContractTests(unittest.TestCase):
         self.assertIn('src/main.ts', result['text'])
         self.assertEqual(result['score_details'][0]['evidence_refs'], ['F0001.C0001'])
 
+    def test_partial_reading_and_missing_citations_still_return_a_numeric_score(self):
+        service=DeepSeekService()
+        service._call_api_json=Mock(side_effect=lambda *args: {'overall_feedback':'依据可读代码',
+            'score_details':[{'criterion':'正确性','score':86,'max_score':100,'feedback':'已实现主要功能','evidence_refs':[]}]})
+        self.deepseek.grade_homework=service.grade_homework
+        material={'schema':'student-materials.v1','reading':{'status':'NEEDS_REVIEW','warnings':['截图识别失败']},
+            'files':[{'id':'F0001','path':'main.ts','role':'code','status':'READ','text':'actual source'},
+                     {'id':'F0002','path':'report.docx','role':'report','status':'PARTIAL','text':'','warnings':['OCR失败']}]}
+        response=self.stub.GradeHomework(pb2.GradeRequest(student_text=json.dumps(material),rubric_json='{"正确性":100}'),timeout=5)
+        result=json.loads(response.merged_content)
+        self.assertEqual(response.total_score,86)
+        self.assertEqual(result['reading']['status'],'PARTIAL')
+        self.assertIn('截图识别失败',result['reading']['warnings'])
+        self.assertEqual(result['score_details'][0]['evidence_refs'],[])
+        self.assertTrue(result['score_details'][0]['evidence_warning'])
+
     def test_program_computed_total_reaches_both_rpc_response_formats(self):
         service=DeepSeekService()
         model_response={'total_score':90,'overall_feedback':'逐项有依据','score_details':[

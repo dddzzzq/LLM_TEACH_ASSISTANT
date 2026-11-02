@@ -38,14 +38,23 @@ func (c *preparedClient) GradeHomework(_ context.Context, r *pb.GradeRequest, _ 
 	if r.Question != "snapshot requirement" || r.RubricJson != `{"功能":100}` {
 		return nil, fmt.Errorf("grading ignored rubric snapshot")
 	}
+	var input studentMaterials
+	if json.Unmarshal([]byte(r.StudentText), &input) != nil {
+		return nil, fmt.Errorf("missing structured evidence")
+	}
+	if input.analysisText() == "" {
+		input.Reading.Status = "NEEDS_REVIEW"
+		result, _ := json.Marshal(map[string]interface{}{"schema": "grading-result.v1", "reading": input.Reading})
+		return &pb.GradeResponse{TotalScore: -1, Feedback: "全部材料无法读取", MergedContent: string(result)}, nil
+	}
 	for _, part := range []string{"alpha code", "beta code", "design report"} {
 		if !strings.Contains(r.StudentText, part) {
 			return nil, fmt.Errorf("lost file %s", part)
 		}
 	}
-	var input studentMaterials
-	if json.Unmarshal([]byte(r.StudentText), &input) != nil || input.Reading.Status != "COMPLETE" {
-		return nil, fmt.Errorf("missing structured evidence")
+	if input.Reading.Status != "COMPLETE" {
+		input.Reading.Status = "PARTIAL"
+		input.Reading.ReviewStage = ""
 	}
 	result, _ := json.Marshal(map[string]interface{}{"schema": "grading-result.v1", "text": input.analysisText(), "reading": input.Reading, "score_details": []map[string]interface{}{{"criterion": "功能", "score": 91, "max_score": 100, "evidence_refs": []string{"F0001.C0001"}}}})
 	return &pb.GradeResponse{TotalScore: 91, Feedback: "fixture evidence", MergedContent: string(result), CodeDocMatchReportJson: "{}"}, nil
@@ -116,12 +125,16 @@ func TestIntegrationPreparedPipelineUsesManifestSnapshotAndPreservesResults(t *t
 	if count != 1 {
 		t.Fatal("failed retry changed previous results")
 	}
-	// A corrupt document holds only that student for review; readable classmates
-	// still receive new results and an existing teacher review is not replaced.
+	// A wholly unreadable submission still needs review. A broken document
+	// alongside readable evidence must receive a score, as do its classmates.
 	db.Model(&results[0]).Updates(map[string]interface{}{"is_human_reviewed": true, "human_score": 88, "human_feedback": "教师复核保留"})
 	bad := filepath.Join(root, "source", "20260002_李四", "报告.docx")
 	os.MkdirAll(filepath.Dir(bad), 0700)
 	os.WriteFile(bad, []byte("broken docx"), 0600)
+	partial := filepath.Join(root, "source", "20260003_王五")
+	os.MkdirAll(partial, 0700)
+	os.WriteFile(filepath.Join(partial, "main.py"), []byte("alpha code\nbeta code\ndesign report"), 0600)
+	os.WriteFile(filepath.Join(partial, "报告.docx"), []byte("broken docx"), 0600)
 	next, err := s.Create(t.Context(), materials.Actor{UserID: 8501, Role: "teacher"}, materials.Request{SourcePath: filepath.Join(root, "source"), AssignmentID: a.ID}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +154,7 @@ func TestIntegrationPreparedPipelineUsesManifestSnapshotAndPreservesResults(t *t
 	}
 	var newResults []models.Submission
 	db.Where("grading_job_id = ?", newJob.ID).Order("student_id").Find(&newResults)
-	if len(newResults) != 2 || newResults[0].Score != 91 || newResults[1].ReadingStatus != "NEEDS_REVIEW" || newResults[1].Score != -1 || client.graded.Load() != 2 {
+	if len(newResults) != 3 || newResults[0].Score != 91 || newResults[1].ReadingStatus != "NEEDS_REVIEW" || newResults[1].Score != -1 || newResults[2].Score != 91 || newResults[2].ReadingStatus != "PARTIAL" || !strings.Contains(newResults[2].ReadingReport, "docx") || client.graded.Load() != 4 {
 		t.Fatal("one failed reader affected classmates", newResults)
 	}
 	var original models.Submission

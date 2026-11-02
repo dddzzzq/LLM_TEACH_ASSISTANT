@@ -28,9 +28,10 @@ async def main():
     results = {key: [dict(id=index, student_id='20260001', student_name=name, score=90, feedback='功能完整，建议补充边界测试。', plagiarism_reports=[], aigc_report={'ai_probability': 0.15, 'detection_source': 'fixture'}, code_doc_match_report={'score': 88, 'reasoning': '报告和代码基本一致'}, is_human_reviewed=False)] for index, (key, name) in enumerate([('class-a', '一班学生'), ('class-b', '二班学生')], 1)}
     for index, name in [(3, '二班学生二'), (4, '二班学生三')]:
         results['class-b'].append(dict(id=index, student_id=f'2026000{index}', student_name=name, score=80 + index, feedback='待教师复核。', plagiarism_reports=[], aigc_report=None, code_doc_match_report=None, is_human_reviewed=False))
-    results['class-b'][0].update(material_batch_id='batch-fixture', reading_status='COMPLETE',
-        reading_report={'status':'COMPLETE','warnings':[], 'submission_archives':[{'id':'zip-fixture','name':'20260001_二班学生.zip','format':'zip','student_id':'20260001'}], 'files':[{'id':'F0001','path':'students/20260001/src/main.ts','status':'READ'}]},
+    results['class-b'][0].update(material_batch_id='batch-fixture', reading_status='PARTIAL',
+        reading_report={'status':'PARTIAL','warnings':['截图2识别失败，其余材料正常给分'], 'submission_archives':[{'id':'zip-fixture','name':'20260001_二班学生.zip','format':'zip','student_id':'20260001'}], 'files':[{'id':'F0001','path':'students/20260001/src/main.ts','status':'READ'}]},
         score_details=[{'criterion':'功能实现','score':54,'max_score':60,'feedback':'源码与截图均已核对',
+                        'evidence_warning':'部分引用未核验，保留基于可读内容的评分',
                         'evidence':[{'id':'F0001.C0001','path':'students/20260001/src/main.ts','line_start':1,'line_end':8}]}])
     captures = dict(uploads=[], directories=[], grades=[], exports=[], saves=[], rubrics=[], deletes=[], regrades=[])
     material_state={'enabled':False,'id':'old-completed-job','status':'SUCCESS'}
@@ -262,7 +263,9 @@ async def main():
         await expect(score_input).to_have_value('90')
         await expect(page.get_by_text('逐项评分与材料依据', exact=True)).to_be_visible()
         await expect(page.get_by_text('源码与截图均已核对', exact=True)).to_be_visible()
-        await page.get_by_text('材料读取与原始文件',exact=True).click()
+        await expect(page.locator('.original-review strong')).to_have_text('90.0')
+        await expect(page.get_by_text('截图2识别失败，其余材料正常给分',exact=True)).to_be_visible()
+        await expect(page.get_by_text('部分引用未核验，保留基于可读内容的评分',exact=True)).to_be_visible()
         await expect(page.get_by_text('20260001_二班学生.zip（ZIP）',exact=True)).to_be_visible()
         async with context.expect_page() as evidence_page:
             await page.locator('.criterion-evidence').get_by_role('button', name='查看原文件', exact=True).click()
@@ -271,7 +274,9 @@ async def main():
         await source_page.close()
         await page.screenshot(path=str(diagnostics / 'review-reading-evidence.png'), full_page=True)
         await page.get_by_role('button', name='取消', exact=True).click()
-        await page.get_by_role('button', name='导出本班成绩', exact=True).click()
+        async with page.expect_download() as class_export:
+            await page.get_by_role('button', name='导出本班成绩', exact=True).click()
+        await class_export.value
         assert captures['exports'][-1]['class_id'] == ['class-b']
         await page.screenshot(path=str(diagnostics / 'class-grades.png'), full_page=True)
         await page.get_by_role('button', name='学生作业与批改', exact=True).click()
@@ -360,7 +365,7 @@ async def main():
         await page.get_by_label('搜索本班学生',exact=True).fill('二班学生三')
         await expect(page.locator('.results-table tbody tr')).to_have_count(1)
         await page.get_by_role('button',name='删除当前班级作业',exact=True).click()
-        await expect(page.get_by_role('status')).to_contain_text('已删除当前班级的评分记录')
+        await expect(page.locator('.inline-notice[role="status"]')).to_contain_text('已删除当前班级的评分记录')
         assert captures['deletes']==[{'class_id':['class-b']}]
         assert len(results['class-a'])==1 and results['class-b']==[]
         empty_icon=await page.locator('.workspace-empty > svg').bounding_box()

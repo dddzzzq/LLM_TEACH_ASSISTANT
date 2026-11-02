@@ -266,11 +266,10 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 					parsed.Reading.Warnings = append(parsed.Reading.Warnings, "材料传输超过24MiB预算，未截断后评分")
 				}
 				readingJSON, _ := json.Marshal(parsed.Reading)
-				if parsed.Reading.Status != "COMPLETE" || len(studentText) > 24<<20 {
-					feedback := "材料读取不完整，待教师复核；系统未将未读内容判为缺交。"
-					if len(studentText) > 24<<20 {
-						feedback = "材料传输超过预算，待复核，未截断后评分。"
-					}
+				// Partial reading is diagnostic information, not a reason to
+				// withhold a score for the student's other readable material.
+				if len(studentText) > 24<<20 {
+					feedback := "材料传输超过预算，待复核，未截断后评分。"
 					atomic.AddInt32(&failedGrades, 1)
 					if err := saveSubmission(models.Submission{AssignmentID: uint(parsedID), StudentID: t.StudentID, StudentName: t.StudentName, Score: -1, Feedback: feedback, MergeContent: parsed.analysisText(), MaterialBatchID: job.MaterialBatchID, GradingJobID: job.ID, ReadingStatus: "NEEDS_REVIEW", ReadingReport: string(readingJSON)}); err != nil {
 						log.Printf("学生 [%s] 待复核记录保存失败: %v", t.StudentID, err)
@@ -337,7 +336,7 @@ func ProcessPipelineForJob(assignmentID string, zipPath string, job models.Async
 					finalFeedback = "AI 评分通信失败：" + grpcFailureCode(errGrade) + "，请重试或复核"
 				}
 
-				if errGrade == nil && gradeRes != nil && readingStatus == "COMPLETE" && gradeRes.TotalScore >= 0 && !math.IsNaN(float64(gradeRes.TotalScore)) && !math.IsInf(float64(gradeRes.TotalScore), 0) {
+				if errGrade == nil && gradeRes != nil && (readingStatus == "COMPLETE" || readingStatus == "PARTIAL") && gradeRes.TotalScore >= 0 && !math.IsNaN(float64(gradeRes.TotalScore)) && !math.IsInf(float64(gradeRes.TotalScore), 0) {
 					finalScore = float64(gradeRes.TotalScore)
 					finalFeedback = gradeRes.Feedback
 					matchJSON = gradeRes.CodeDocMatchReportJson
